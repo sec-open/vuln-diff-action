@@ -1,0 +1,14 @@
+{
+  "name": "vuln-diff-action",
+  "version": "0.1.0",
+  "description": "Compare vulnerabilities between two refs using Syft+Grype and produce a Markdown diff",
+  "main": "src/index.js",
+  "scripts": {
+    "build": "mkdir -p dist && cp -R src/index.js dist/index.js"
+  },
+  "dependencies": {
+    "@actions/core": "^1.10.1",
+    "@actions/github": "^6.0.0",
+    "@actions/exec": "^1.1.1"
+  }
+}

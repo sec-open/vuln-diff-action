@@ -1,0 +1,42 @@
+name: "Vulnerability Diff (Syft+Grype)"
+description: "Compare vulnerabilities between two refs (base/head) and output a Markdown table and JSON diff"
+author: "sec-open"
+runs:
+  using: "node20"
+  main: "dist/index.js"
+
+inputs:
+  base_ref:
+    description: "Base ref/branch/sha to compare against (e.g., main)"
+    required: true
+  head_ref:
+    description: "Head ref/branch/sha to compare"
+    required: true
+  path:
+    description: "Subdirectory to scan (monorepo). Default: repo root"
+    required: false
+    default: "."
+  build_command:
+    description: "Optional build command before scanning (e.g., mvn -q -DskipTests package)"
+    required: false
+    default: ""
+  min_severity:
+    description: "Minimum severity to report: LOW|MEDIUM|HIGH|CRITICAL (inclusive)"
+    required: false
+    default: "LOW"
+  write_summary:
+    description: "Write Markdown table to GITHUB_STEP_SUMMARY"
+    required: false
+    default: "true"
+
+outputs:
+  new_count:
+    description: "Number of NEW vulnerabilities introduced by head over base"
+  removed_count:
+    description: "Number of vulnerabilities REMOVED by head vs base"
+  unchanged_count:
+    description: "Number of unchanged vulnerabilities"
+  diff_markdown_table:
+    description: "Markdown table with Severity | VulnerabilityID | package:version | branches"
+  diff_json:
+    description: "JSON diff payload"
