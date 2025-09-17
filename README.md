@@ -1,6 +1,6 @@
 # Vulnerability Diff Action
 
-[![CI](https://github.com/sec-open/vuln-diff-action/actions/workflows/ci.yml/badge.svg)](https://github.com/sec-open/vuln-diff-action/actions/workflows/ci.yml)
+[![CI](https://github.com/sec-open/vuln-diff-action/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sec-open/vuln-diff-action/actions/workflows/ci.yml)
 
 GitHub Action to **compare vulnerabilities between two refs (branches, tags, commits)** using [Syft](https://github.com/anchore/syft) and [Grype](https://github.com/anchore/grype).  
 
