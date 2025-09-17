@@ -2,17 +2,15 @@ const core = require("@actions/core");
 const exec = require("@actions/exec");
 const fs = require("fs");
 const path = require("path");
-const { generateSbom } = require("./sbom");
+const { generateSbomAuto } = require("./sbom"); // auto: Maven CycloneDX if pom.xml, else Syft dir
 const { scanSbom } = require("./grype");
 const { diff, renderMarkdownTable } = require("./diff");
-const github = require("@actions/github");
 
-// Helper: run shell
+// ---------- shell helpers ----------
 async function sh(cmd, opts = {}) {
   return exec.exec("bash", ["-lc", cmd], opts);
 }
 
-// Try rev-parse and return SHA or null
 async function tryRevParse(ref) {
   let out = "";
   try {
@@ -30,12 +28,12 @@ function isSha(ref) {
 }
 
 /**
- * Resolve a user ref (branch name or SHA) to a commit SHA.
+ * Resolve a user-supplied ref (branch name or SHA) to a commit SHA.
  * Tries in this order:
- *   1) as-is
- *   2) refs/remotes/origin/<ref>
- *   3) refs/remotes/upstream/<ref> (only if 'upstream' exists)
- *   4) final attempt: fetch from origin and rev-parse
+ *  1) as-is
+ *  2) refs/remotes/origin/<ref>
+ *  3) refs/remotes/upstream/<ref> (only if 'upstream' remote exists)
+ *  4) final attempt: fetch from origin and rev-parse
  */
 async function resolveRefToSha(ref) {
   if (isSha(ref)) {
@@ -44,15 +42,15 @@ async function resolveRefToSha(ref) {
     throw new Error(`Input '${ref}' looks like a SHA but does not exist locally.`);
   }
 
-  // as-is (local branch or full ref)
+  // 1) try as-is (local branch / full ref)
   let sha = await tryRevParse(ref);
   if (sha) return sha;
 
-  // origin/<ref>
+  // 2) origin/<ref>
   sha = await tryRevParse(`refs/remotes/origin/${ref}`);
   if (sha) return sha;
 
-  // upstream/<ref> (if remote exists)
+  // 3) upstream/<ref> (if remote exists)
   let remotes = "";
   await exec.exec("bash", ["-lc", "git remote"], {
     listeners: { stdout: d => (remotes += d.toString()) },
@@ -62,17 +60,17 @@ async function resolveRefToSha(ref) {
     if (sha) return sha;
   }
 
-  // final attempt: fetch ref from origin and try as-is
+  // 4) last attempt: fetch that ref from origin
   try {
     await sh(`git fetch origin ${ref}:${ref} --tags --prune`);
     sha = await tryRevParse(ref);
     if (sha) return sha;
-  } catch {/* ignore */}
+  } catch { /* ignore */ }
 
   throw new Error(`Cannot resolve ref '${ref}' to a commit SHA. Ensure the branch or SHA exists in this runner.`);
 }
 
-// Pretty helpers for summary
+// ---------- pretty helpers for summary ----------
 function shortSha(sha) { return (sha || "").substring(0, 12); }
 function guessLabel(ref) {
   if (!ref) return "";
@@ -87,9 +85,10 @@ async function commitLine(sha) {
   return out.trim();
 }
 
+// ---------- main ----------
 async function run() {
   try {
-    // Keep raw inputs to show them in the summary
+    // Keep raw inputs to display exactly what the user passed
     const baseRefInput = core.getInput("base_ref", { required: true });
     const headRefInput = core.getInput("head_ref", { required: true });
     const scanPath = core.getInput("path") || ".";
@@ -102,14 +101,14 @@ async function run() {
     const headDir = path.join(workdir, "__head__");
     fs.mkdirSync(baseDir, { recursive: true });
 
-    // Fetch all so we can resolve refs
+    // Ensure we have all refs locally
     await sh("git fetch --all --tags --prune --force");
 
-    // Resolve to SHAs
+    // Resolve inputs to SHAs
     const baseSha = await resolveRefToSha(baseRefInput);
     const headSha = await resolveRefToSha(headRefInput);
 
-    // If SHAs are equal, bail out early
+    // Guard: comparing the same commit is useless and misleading
     if (baseSha === headSha) {
       core.setFailed(
         `Both refs resolve to the same commit (${baseSha}). ` +
@@ -118,17 +117,17 @@ async function run() {
       return;
     }
 
-    // Current workspace SHA
+    // Detect current workspace SHA
     let currentSha = "";
     await exec.exec("bash", ["-lc", "git rev-parse HEAD"], {
       listeners: { stdout: d => (currentSha += d.toString()) },
     });
     currentSha = currentSha.trim();
 
-    // BASE worktree (always detach by SHA)
+    // Create BASE worktree (always detached by SHA)
     await sh(`git worktree add --detach ${baseDir} ${baseSha}`);
 
-    // HEAD: reuse current workspace if already at headSha; otherwise create detached worktree
+    // HEAD: reuse current workspace if already at headSha, else create detached worktree
     let headScanRoot = workdir;
     let createdHeadWorktree = false;
     if (currentSha !== headSha) {
@@ -138,27 +137,27 @@ async function run() {
       createdHeadWorktree = true;
     }
 
-    // Optional build
+    // Optional build (helps produce accurate SBOMs for Java/Gradle/etc.)
     if (buildCommand) {
       await sh(buildCommand, { cwd: baseDir });
       await sh(buildCommand, { cwd: headScanRoot });
     }
 
-    // SBOM generation
+    // Generate SBOMs (auto: Maven CycloneDX if pom.xml, otherwise Syft directory scan)
     const baseSbom = path.join(workdir, "sbom-base.json");
     const headSbom = path.join(workdir, "sbom-head.json");
-    await generateSbom(path.join(baseDir, scanPath), baseSbom);
-    await generateSbom(path.join(headScanRoot, scanPath), headSbom);
+    await generateSbomAuto(path.join(baseDir, scanPath), baseSbom);
+    await generateSbomAuto(path.join(headScanRoot, scanPath), headSbom);
 
-    // Scans
+    // Scan with Grype
     const baseScan = await scanSbom(baseSbom);
     const headScan = await scanSbom(headSbom);
 
-    // Diff and table
+    // Diff and Markdown table
     const d = diff(baseScan.matches || [], headScan.matches || [], minSeverity);
     const table = renderMarkdownTable(d.news, d.removed, d.unchanged);
 
-    // Extra context lines
+    // Extra context lines for summary
     const baseCommit = await commitLine(baseSha);
     const headCommit = await commitLine(headSha);
 
@@ -170,8 +169,10 @@ async function run() {
     core.setOutput("diff_json", JSON.stringify(d));
     core.setOutput("base_sha", baseSha);
     core.setOutput("head_sha", headSha);
+    core.setOutput("base_input", baseRefInput);
+    core.setOutput("head_input", headRefInput);
 
-    // Summary
+    // Job summary
     if (writeSummary) {
       const summaryParts = [];
       summaryParts.push("### Vulnerability Diff (Syft+Grype)\n");
@@ -185,7 +186,7 @@ async function run() {
       await core.summary.addRaw(summaryParts.join("\n")).write();
     }
 
-    // Cleanup
+    // Cleanup worktrees (never remove the current workspace)
     await sh(`git worktree remove ${baseDir} --force || true`);
     if (createdHeadWorktree) {
       await sh(`git worktree remove ${headDir} --force || true`);
@@ -196,5 +197,3 @@ async function run() {
 }
 
 run();
-
-
