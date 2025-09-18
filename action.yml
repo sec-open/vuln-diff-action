@@ -41,9 +41,9 @@ inputs:
     required: false
     default: "150"
   report_pdf:
-    description: "Also render report.pdf using Puppeteer"
+    description: "Also render report.pdf using Puppeteer, default true"
     required: false
-    default: "false"
+    default: "true"
 
 outputs:
   new_count:

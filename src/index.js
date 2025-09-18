@@ -1,18 +1,29 @@
 // src/index.js
-// Main action: generate SBOMs, scan with Grype, compute diff, write summary,
-// build Markdown + HTML reports, and (optionally) export PDF with Puppeteer.
+// Generate SBOMs, scan with Grype, compute diff, write summary,
+// build Markdown + HTML reports, and export PDFs:
+//  - main.pdf (portrait): cover, TOC, intro, dual pies, diff table
+//  - landscape.pdf (landscape): dependency graphs (base/head) + dependency paths (base/head)
+// Then merge into report.pdf using pdf-lib.
 
 const core = require("@actions/core");
 const exec = require("@actions/exec");
 const artifact = require("@actions/artifact");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
+const { PDFDocument } = require("pdf-lib");
+
 const { generateSbomAuto } = require("./sbom");
 const { scanSbom } = require("./grype");
 const { diff, renderMarkdownTable } = require("./diff");
-const { buildMarkdownReport } = require("./report");
-const { buildHtmlReport } = require("./report-html");
-const os = require("os");
+const {
+  buildMarkdownReport,
+  buildDependencyPathsTable,
+  renderPathsMarkdownTable,
+  buildMermaidGraphFromBOMImproved
+} = require("./report");
+const { buildHtmlMain, buildHtmlLandscape } = require("./report-html");
+
 // ----------------------- shell + git helpers -----------------------
 async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); }
 
@@ -25,7 +36,6 @@ async function tryRevParse(ref) {
     return out.trim();
   } catch { return null; }
 }
-
 function isSha(ref) { return /^[0-9a-f]{7,40}$/i.test(ref || ""); }
 
 async function resolveRefToSha(ref) {
@@ -62,117 +72,52 @@ async function commitLine(sha) {
   return out.trim();
 }
 
-// ----------------------- Mermaid graph utils from report.js -----------------------
-const SEV_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
-function buildGraphFromBOM(bomJson) {
-  const dependencies = bomJson?.dependencies || [];
-  const components = bomJson?.components || [];
-  const refToLabel = new Map();
-  const nameVer = (c) => `${c?.name || "unknown"}:${c?.version || "unknown"}`;
-  for (const c of components) {
-    const label = nameVer(c);
-    if (c["bom-ref"]) refToLabel.set(c["bom-ref"], label);
-    if (c.purl) refToLabel.set(c.purl, label);
-  }
-  const adj = new Map();     // label -> Set(label)
-  const parents = new Map(); // label -> Set(label)
-  const ensure = (map, key) => { if (!map.has(key)) map.set(key, new Set()); return map.get(key); };
-  for (const d of dependencies) {
-    const parentLabel = refToLabel.get(d.ref) || d.ref || "unknown";
-    ensure(adj, parentLabel); ensure(parents, parentLabel);
-    for (const ch of (d.dependsOn || [])) {
-      const childLabel = refToLabel.get(ch) || ch || "unknown";
-      ensure(adj, childLabel); ensure(parents, childLabel);
-      adj.get(parentLabel).add(childLabel);
-      parents.get(childLabel).add(parentLabel);
-    }
-  }
-  // Ensure nodes for orphans
-  for (const [p, cs] of adj) { ensure(parents, p); for (const c of cs) ensure(adj, c); }
-  // Roots = nodes with no parents
-  const roots = [];
-  for (const [node, ps] of parents.entries()) if (!ps || ps.size === 0) roots.push(node);
-  return { adj, parents, roots };
-}
-
-function buildMermaidGraphFromBOMImproved(bomJson, grypeMatches, graphMax = 150) {
-  const { adj, parents, roots } = buildGraphFromBOM(bomJson);
-  const vulnerable = new Set((grypeMatches || []).map(m => `${m?.artifact?.name || "unknown"}:${m?.artifact?.version || "unknown"}`));
-  const keep = new Set(); const queue = [];
-  for (const v of vulnerable) { if (!keep.has(v)) { keep.add(v); queue.push(v); } }
-  while (queue.length && keep.size < graphMax) {
-    const cur = queue.shift();
-    for (const p of (parents.get(cur) || [])) {
-      if (!keep.has(p)) { keep.add(p); queue.push(p); if (keep.size >= graphMax) break; }
-    }
-  }
-  let idx = 0; const idMap = new Map(); const idFor = (l)=>{ if(!idMap.has(l)) idMap.set(l,`n${idx++}`); return idMap.get(l); };
-  // cluster by nearest root
-  const rootOf = new Map();
-  function nearestRoot(node) {
-    const visited = new Set(); const q=[node];
-    while (q.length) { const x=q.shift(); if (visited.has(x)) continue; visited.add(x);
-      const ps = parents.get(x) || new Set(); if (ps.size===0) return x; for (const p of ps) q.push(p); }
-    return node;
-  }
-  for (const node of keep) { const r = nearestRoot(node); if (!rootOf.has(r)) rootOf.set(r, new Set()); rootOf.get(r).add(node); }
-  const lines = []; lines.push("graph LR");
-  for (const [root, nodes] of rootOf.entries()) {
-    lines.push(`subgraph "${root}"`);
-    for (const n of nodes) { const nid = idFor(n); lines.push(`${nid}["${n}"]`); }
-    for (const n of nodes) {
-      const nid = idFor(n);
-      for (const ch of (adj.get(n) || [])) { if (!nodes.has(ch)) continue; const cid = idFor(ch); lines.push(`${nid} --> ${cid}`); }
-    }
-    lines.push("end");
-  }
-  for (const v of vulnerable) { if (keep.has(v)) { const vid = idFor(v); lines.push(`style ${vid} fill:#ffe0e0,stroke:#d33,stroke-width:2px`); } }
-  return lines.join("\n");
-}
-
-// ----------------------- PDF helper (Puppeteer) -----------------------
-
-// --- helper to run shell ---
-async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); }
-
-// --- ensure Chrome is installed for Puppeteer at runtime ---
+// ----------------------- Puppeteer helpers -----------------------
 async function ensureChromeForPuppeteer(version = "22.15.0") {
-  // Use Puppeteer's CLI to install Chrome into the default cache dir
   const cacheDir = process.env.PUPPETEER_CACHE_DIR || `${os.homedir()}/.cache/puppeteer`;
   const cmd = `PUPPETEER_CACHE_DIR=${cacheDir} npx --yes puppeteer@${version} browsers install chrome`;
   await sh(cmd);
-  return cacheDir; // useful for debugging paths if needed
+  return cacheDir;
 }
 
-// --- render PDF from HTML using the Chrome channel installed above ---
-async function renderPdfFromHtml(html, outPath) {
+async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
   const puppeteer = require("puppeteer");
-  // Ensure Chrome for Puppeteer is available (downloaded into ~/.cache/puppeteer)
   await ensureChromeForPuppeteer();
-
-  // Launch using the 'chrome' channel so Puppeteer uses the installed Chrome
   const browser = await puppeteer.launch({
     channel: "chrome",
     headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: ["--no-sandbox", "--disable-setuid-sandbox"]
   });
-
   try {
     const page = await browser.newPage();
-    // Load HTML (uses CDN for Mermaid/Chart.js; wait for network to go idle)
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.emulateMediaType("screen");
     await page.pdf({
       path: outPath,
       format: "A4",
+      landscape,
       printBackground: true,
-      margin: { top: "14mm", right: "12mm", bottom: "14mm", left: "12mm" },
+      margin: { top: "14mm", right: "12mm", bottom: "14mm", left: "12mm" }
     });
   } finally {
     await browser.close();
   }
 }
 
+async function mergePdfs(pdfPaths, outPath) {
+  const docs = [];
+  for (const p of pdfPaths) {
+    const bytes = fs.readFileSync(p);
+    docs.push(await PDFDocument.load(bytes));
+  }
+  const out = await PDFDocument.create();
+  for (const doc of docs) {
+    const pages = await out.copyPages(doc, doc.getPageIndices());
+    for (const pg of pages) out.addPage(pg);
+  }
+  const finalBytes = await out.save();
+  fs.writeFileSync(outPath, finalBytes);
+}
 
 // ----------------------- main -----------------------
 async function run() {
@@ -187,7 +132,7 @@ async function run() {
     const uploadArtifact = (core.getInput("upload_artifact") || "true") === "true";
     const artifactName   = core.getInput("artifact_name") || "vuln-diff-artifacts";
     const graphMaxNodes  = parseInt(core.getInput("graph_max_nodes") || "150", 10);
-    const reportPdf      = (core.getInput("report_pdf") || "false") === "true"; // NEW
+    const reportPdf      = (core.getInput("report_pdf") || "false") === "true";
 
     const workdir = process.cwd();
     const baseDir = path.join(workdir, "__base__");
@@ -272,49 +217,68 @@ async function run() {
       await core.summary.addRaw(summary.join("\n")).write();
     }
 
-    // Build Markdown report.md (with severity groups + paths + improved mermaid)
-    const reportPath = path.join(workdir, "report.md");
-    let headBomJson = {};
-    try { headBomJson = JSON.parse(fs.readFileSync(headSbom, "utf8")); }
-    catch (e) { core.warning(`Failed to parse ${headSbom}: ${e.message}`); }
-
-    // Generate dependency paths table + improved Mermaid for HTML via buildMarkdownReport
-    const mermaidGraph = buildMermaidGraphFromBOMImproved(headBomJson, headScan.matches || [], graphMaxNodes);
-    const reportMd = buildMarkdownReport({
+    // Markdown report (kept simple; main visuals will be in HTML/PDF)
+    const reportMdPath = path.join(workdir, "report.md");
+    fs.writeFileSync(reportMdPath, buildMarkdownReport({
       baseLabel: guessLabel(baseRefInput), baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
       headLabel: guessLabel(headRefInput), headInput: headRefInput, headSha, headCommitLine: headCommit,
       minSeverity,
       counts: { new: d.news.length, removed: d.removed.length, unchanged: d.unchanged.length },
       table,
       headGrype: headScan,
-      headBOM: headBomJson,
+      headBOM: JSON.parse(fs.readFileSync(headSbom, "utf8")),
       graphMaxNodes
-    });
-    fs.writeFileSync(reportPath, reportMd, "utf8");
+    }), "utf8");
 
-    // Build HTML report (render diff table + dependency paths + mermaid + pie chart)
-    const pathsSectionOnly = reportMd.split("#### Dependency paths")[1] || "";
-    const pathsMd = pathsSectionOnly ? "#### Dependency paths\n" + pathsSectionOnly.split("#### Dependency graph")[0] : "";
-    const reportHtml = buildHtmlReport({
+    // Build data for HTML/PDF
+    const baseBomJson = JSON.parse(fs.readFileSync(baseSbom, "utf8"));
+    const headBomJson = JSON.parse(fs.readFileSync(headSbom, "utf8"));
+
+    const mermaidBase = buildMermaidGraphFromBOMImproved(baseBomJson, baseScan.matches || [], graphMaxNodes);
+    const mermaidHead = buildMermaidGraphFromBOMImproved(headBomJson, headScan.matches || [], graphMaxNodes);
+
+    const pathsBaseMd = renderPathsMarkdownTable(
+      buildDependencyPathsTable(baseBomJson, baseScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 })
+    );
+    const pathsHeadMd = renderPathsMarkdownTable(
+      buildDependencyPathsTable(headBomJson, headScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 })
+    );
+
+    // HTMLs
+    const htmlMain = buildHtmlMain({
       baseLabel: guessLabel(baseRefInput), baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
       headLabel: guessLabel(headRefInput), headInput: headRefInput, headSha, headCommitLine: headCommit,
       minSeverity,
       counts: { new: d.news.length, removed: d.removed.length, unchanged: d.unchanged.length },
       diffTableMarkdown: table,
-      headGrype: headScan,
-      headBOM: headBomJson,
-      mermaidGraph,
-      pathsTableMarkdown: pathsMd
+      baseMatches: baseScan.matches || [],
+      headMatches: headScan.matches || []
     });
-    const reportHtmlPath = path.join(workdir, "report.html");
-    fs.writeFileSync(reportHtmlPath, reportHtml, "utf8");
+    const htmlLandscape = buildHtmlLandscape({
+      baseLabel: guessLabel(baseRefInput),
+      headLabel: guessLabel(headRefInput),
+      mermaidBase, mermaidHead,
+      pathsBaseMd, pathsHeadMd
+    });
 
-    // Optional: export to PDF with Puppeteer
+    const reportHtmlMainPath = path.join(workdir, "report-main.html");
+    const reportHtmlLscpPath = path.join(workdir, "report-landscape.html");
+    fs.writeFileSync(reportHtmlMainPath, htmlMain, "utf8");
+    fs.writeFileSync(reportHtmlLscpPath, htmlLandscape, "utf8");
+
+    // PDFs (optional)
     let reportPdfPath = "";
+    let pdfs = [];
     if (reportPdf) {
+      const pdfMain = path.join(workdir, "report-main.pdf");
+      const pdfLscp = path.join(workdir, "report-landscape.pdf");
+      await renderPdfFromHtml(htmlMain, pdfMain, { landscape: false });
+      await renderPdfFromHtml(htmlLandscape, pdfLscp, { landscape: true });
+      // Merge
       reportPdfPath = path.join(workdir, "report.pdf");
-      await renderPdfFromHtml(reportHtml, reportPdfPath);
-      core.info(`PDF report generated at ${reportPdfPath}`);
+      await mergePdfs([pdfMain, pdfLscp], reportPdfPath);
+      pdfs = [pdfMain, pdfLscp, reportPdfPath];
+      core.info(`PDFs generated: ${pdfs.join(", ")}`);
     }
 
     // Save raw scans/diff for artifact
@@ -328,8 +292,11 @@ async function run() {
     // Upload artifact bundle
     if (uploadArtifact) {
       const client = new artifact.DefaultArtifactClient();
-      const files = [reportPath, reportHtmlPath, baseSbom, headSbom, grypeBasePath, grypeHeadPath, diffJsonPath];
-      if (reportPdf && reportPdfPath) files.push(reportPdfPath);
+      const files = [
+        reportMdPath, reportHtmlMainPath, reportHtmlLscpPath,
+        baseSbom, headSbom, grypeBasePath, grypeHeadPath, diffJsonPath,
+        ...pdfs
+      ];
       await client.uploadArtifact(artifactName, files, workdir, { continueOnError: true, retentionDays: 90 });
     }
 
