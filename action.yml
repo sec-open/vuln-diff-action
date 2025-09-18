@@ -1,5 +1,5 @@
 name: "Vulnerability Diff (Syft+Grype)"
-description: "Compare vulnerabilities between two refs (base/head) and output a Markdown table and JSON diff"
+description: "Compare vulnerabilities between two refs (base/head) and output a Markdown table, JSON diff, and upload artifacts"
 author: "sec-open"
 runs:
   using: "node20"
@@ -17,7 +17,7 @@ inputs:
     required: false
     default: "."
   build_command:
-    description: "Optional build command before scanning (e.g., mvn -q -DskipTests package)"
+    description: "Optional build command before scanning"
     required: false
     default: ""
   min_severity:
@@ -28,6 +28,18 @@ inputs:
     description: "Write Markdown table to GITHUB_STEP_SUMMARY"
     required: false
     default: "true"
+  upload_artifact:
+    description: "Upload SBOMs, grype outputs and a full report as artifact"
+    required: false
+    default: "true"
+  artifact_name:
+    description: "Artifact name"
+    required: false
+    default: "vuln-diff-artifacts"
+  graph_max_nodes:
+    description: "Max nodes to include in the Mermaid dependency graph"
+    required: false
+    default: "150"
 
 outputs:
   new_count:
@@ -40,3 +52,11 @@ outputs:
     description: "Markdown table with Severity | VulnerabilityID | package:version | branches"
   diff_json:
     description: "JSON diff payload"
+  base_sha:
+    description: "Resolved base commit SHA"
+  head_sha:
+    description: "Resolved head commit SHA"
+  base_input:
+    description: "Raw base input ref"
+  head_input:
+    description: "Raw head input ref"
