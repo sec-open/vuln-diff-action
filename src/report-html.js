@@ -1,7 +1,9 @@
 // src/report-html.js
-// Build two HTML documents:
-//  - Main (portrait): cover, TOC, intro, dual pies (BASE/HEAD), diff table
-//  - Landscape: dependency graphs (BASE/HEAD) + dependency paths tables (BASE/HEAD)
+// Two HTML templates:
+//  - Main (portrait): Cover, TOC, Introduction, Summary, Severity distribution, Diff table.
+//  - Landscape: Dependency graph (base/head) and Dependency paths (base/head) on separate pages.
+// Each section starts on a new page (page-break). Footer date on cover.
+// Comments in English.
 
 function escapeHtml(s = "") {
   return String(s)
@@ -24,10 +26,12 @@ function sevCountsFromMatches(matches = []) {
 }
 
 function buildHtmlMain({
+  repository, // NEW: "owner/repo"
   baseLabel, baseInput, baseSha, baseCommitLine,
   headLabel, headInput, headSha, headCommitLine,
   minSeverity, counts, diffTableMarkdown,
-  baseMatches, headMatches
+  baseMatches, headMatches,
+  nowStr // footer date dd/mm/yyyy HH:MM:ss
 }) {
   const sevBase = sevCountsFromMatches(baseMatches || []);
   const sevHead = sevCountsFromMatches(headMatches || []);
@@ -36,7 +40,7 @@ function buildHtmlMain({
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Security Report — ${escapeHtml(baseLabel)} vs ${escapeHtml(headLabel)}</title>
+<title>Security Report — ${escapeHtml(repository)} — ${escapeHtml(baseLabel)} vs ${escapeHtml(headLabel)}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   :root { color-scheme: light dark; }
@@ -44,8 +48,10 @@ function buildHtmlMain({
   h1,h2,h3 { margin: .6em 0 .3em; }
   .muted { opacity:.7; }
   .center { text-align: center; }
-  .cover { margin-top: 20vh; }
-  .subtitle { font-size: 1.2rem; margin-top:.4rem; }
+  .cover { margin-top: 18vh; }
+  .subtitle { font-size: 1.15rem; margin-top:.3rem; }
+  .repo { font-size: 1.2rem; margin-top:.2rem; }
+  .footer { position: fixed; bottom: 24px; left: 24px; right: 24px; text-align: center; font-size: .9rem; opacity:.65; }
   .toc ul { margin: .4rem 0 .8rem 1.1rem; }
   .card { border: 1px solid #ccc3; border-radius: 10px; padding: 16px; margin: 16px 0; }
   .flex { display: flex; gap: 16px; flex-wrap: wrap; align-items: stretch; }
@@ -64,14 +70,9 @@ function buildHtmlMain({
 <!-- Cover -->
 <section class="cover center">
   <h1>Security Report</h1>
+  <div class="repo">${escapeHtml(repository)}</div>
   <div class="subtitle">Comparison of branches <b>${escapeHtml(baseLabel)}</b> vs <b>${escapeHtml(headLabel)}</b></div>
-  <div class="small muted" style="margin-top:1rem">
-    Base <code>${escapeHtml(baseLabel)}</code> (input: <code>${escapeHtml(baseInput)}</code>) → <code>${shortSha(baseSha)}</code><br/>
-    ${escapeHtml(baseCommitLine)}<br/><br/>
-    Head <code>${escapeHtml(headLabel)}</code> (input: <code>${escapeHtml(headInput)}</code>) → <code>${shortSha(headSha)}</code><br/>
-    ${escapeHtml(headCommitLine)}<br/><br/>
-    Min severity: <code>${escapeHtml(minSeverity)}</code> • Counts: NEW=${counts.new} · REMOVED=${counts.removed} · UNCHANGED=${counts.unchanged}
-  </div>
+  <div class="footer">${escapeHtml(nowStr)}</div>
 </section>
 
 <!-- TOC -->
@@ -79,16 +80,20 @@ function buildHtmlMain({
   <h2>Table of Contents</h2>
   <ul>
     <li>Introduction</li>
-    <li>Severity distribution (BASE & HEAD)</li>
+    <li>Summary</li>
+    <li>Severity distribution</li>
     <li>Vulnerability diff table</li>
-    <li>Dependency graphs (BASE & HEAD) — landscape</li>
-    <li>Dependency paths (BASE & HEAD) — landscape</li>
+    <li>Dependency graph base</li>
+    <li>Dependency graph head</li>
+    <li>Dependency path base</li>
+    <li>Dependency path head</li>
   </ul>
 </section>
 
 <!-- Introduction -->
-<section class="intro">
+<section class="intro page-break">
   <h2>Introduction</h2>
+  <p>The goal of this report is to detect vulnerabilities that are introduced or fixed between two development branches.</p>
   <p>This report compares security vulnerabilities between two Git references (base and head) using:</p>
   <ul>
     <li><b>Syft</b>: Generates a Software Bill of Materials (SBOM) in CycloneDX JSON format (or via Maven CycloneDX plugin for accurate Java dependencies).</li>
@@ -96,13 +101,41 @@ function buildHtmlMain({
     <li><b>GitHub Actions</b>: Orchestrates the workflow and provides summary, artifacts, and automation.</li>
     <li><b>Puppeteer</b>: Exports this HTML report to PDF (optional).</li>
     <li><b>Chart.js</b>: Renders charts for severity distributions.</li>
-    <li><b>Mermaid</b> (in landscape report): Draws dependency graphs with vulnerable nodes highlighted.</li>
+    <li><b>Mermaid</b> (in landscape sections): Draws dependency graphs with vulnerable nodes highlighted.</li>
   </ul>
 </section>
 
-<!-- Dual pies -->
-<section class="card">
-  <h2>Severity distribution (BASE & HEAD)</h2>
+<!-- Summary -->
+<section class="summary page-break">
+  <h2>Summary</h2>
+  <div class="card">
+    <h3>Base branch</h3>
+    <ul>
+      <li><b>Name</b>: <code>${escapeHtml(baseLabel)}</code> (input: <code>${escapeHtml(baseInput)}</code>)</li>
+      <li><b>Commit</b>: <code>${shortSha(baseSha)}</code></li>
+      <li><b>Message</b>: <span class="small">${escapeHtml(baseCommitLine)}</span></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Head branch</h3>
+    <ul>
+      <li><b>Name</b>: <code>${escapeHtml(headLabel)}</code> (input: <code>${escapeHtml(headInput)}</code>)</li>
+      <li><b>Commit</b>: <code>${shortSha(headSha)}</code></li>
+      <li><b>Message</b>: <span class="small">${escapeHtml(headCommitLine)}</span></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Scan parameters</h3>
+    <ul>
+      <li><b>Minimum severity</b>: <code>${escapeHtml(minSeverity)}</code></li>
+      <li><b>Counts</b>: NEW=${counts.new} · REMOVED=${counts.removed} · UNCHANGED=${counts.unchanged}</li>
+    </ul>
+  </div>
+</section>
+
+<!-- Severity distribution -->
+<section class="card page-break">
+  <h2>Severity distribution</h2>
   <div class="flex">
     <div class="col">
       <h3>BASE: ${escapeHtml(baseLabel)}</h3>
@@ -122,24 +155,18 @@ function buildHtmlMain({
 </section>
 
 <script>
-  // Render diff table (Markdown)
+  // Render diff table
   const diffMd = ${JSON.stringify(diffTableMarkdown || "")};
   document.getElementById("diff-md").innerHTML = marked.parse(diffMd);
 
-  // Severity pie charts (smaller side-by-side)
+  // Severity pies
   const sevBase = ${JSON.stringify(sevBase)};
   const sevHead = ${JSON.stringify(sevHead)};
   function makePie(el, data) {
     return new Chart(el.getContext('2d'), {
       type: "pie",
-      data: {
-        labels: Object.keys(data),
-        datasets: [{ data: Object.values(data) }]
-      },
-      options: {
-        responsive: false,
-        plugins: { legend: { position: "bottom" } }
-      }
+      data: { labels: Object.keys(data), datasets: [{ data: Object.values(data) }] },
+      options: { responsive: false, plugins: { legend: { position: "bottom" } } }
     });
   }
   makePie(document.getElementById("pieBase"), sevBase);
@@ -167,10 +194,8 @@ function buildHtmlLandscape({
   h1,h2,h3 { margin: .5em 0 .3em; }
   .card { border: 1px solid #ccc3; border-radius: 10px; padding: 16px; margin: 16px 0; }
   .page-break { page-break-before: always; }
-  .mermaid { width: 100%; }
-  /* Make SVG use full width and larger base font for readability */
+  .mermaid { width: 100%; font-size: 16px; }
   .mermaid svg { width: 100% !important; height: auto !important; }
-  .mermaid { font-size: 16px; }
   table { border-collapse: collapse; width: 100%; font-size: 12px; }
   th, td { border: 1px solid #ddd; padding: 4px 6px; vertical-align: top; }
   th { background: #f6f6f6; }
@@ -189,7 +214,7 @@ function buildHtmlLandscape({
 </head>
 <body>
 
-<section class="card">
+<section class="card page-break">
   <h2>Dependency graph — BASE: ${escapeHtml(baseLabel)}</h2>
   <pre class="mermaid">${mermaidBase ? mermaidBase : "graph LR\nA[No data]"}</pre>
 </section>
@@ -200,17 +225,16 @@ function buildHtmlLandscape({
 </section>
 
 <section class="card page-break">
-  <h2>Dependency paths — BASE</h2>
+  <h2>Dependency path — BASE</h2>
   <div id="paths-base"></div>
 </section>
 
 <section class="card page-break">
-  <h2>Dependency paths — HEAD</h2>
+  <h2>Dependency path — HEAD</h2>
   <div id="paths-head"></div>
 </section>
 
 <script>
-  // Render paths tables from Markdown
   const pathsBaseMd = ${JSON.stringify(pathsBaseMd || "")};
   const pathsHeadMd = ${JSON.stringify(pathsHeadMd || "")};
   document.getElementById("paths-base").innerHTML = marked.parse(pathsBaseMd || "_No paths_");

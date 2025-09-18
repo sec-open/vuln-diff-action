@@ -1,5 +1,7 @@
 // src/report.js
-// Build a comprehensive markdown report.
+// Markdown report (summary) + dependency paths helpers
+// Adjusted paths table: remove Depth0, add Module (no version), Package remains name:version.
+// Comments in English.
 
 const ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
 
@@ -17,12 +19,13 @@ function groupBySeverity(matches) {
   return map;
 }
 
+// Graph builder
 function buildGraphFromBOM(bomJson) {
   const dependencies = bomJson?.dependencies || [];
   const components = bomJson?.components || [];
-
   const refToLabel = new Map();
   const nameVer = (c) => `${c?.name || "unknown"}:${c?.version || "unknown"}`;
+
   for (const c of components) {
     const label = nameVer(c);
     if (c["bom-ref"]) refToLabel.set(c["bom-ref"], label);
@@ -64,7 +67,7 @@ function findPathsToTarget(target, parents, maxPaths = 5, maxDepth = 10) {
     const node = path[path.length - 1];
     const ps = parents.get(node) || new Set();
     if (ps.size === 0 || path.length >= maxDepth) {
-      res.push([...path].reverse());
+      res.push([...path].reverse()); // root ... target
       continue;
     }
     for (const p of ps) {
@@ -78,40 +81,58 @@ function findPathsToTarget(target, parents, maxPaths = 5, maxDepth = 10) {
   return res;
 }
 
+function stripVersion(label) {
+  // "commons-datastore:7.0.0-SNAPSHOT" -> "commons-datastore"
+  return String(label || "").split(":")[0];
+}
+
+/**
+ * Build dependency paths table rows with new schema:
+ * Columns: Severity, Module, Package, Depth0..DepthN
+ * - Module: first element of the path (root), without version
+ * - Package: vulnerable package name:version (target)
+ * - Depth columns: remaining path elements after the module and before the package, reindexed starting at Depth0
+ */
 function buildDependencyPathsTable(bomJson, grypeMatches, options = {}) {
   const { parents } = buildGraphFromBOM(bomJson);
-
-  const vulnerable = new Set(
-    (grypeMatches || []).map(m => `${m?.artifact?.name || "unknown"}:${m?.artifact?.version || "unknown"}`)
-  );
-
   const maxPathsPerPkg = options.maxPathsPerPkg ?? 3;
   const maxDepth = options.maxDepth ?? 10;
 
-  const rows = [];
+  const rows = []; // [Severity, Module, Package, Depth0..]
   for (const m of (grypeMatches || [])) {
     const sev = (m?.vulnerability?.severity || "UNKNOWN").toUpperCase();
     const pkg = `${m?.artifact?.name || "unknown"}:${m?.artifact?.version || "unknown"}`;
-    if (!vulnerable.has(pkg)) continue;
 
     const paths = findPathsToTarget(pkg, parents, maxPathsPerPkg, maxDepth);
     if (paths.length === 0) {
-      rows.push([pkg, sev, pkg]);
+      // No path: module unknown -> leave empty; still record row
+      rows.push([sev, "", pkg]);
       continue;
     }
-    for (const p of paths) rows.push([pkg, sev, ...p]);
+    for (const p of paths) {
+      // p: [root, ..., target]
+      const moduleLabel = stripVersion(p[0] || "");
+      const inner = p.slice(1, -1); // skip root, skip target
+      const depths = inner.map(stripVersion);
+      rows.push([sev, moduleLabel, pkg, ...depths]);
+    }
   }
 
+  // Sort rows by severity (CRITICAL..LOW..UNKNOWN)
+  const sevIdx = s => ORDER.indexOf(s);
+  rows.sort((a, b) => sevIdx(a[0]) - sevIdx(b[0]));
+
+  // Determine max depth columns
   let maxLen = 0;
   for (const r of rows) if (r.length > maxLen) maxLen = r.length;
-  const depthCols = Array.from({ length: Math.max(3, maxLen - 2) }, (_, i) => `Depth${i}`);
+  const depthCols = Array.from({ length: Math.max(0, maxLen - 3) }, (_, i) => `Depth${i}`);
 
   return { rows, depthCols };
 }
 
 function renderPathsMarkdownTable(paths) {
   const { rows, depthCols } = paths;
-  const headers = ["Package", "Severity", ...depthCols];
+  const headers = ["Severity", "Module", "Package", ...depthCols];
   const sep = headers.map(() => "---");
 
   const lines = [];
@@ -119,11 +140,12 @@ function renderPathsMarkdownTable(paths) {
   lines.push(`| ${sep.join(" | ")} |`);
 
   for (const r of rows) {
-    const pkg = r[0];
-    const sev = r[1];
-    const cells = r.slice(2);
+    const sev = r[0];
+    const mod = r[1];
+    const pkg = r[2];
+    const cells = r.slice(3);
     const padded = [...cells, ...Array(Math.max(0, depthCols.length - cells.length)).fill("")].slice(0, depthCols.length);
-    lines.push(`| \`${pkg}\` | **${sev}** | ${padded.map(x => (x ? `\`${x}\`` : "")).join(" | ")} |`);
+    lines.push(`| **${sev}** | \`${mod}\` | \`${pkg}\` | ${padded.map(x => (x ? `\`${x}\`` : "")).join(" | ")} |`);
   }
   return lines.join("\n");
 }
@@ -160,10 +182,8 @@ function buildMermaidGraphFromBOMImproved(bomJson, grypeMatches, graphMax = 150)
 function buildMarkdownReport({
   baseLabel, baseInput, baseSha, baseCommitLine,
   headLabel, headInput, headSha, headCommitLine,
-  minSeverity, counts, table,
-  headGrype, headBOM, graphMaxNodes
+  minSeverity, counts, table
 }) {
-  const sevGroups = groupBySeverity(headGrype.matches || []);
   const md = [];
   md.push("### Vulnerability Diff (Syft + Grype)\n");
   md.push(`- **Base**: \`${baseLabel}\` (_input:_ \`${baseInput}\`) → \`${shortSha(baseSha)}\``);
@@ -181,6 +201,6 @@ module.exports = {
   buildMarkdownReport,
   buildDependencyPathsTable,
   renderPathsMarkdownTable,
-  buildMermaidGraphFromBOMImproved
+  buildMermaidGraphFromBOMImproved,
+  ORDER
 };
-

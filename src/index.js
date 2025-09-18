@@ -1,9 +1,15 @@
 // src/index.js
 // Generate SBOMs, scan with Grype, compute diff, write summary,
 // build Markdown + HTML reports, and export PDFs:
-//  - main.pdf (portrait): cover, TOC, intro, dual pies, diff table
+//  - main.pdf (portrait): cover, TOC, intro, summary, dual pies, diff table
 //  - landscape.pdf (landscape): dependency graphs (base/head) + dependency paths (base/head)
 // Then merge into report.pdf using pdf-lib.
+//
+// Notes:
+// - Comments are in English.
+// - Margins: we reduced PDF margins (portrait and landscape) so graphs/tables fit better.
+// - Cover page now shows repository ("owner/repo") and a timestamp footer (dd/mm/yyyy HH:MM:ss).
+// - The "Summary" section (after Introduction) contains clear per-branch details.
 
 const core = require("@actions/core");
 const exec = require("@actions/exec");
@@ -15,6 +21,7 @@ const { PDFDocument } = require("pdf-lib");
 
 const { generateSbomAuto } = require("./sbom");
 const { scanSbom } = require("./grype");
+// diff/render now support passing branch labels; extra args are ignored by older versions safely
 const { diff, renderMarkdownTable } = require("./diff");
 const {
   buildMarkdownReport,
@@ -72,8 +79,16 @@ async function commitLine(sha) {
   return out.trim();
 }
 
+// ----------------------- time / repo helpers -----------------------
+function fmtNow() {
+  const pad = n => String(n).padStart(2, "0");
+  const d = new Date();
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 // ----------------------- Puppeteer helpers -----------------------
 async function ensureChromeForPuppeteer(version = "22.15.0") {
+  // Ensure a Chrome binary is available in CI environment
   const cacheDir = process.env.PUPPETEER_CACHE_DIR || `${os.homedir()}/.cache/puppeteer`;
   const cmd = `PUPPETEER_CACHE_DIR=${cacheDir} npx --yes puppeteer@${version} browsers install chrome`;
   await sh(cmd);
@@ -92,12 +107,15 @@ async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.emulateMediaType("screen");
+    // Tighter margins to help content fit on one page (especially graphs)
+    const portraitMargins = { top: "10mm", right: "8mm", bottom: "10mm", left: "8mm" };
+    const landscapeMargins = { top: "8mm", right: "6mm", bottom: "8mm", left: "6mm" };
     await page.pdf({
       path: outPath,
       format: "A4",
       landscape,
       printBackground: true,
-      margin: { top: "14mm", right: "12mm", bottom: "14mm", left: "12mm" }
+      margin: landscape ? landscapeMargins : portraitMargins
     });
   } finally {
     await browser.close();
@@ -133,6 +151,9 @@ async function run() {
     const artifactName   = core.getInput("artifact_name") || "vuln-diff-artifacts";
     const graphMaxNodes  = parseInt(core.getInput("graph_max_nodes") || "150", 10);
     const reportPdf      = (core.getInput("report_pdf") || "false") === "true";
+
+    const repository = process.env.GITHUB_REPOSITORY || ""; // e.g., "opencb/java-common-libs"
+    const nowStr = fmtNow();
 
     const workdir = process.cwd();
     const baseDir = path.join(workdir, "__base__");
@@ -184,8 +205,10 @@ async function run() {
     const baseScan = await scanSbom(baseSbom);
     const headScan = await scanSbom(headSbom);
 
-    // Diff
-    const d = diff(baseScan.matches || [], headScan.matches || [], minSeverity);
+    // Diff (pass branch labels so the renderer can show "develop"/"TASK-7908" instead of BASE/HEAD)
+    const baseLabel = guessLabel(baseRefInput);
+    const headLabel = guessLabel(headRefInput);
+    const d = diff(baseScan.matches || [], headScan.matches || [], minSeverity, baseLabel, headLabel);
     const table = renderMarkdownTable(d.news, d.removed, d.unchanged);
 
     // Commit lines
@@ -203,13 +226,13 @@ async function run() {
     core.setOutput("base_input", baseRefInput);
     core.setOutput("head_input", headRefInput);
 
-    // Summary
+    // Job Summary (short)
     if (writeSummary) {
       const summary = [];
       summary.push("### Vulnerability Diff (Syft+Grype)\n");
-      summary.push(`- **Base**: \`${guessLabel(baseRefInput)}\` (_input:_ \`${baseRefInput}\`) → \`${shortSha(baseSha)}\``);
+      summary.push(`- **Base**: \`${baseLabel}\` (_input:_ \`${baseRefInput}\`) → \`${shortSha(baseSha)}\``);
       summary.push(`  - ${baseCommit}`);
-      summary.push(`- **Head**: \`${guessLabel(headRefInput)}\` (_input:_ \`${headRefInput}\`) → \`${shortSha(headSha)}\``);
+      summary.push(`- **Head**: \`${headLabel}\` (_input:_ \`${headRefInput}\`) → \`${shortSha(headSha)}\``);
       summary.push(`  - ${headCommit}`);
       summary.push(`- **Min severity**: \`${minSeverity}\``);
       summary.push(`- **Counts**: NEW=${d.news.length} · REMOVED=${d.removed.length} · UNCHANGED=${d.unchanged.length}\n`);
@@ -217,20 +240,24 @@ async function run() {
       await core.summary.addRaw(summary.join("\n")).write();
     }
 
-    // Markdown report (kept simple; main visuals will be in HTML/PDF)
+    // Simple Markdown report (kept for artifact/debug)
     const reportMdPath = path.join(workdir, "report.md");
-    fs.writeFileSync(reportMdPath, buildMarkdownReport({
-      baseLabel: guessLabel(baseRefInput), baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
-      headLabel: guessLabel(headRefInput), headInput: headRefInput, headSha, headCommitLine: headCommit,
-      minSeverity,
-      counts: { new: d.news.length, removed: d.removed.length, unchanged: d.unchanged.length },
-      table,
-      headGrype: headScan,
-      headBOM: JSON.parse(fs.readFileSync(headSbom, "utf8")),
-      graphMaxNodes
-    }), "utf8");
+    fs.writeFileSync(
+      reportMdPath,
+      buildMarkdownReport({
+        baseLabel, baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
+        headLabel, headInput: headRefInput, headSha, headCommitLine: headCommit,
+        minSeverity,
+        counts: { new: d.news.length, removed: d.removed.length, unchanged: d.unchanged.length },
+        table,
+        headGrype: headScan,
+        headBOM: JSON.parse(fs.readFileSync(headSbom, "utf8")),
+        graphMaxNodes
+      }),
+      "utf8"
+    );
 
-    // Build data for HTML/PDF
+    // Data for HTML/PDF
     const baseBomJson = JSON.parse(fs.readFileSync(baseSbom, "utf8"));
     const headBomJson = JSON.parse(fs.readFileSync(headSbom, "utf8"));
 
@@ -244,19 +271,22 @@ async function run() {
       buildDependencyPathsTable(headBomJson, headScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 })
     );
 
-    // HTMLs
+    // HTMLs (main portrait + landscape sections)
     const htmlMain = buildHtmlMain({
-      baseLabel: guessLabel(baseRefInput), baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
-      headLabel: guessLabel(headRefInput), headInput: headRefInput, headSha, headCommitLine: headCommit,
+      repository,
+      baseLabel, baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
+      headLabel, headInput: headRefInput, headSha, headCommitLine: headCommit,
       minSeverity,
       counts: { new: d.news.length, removed: d.removed.length, unchanged: d.unchanged.length },
       diffTableMarkdown: table,
       baseMatches: baseScan.matches || [],
-      headMatches: headScan.matches || []
+      headMatches: headScan.matches || [],
+      nowStr
     });
+
     const htmlLandscape = buildHtmlLandscape({
-      baseLabel: guessLabel(baseRefInput),
-      headLabel: guessLabel(headRefInput),
+      baseLabel,
+      headLabel,
       mermaidBase, mermaidHead,
       pathsBaseMd, pathsHeadMd
     });
@@ -272,9 +302,13 @@ async function run() {
     if (reportPdf) {
       const pdfMain = path.join(workdir, "report-main.pdf");
       const pdfLscp = path.join(workdir, "report-landscape.pdf");
+
+      // Portrait main (reduced margins already set in renderPdfFromHtml)
       await renderPdfFromHtml(htmlMain, pdfMain, { landscape: false });
+      // Landscape sections (graphs/paths) with tighter margins to keep title + graph on the same page
       await renderPdfFromHtml(htmlLandscape, pdfLscp, { landscape: true });
-      // Merge
+
+      // Merge into final report.pdf
       reportPdfPath = path.join(workdir, "report.pdf");
       await mergePdfs([pdfMain, pdfLscp], reportPdfPath);
       pdfs = [pdfMain, pdfLscp, reportPdfPath];
