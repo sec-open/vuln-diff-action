@@ -87,7 +87,7 @@ function fmtNow() {
 }
 
 // ----------------------- Puppeteer helpers -----------------------
-async function ensureChromeForPuppeteer(version = "22.15.0") {
+async function ensureChromeForPuppeteer(version = "24.10.2") {
   // Ensure a Chrome binary is available in CI environment
   const cacheDir = process.env.PUPPETEER_CACHE_DIR || `${os.homedir()}/.cache/puppeteer`;
   const cmd = `PUPPETEER_CACHE_DIR=${cacheDir} npx --yes puppeteer@${version} browsers install chrome`;
