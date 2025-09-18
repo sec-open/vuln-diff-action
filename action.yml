@@ -48,6 +48,19 @@ inputs:
     description: "Shell script to run inside each worktree (BASE and HEAD) before build/SBOM"
     required: false
     default: ""
+  pr_comment:
+    description: "Post/Update a reusable PR comment with NEW vulnerabilities"
+    required: false
+    default: "false"
+  pr_comment_marker:
+    description: "Hidden marker used to find the existing reusable comment"
+    required: false
+    default: "<!-- vuln-diff-action:comment -->"
+  github_token:
+    description: "GitHub token with permission to write PR comments (defaults to GITHUB_TOKEN)"
+    required: false
+    default: ""
+
 
 
 outputs:
