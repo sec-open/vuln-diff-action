@@ -10,11 +10,13 @@
 // - Margins: we reduced PDF margins (portrait and landscape) so graphs/tables fit better.
 // - Cover page now shows repository ("owner/repo") and a timestamp footer (dd/mm/yyyy HH:MM:ss).
 // - The "Summary" section (after Introduction) contains clear per-branch details.
-// - NEW: setup_script input to prepare each worktree (e.g., clone opencga and create a symlink).
+// - setup_script input to prepare each worktree (e.g., clone opencga and create a symlink).
+// - NEW: Optional reusable PR comment (single upserted comment per PR) with NEW vulnerabilities.
 
 const core = require("@actions/core");
 const exec = require("@actions/exec");
 const artifact = require("@actions/artifact");
+const github = require("@actions/github"); // <-- NEW
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -146,6 +148,27 @@ async function runSetupScriptIfAny(setupScript, role, dir, envExtras) {
   });
 }
 
+// ----------------------- PR comment helpers (NEW) -----------------------
+async function upsertPrComment({ token, owner, repo, prNumber, marker, body }) {
+  const octokit = github.getOctokit(token);
+  // List recent comments and find existing one with marker
+  const { data: comments } = await octokit.rest.issues.listComments({
+    owner, repo, issue_number: prNumber, per_page: 100,
+  });
+  const existing = comments.find(c => (c.body || "").includes(marker));
+  if (existing) {
+    await octokit.rest.issues.updateComment({
+      owner, repo, comment_id: existing.id, body,
+    });
+    return { action: "updated", id: existing.id };
+  } else {
+    const { data: created } = await octokit.rest.issues.createComment({
+      owner, repo, issue_number: prNumber, body,
+    });
+    return { action: "created", id: created.id };
+  }
+}
+
 // ----------------------- main -----------------------
 async function run() {
   try {
@@ -160,9 +183,14 @@ async function run() {
     const artifactName   = core.getInput("artifact_name") || "vuln-diff-artifacts";
     const graphMaxNodes  = parseInt(core.getInput("graph_max_nodes") || "150", 10);
     const reportPdf      = (core.getInput("report_pdf") || "false") === "true";
-    const setupScript    = core.getInput("setup_script") || ""; // NEW
+    const setupScript    = core.getInput("setup_script") || "";
 
-    const repository = process.env.GITHUB_REPOSITORY || ""; // e.g., "opencb/java-common-libs"
+    // NEW: PR comment inputs
+    const prCommentEnabled = (core.getInput("pr_comment") || "false") === "true";
+    const prMarker         = core.getInput("pr_comment_marker") || "<!-- vuln-diff-action:comment -->";
+    const ghTokenInput     = core.getInput("github_token") || "";
+
+    const repository = process.env.GITHUB_REPOSITORY || ""; // e.g., "owner/repo"
     const nowStr = fmtNow();
 
     const workdir = process.cwd();
@@ -259,6 +287,52 @@ async function run() {
       summary.push(table);
       await core.summary.addRaw(summary.join("\n")).write();
     }
+
+    // ---------------- PR reusable comment (NEW) ----------------
+    const ghToken = ghTokenInput || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
+    if (prCommentEnabled) {
+      const ctx = github.context;
+      const isPr = (ctx.eventName === "pull_request" || ctx.eventName === "pull_request_target") && ctx.payload?.pull_request;
+      if (!isPr) {
+        core.info("PR comment requested but this run is not a pull_request event; skipping comment.");
+      } else if (!ghToken) {
+        core.warning("PR comment requested but no github_token provided; skipping comment.");
+      } else {
+        const prNumber = ctx.payload.pull_request.number;
+        const [owner, repo] = (process.env.GITHUB_REPOSITORY || "").split("/");
+        // Build a compact table with only NEW vulnerabilities
+        const onlyNewTable = renderMarkdownTable(d.news, [], []);
+        const bodyLines = [];
+        if (d.news.length > 0) {
+          bodyLines.push(`### 🔎 New vulnerabilities introduced (${d.news.length})`);
+          bodyLines.push("");
+        } else {
+          bodyLines.push(`### ✅ No new vulnerabilities introduced`);
+          bodyLines.push("");
+        }
+        bodyLines.push(`- **Base**: \`${baseLabel}\` → \`${shortSha(baseSha)}\``);
+        bodyLines.push(`- **Head**: \`${headLabel}\` → \`${shortSha(headSha)}\``);
+        bodyLines.push(`- **Minimum severity**: \`${minSeverity}\``);
+        bodyLines.push("");
+        if (d.news.length > 0) {
+          bodyLines.push(onlyNewTable);
+          bodyLines.push("");
+        }
+        bodyLines.push(`_Updated automatically by vuln-diff-action._`);
+        bodyLines.push(prMarker);
+        const commentBody = bodyLines.join("\n");
+
+        try {
+          const res = await upsertPrComment({
+            token: ghToken, owner, repo, prNumber, marker: prMarker, body: commentBody
+          });
+          core.info(`PR comment ${res.action} (id=${res.id})`);
+        } catch (e) {
+          core.warning(`Failed to upsert PR comment: ${e.message || e}`);
+        }
+      }
+    }
+    // ----------------------------------------------------------
 
     // Simple Markdown report (kept for artifact/debug)
     const reportMdPath = path.join(workdir, "report.md");
