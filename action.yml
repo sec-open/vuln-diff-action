@@ -44,6 +44,11 @@ inputs:
     description: "Also render report.pdf using Puppeteer, default true"
     required: false
     default: "true"
+  setup_script:
+    description: "Shell script to run inside each worktree (BASE and HEAD) before build/SBOM"
+    required: false
+    default: ""
+
 
 outputs:
   new_count:

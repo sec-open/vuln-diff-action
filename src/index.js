@@ -10,6 +10,7 @@
 // - Margins: we reduced PDF margins (portrait and landscape) so graphs/tables fit better.
 // - Cover page now shows repository ("owner/repo") and a timestamp footer (dd/mm/yyyy HH:MM:ss).
 // - The "Summary" section (after Introduction) contains clear per-branch details.
+// - NEW: setup_script input to prepare each worktree (e.g., clone opencga and create a symlink).
 
 const core = require("@actions/core");
 const exec = require("@actions/exec");
@@ -21,7 +22,6 @@ const { PDFDocument } = require("pdf-lib");
 
 const { generateSbomAuto } = require("./sbom");
 const { scanSbom } = require("./grype");
-// diff/render now support passing branch labels; extra args are ignored by older versions safely
 const { diff, renderMarkdownTable } = require("./diff");
 const {
   buildMarkdownReport,
@@ -137,6 +137,15 @@ async function mergePdfs(pdfPaths, outPath) {
   fs.writeFileSync(outPath, finalBytes);
 }
 
+// ----------------------- setup_script runner -----------------------
+async function runSetupScriptIfAny(setupScript, role, dir, envExtras) {
+  if (!setupScript || !setupScript.trim()) return;
+  await sh(setupScript, {
+    cwd: dir,
+    env: { ...process.env, ...envExtras, WORKTREE_ROLE: role, WORKTREE_DIR: dir }
+  });
+}
+
 // ----------------------- main -----------------------
 async function run() {
   try {
@@ -151,6 +160,7 @@ async function run() {
     const artifactName   = core.getInput("artifact_name") || "vuln-diff-artifacts";
     const graphMaxNodes  = parseInt(core.getInput("graph_max_nodes") || "150", 10);
     const reportPdf      = (core.getInput("report_pdf") || "false") === "true";
+    const setupScript    = core.getInput("setup_script") || ""; // NEW
 
     const repository = process.env.GITHUB_REPOSITORY || ""; // e.g., "opencb/java-common-libs"
     const nowStr = fmtNow();
@@ -189,6 +199,18 @@ async function run() {
       createdHeadWorktree = true;
     }
 
+    // ---- run setup_script in each worktree BEFORE build/SBOM ----
+    const baseLabel = guessLabel(baseRefInput);
+    const headLabel = guessLabel(headRefInput);
+    const envExtras = {
+      REPOSITORY: repository,
+      BASE_LABEL: baseLabel,
+      HEAD_LABEL: headLabel,
+      GITHUB_TOKEN: process.env.GITHUB_TOKEN || process.env.GH_TOKEN || ""
+    };
+    await runSetupScriptIfAny(setupScript, "BASE", baseDir, envExtras);
+    await runSetupScriptIfAny(setupScript, "HEAD", headScanRoot, envExtras);
+
     // Optional build
     if (buildCommand) {
       await sh(buildCommand, { cwd: baseDir });
@@ -205,9 +227,7 @@ async function run() {
     const baseScan = await scanSbom(baseSbom);
     const headScan = await scanSbom(headSbom);
 
-    // Diff (pass branch labels so the renderer can show "develop"/"TASK-7908" instead of BASE/HEAD)
-    const baseLabel = guessLabel(baseRefInput);
-    const headLabel = guessLabel(headRefInput);
+    // Diff (show real branch names instead of BASE/HEAD)
     const d = diff(baseScan.matches || [], headScan.matches || [], minSeverity, baseLabel, headLabel);
     const table = renderMarkdownTable(d.news, d.removed, d.unchanged);
 
@@ -272,8 +292,9 @@ async function run() {
     );
 
     // HTMLs (main portrait + landscape sections)
+    const repositoryEnv = process.env.GITHUB_REPOSITORY || repository;
     const htmlMain = buildHtmlMain({
-      repository,
+      repository: repositoryEnv,
       baseLabel, baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
       headLabel, headInput: headRefInput, headSha, headCommitLine: headCommit,
       minSeverity,
