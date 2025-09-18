@@ -1,16 +1,17 @@
 {
   "name": "vuln-diff-action",
   "version": "0.1.0",
-  "description": "Compare vulnerabilities between two refs using Syft+Grype and produce a Markdown diff",
+  "description": "Compare vulnerabilities between two refs using Syft+Grype and produce diffs/reports",
   "main": "src/index.js",
   "scripts": {
     "build": "ncc build src/index.js -o dist"
   },
   "dependencies": {
+    "@actions/artifact": "^2.1.7",
     "@actions/core": "^1.10.1",
     "@actions/exec": "^1.1.1",
     "@actions/github": "^6.0.0",
-    "@actions/artifact": "^2.1.7"
+    "puppeteer": "^22.15.0"
   },
   "devDependencies": {
     "@vercel/ncc": "^0.38.3"

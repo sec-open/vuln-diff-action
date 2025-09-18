@@ -40,6 +40,10 @@ inputs:
     description: "Max nodes to include in the Mermaid dependency graph"
     required: false
     default: "150"
+  report_pdf:
+    description: "Also render report.pdf using Puppeteer"
+    required: false
+    default: "false"
 
 outputs:
   new_count:
