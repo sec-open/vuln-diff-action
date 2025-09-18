@@ -12,7 +12,7 @@ const { scanSbom } = require("./grype");
 const { diff, renderMarkdownTable } = require("./diff");
 const { buildMarkdownReport } = require("./report");
 const { buildHtmlReport } = require("./report-html");
-
+const os = require("os");
 // ----------------------- shell + git helpers -----------------------
 async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); }
 
@@ -131,27 +131,48 @@ function buildMermaidGraphFromBOMImproved(bomJson, grypeMatches, graphMax = 150)
 }
 
 // ----------------------- PDF helper (Puppeteer) -----------------------
+
+// --- helper to run shell ---
+async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); }
+
+// --- ensure Chrome is installed for Puppeteer at runtime ---
+async function ensureChromeForPuppeteer(version = "22.15.0") {
+  // Use Puppeteer's CLI to install Chrome into the default cache dir
+  const cacheDir = process.env.PUPPETEER_CACHE_DIR || `${os.homedir()}/.cache/puppeteer`;
+  const cmd = `PUPPETEER_CACHE_DIR=${cacheDir} npx --yes puppeteer@${version} browsers install chrome`;
+  await sh(cmd);
+  return cacheDir; // useful for debugging paths if needed
+}
+
+// --- render PDF from HTML using the Chrome channel installed above ---
 async function renderPdfFromHtml(html, outPath) {
-  // Lazy import to avoid cost if not requested
   const puppeteer = require("puppeteer");
+  // Ensure Chrome for Puppeteer is available (downloaded into ~/.cache/puppeteer)
+  await ensureChromeForPuppeteer();
+
+  // Launch using the 'chrome' channel so Puppeteer uses the installed Chrome
   const browser = await puppeteer.launch({
+    channel: "chrome",
     headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
+
   try {
     const page = await browser.newPage();
+    // Load HTML (uses CDN for Mermaid/Chart.js; wait for network to go idle)
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.emulateMediaType("screen");
     await page.pdf({
       path: outPath,
       format: "A4",
       printBackground: true,
-      margin: { top: "14mm", right: "12mm", bottom: "14mm", left: "12mm" }
+      margin: { top: "14mm", right: "12mm", bottom: "14mm", left: "12mm" },
     });
   } finally {
     await browser.close();
   }
 }
+
 
 // ----------------------- main -----------------------
 async function run() {
