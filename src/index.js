@@ -6,7 +6,7 @@
 
 const core = require("@actions/core");
 const exec = require("@actions/exec");
-const artifact = require("@actions/artifact");
+const { create: createArtifactClient } = require("@actions/artifact");
 const fs = require("fs");
 const path = require("path");
 const { generateSbomAuto } = require("./sbom"); // auto: Maven CycloneDX if pom.xml, else Syft dir
@@ -367,9 +367,9 @@ async function run() {
     fs.writeFileSync(diffJsonPath, JSON.stringify({ news: d.news, removed: d.removed, unchanged: d.unchanged }, null, 2));
 
     // Upload artifact (SBOMs, grype outputs, report, diff)
-    if (uploadArtifact) {
-      const client = artifact.create();
-      await client.uploadArtifact(
+      if (uploadArtifact) {
+        const client = createArtifactClient();
+        await client.uploadArtifact(
         artifactName,
         [reportPath, baseSbom, headSbom, grypeBasePath, grypeHeadPath, diffJsonPath],
         workdir,
