@@ -304,7 +304,7 @@ async function run() {
         const onlyNewTable = renderMarkdownTable(d.news, [], []);
         const bodyLines = [];
         if (d.news.length > 0) {
-          bodyLines.push(`### 🔎 New vulnerabilities introduced (${d.news.length})`);
+          bodyLines.push(`### 🚨 New vulnerabilities introduced (${d.news.length})`);
           bodyLines.push("");
         } else {
           bodyLines.push(`### ✅ No new vulnerabilities introduced`);
