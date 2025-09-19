@@ -1,25 +1,25 @@
 // src/index.js
 // Generate SBOMs, scan with Grype, compute diff, write summary,
-// build Markdown + HTML reports, and export PDFs:
-//  - main.pdf (portrait): cover, TOC, intro, summary, dual pies, diff table
-//  - landscape.pdf (landscape): dependency graphs (base/head) + dependency paths (base/head)
-// Then merge into report.pdf using pdf-lib.
+// build Markdown + HTML reports, export optional PDFs, upsert a reusable PR comment,
+// and (NEW) send a Slack notification when NEW vulns are introduced.
 //
 // Notes:
 // - Comments are in English.
-// - Margins: we reduced PDF margins (portrait and landscape) so graphs/tables fit better.
-// - Cover page now shows repository ("owner/repo") and a timestamp footer (dd/mm/yyyy HH:MM:ss).
-// - The "Summary" section (after Introduction) contains clear per-branch details.
-// - setup_script input to prepare each worktree (e.g., clone opencga and create a symlink).
-// - NEW: Optional reusable PR comment (single upserted comment per PR) with NEW vulnerabilities.
+// - Margins are reduced in PDFs so charts/graphs fit better.
+// - setup_script: prepare each worktree (e.g., clone opencga & make symlink) before build/SBOM.
+// - PR comment: single comment per PR, updated on every run.
+// - Slack: reads webhook from input `slack_webhook_url` OR env `SLACK_SECURITY_WEBHOOK_URL`.
+//
+// Required runtime: Node 20 (native fetch is available, but we use https for compatibility).
 
 const core = require("@actions/core");
 const exec = require("@actions/exec");
 const artifact = require("@actions/artifact");
-const github = require("@actions/github"); // <-- NEW
+const github = require("@actions/github");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const https = require("https");
 const { PDFDocument } = require("pdf-lib");
 
 const { generateSbomAuto } = require("./sbom");
@@ -90,7 +90,6 @@ function fmtNow() {
 
 // ----------------------- Puppeteer helpers -----------------------
 async function ensureChromeForPuppeteer(version = "24.10.2") {
-  // Ensure a Chrome binary is available in CI environment
   const cacheDir = process.env.PUPPETEER_CACHE_DIR || `${os.homedir()}/.cache/puppeteer`;
   const cmd = `PUPPETEER_CACHE_DIR=${cacheDir} npx --yes puppeteer@${version} browsers install chrome`;
   await sh(cmd);
@@ -109,7 +108,6 @@ async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.emulateMediaType("screen");
-    // Tighter margins to help content fit on one page (especially graphs)
     const portraitMargins = { top: "10mm", right: "8mm", bottom: "10mm", left: "8mm" };
     const landscapeMargins = { top: "8mm", right: "6mm", bottom: "8mm", left: "6mm" };
     await page.pdf({
@@ -148,10 +146,9 @@ async function runSetupScriptIfAny(setupScript, role, dir, envExtras) {
   });
 }
 
-// ----------------------- PR comment helpers (NEW) -----------------------
+// ----------------------- PR comment helpers -----------------------
 async function upsertPrComment({ token, owner, repo, prNumber, marker, body }) {
   const octokit = github.getOctokit(token);
-  // List recent comments and find existing one with marker
   const { data: comments } = await octokit.rest.issues.listComments({
     owner, repo, issue_number: prNumber, per_page: 100,
   });
@@ -167,6 +164,28 @@ async function upsertPrComment({ token, owner, repo, prNumber, marker, body }) {
     });
     return { action: "created", id: created.id };
   }
+}
+
+// ----------------------- Slack helpers (https) -----------------------
+async function sendSlackMessage(webhookUrl, payload) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload);
+    const url = new URL(webhookUrl);
+    const options = {
+      method: "POST",
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) }
+    };
+    const req = https.request(options, res => {
+      let body = "";
+      res.on("data", d => (body += d));
+      res.on("end", () => resolve({ status: res.statusCode, body }));
+    });
+    req.on("error", reject);
+    req.write(data);
+    req.end();
+  });
 }
 
 // ----------------------- main -----------------------
@@ -185,10 +204,15 @@ async function run() {
     const reportPdf      = (core.getInput("report_pdf") || "false") === "true";
     const setupScript    = core.getInput("setup_script") || "";
 
-    // NEW: PR comment inputs
+    // PR comment inputs
     const prCommentEnabled = (core.getInput("pr_comment") || "false") === "true";
     const prMarker         = core.getInput("pr_comment_marker") || "<!-- vuln-diff-action:comment -->";
     const ghTokenInput     = core.getInput("github_token") || "";
+
+    // Slack inputs
+    const slackInputWebhook = core.getInput("slack_webhook_url") || "";
+    const slackEnvWebhook   = process.env.SLACK_SECURITY_WEBHOOK_URL || "";
+    const slackWebhookUrl   = slackInputWebhook || slackEnvWebhook; // prefer explicit input, fallback to env
 
     const repository = process.env.GITHUB_REPOSITORY || ""; // e.g., "owner/repo"
     const nowStr = fmtNow();
@@ -288,7 +312,7 @@ async function run() {
       await core.summary.addRaw(summary.join("\n")).write();
     }
 
-    // ---------------- PR reusable comment (NEW) ----------------
+    // ---------------- PR reusable comment ----------------
     const ghToken = ghTokenInput || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
     if (prCommentEnabled) {
       const ctx = github.context;
@@ -300,31 +324,37 @@ async function run() {
       } else {
         const prNumber = ctx.payload.pull_request.number;
         const [owner, repo] = (process.env.GITHUB_REPOSITORY || "").split("/");
-        // Build a compact table with only NEW vulnerabilities
         const onlyNewTable = renderMarkdownTable(d.news, [], []);
-        const bodyLines = [];
+        const maxSev = (arr => {
+          const order = ["CRITICAL","HIGH","MEDIUM","LOW","UNKNOWN"];
+          let idx = 999;
+          for (const s of arr) idx = Math.min(idx, order.indexOf((s || "UNKNOWN").toUpperCase()));
+          return ["CRITICAL","HIGH","MEDIUM","LOW","UNKNOWN"][Math.max(0, idx)];
+        })(d.news.map(x => x.severity));
+        const icon = d.news.length === 0 ? "✅" : (maxSev === "CRITICAL" ? "🛑" : "🚨");
+
+        const lines = [];
         if (d.news.length > 0) {
-          bodyLines.push(`### 🚨 New vulnerabilities introduced (${d.news.length})`);
-          bodyLines.push("");
+          lines.push(`## ${icon} New vulnerabilities introduced (${d.news.length})`);
+          lines.push("");
         } else {
-          bodyLines.push(`### ✅ No new vulnerabilities introduced`);
-          bodyLines.push("");
+          lines.push(`## ${icon} No new vulnerabilities introduced`);
+          lines.push("");
         }
-        bodyLines.push(`- **Base**: \`${baseLabel}\` → \`${shortSha(baseSha)}\``);
-        bodyLines.push(`- **Head**: \`${headLabel}\` → \`${shortSha(headSha)}\``);
-        bodyLines.push(`- **Minimum severity**: \`${minSeverity}\``);
-        bodyLines.push("");
+        lines.push(`- **Base**: \`${baseLabel}\` → \`${shortSha(baseSha)}\``);
+        lines.push(`- **Head**: \`${headLabel}\` → \`${shortSha(headSha)}\``);
+        lines.push(`- **Minimum severity**: \`${minSeverity}\``);
+        lines.push("");
         if (d.news.length > 0) {
-          bodyLines.push(onlyNewTable);
-          bodyLines.push("");
+          lines.push(onlyNewTable);
+          lines.push("");
         }
-        bodyLines.push(`_Updated automatically by vuln-diff-action._`);
-        bodyLines.push(prMarker);
-        const commentBody = bodyLines.join("\n");
+        lines.push(`_Updated automatically by vuln-diff-action._`);
+        lines.push(prMarker);
 
         try {
           const res = await upsertPrComment({
-            token: ghToken, owner, repo, prNumber, marker: prMarker, body: commentBody
+            token: ghToken, owner, repo, prNumber, marker: prMarker, body: lines.join("\n")
           });
           core.info(`PR comment ${res.action} (id=${res.id})`);
         } catch (e) {
@@ -332,9 +362,38 @@ async function run() {
         }
       }
     }
-    // ----------------------------------------------------------
 
-    // Simple Markdown report (kept for artifact/debug)
+    // ---------------- Slack notification (NEW) ----------------
+    if (slackWebhookUrl && d.news.length > 0) {
+      // Compact text message with top-5 table (full table may be too long for Slack)
+      const top5 = renderMarkdownTable(d.news.slice(0, 5), [], []);
+      const prLink = (() => {
+        const ctx = github.context;
+        if (ctx.eventName === "pull_request" && ctx.payload?.pull_request?.html_url) return ctx.payload.pull_request.html_url;
+        // fallback: repo URL
+        if (process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY) {
+          return `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`;
+        }
+        return "";
+      })();
+
+      const text =
+        `*🚨 ${d.news.length} new vulnerabilities introduced*\n` +
+        `• Repo: \`${repository}\`\n` +
+        `• Base: \`${baseLabel}\` → \`${shortSha(baseSha)}\`\n` +
+        `• Head: \`${headLabel}\` → \`${shortSha(headSha)}\`\n` +
+        (prLink ? `• PR: ${prLink}\n` : "") +
+        `\n*Top 5 (by severity)*\n${top5}`;
+
+      try {
+        const res = await sendSlackMessage(slackWebhookUrl, { text });
+        core.info(`Slack notification sent (status ${res.status})`);
+      } catch (e) {
+        core.warning(`Failed to send Slack message: ${e.message || e}`);
+      }
+    }
+
+    // ---------------- Reports / artifacts ----------------
     const reportMdPath = path.join(workdir, "report.md");
     fs.writeFileSync(
       reportMdPath,
@@ -351,7 +410,6 @@ async function run() {
       "utf8"
     );
 
-    // Data for HTML/PDF
     const baseBomJson = JSON.parse(fs.readFileSync(baseSbom, "utf8"));
     const headBomJson = JSON.parse(fs.readFileSync(headSbom, "utf8"));
 
@@ -365,7 +423,6 @@ async function run() {
       buildDependencyPathsTable(headBomJson, headScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 })
     );
 
-    // HTMLs (main portrait + landscape sections)
     const repositoryEnv = process.env.GITHUB_REPOSITORY || repository;
     const htmlMain = buildHtmlMain({
       repository: repositoryEnv,
@@ -391,26 +448,19 @@ async function run() {
     fs.writeFileSync(reportHtmlMainPath, htmlMain, "utf8");
     fs.writeFileSync(reportHtmlLscpPath, htmlLandscape, "utf8");
 
-    // PDFs (optional)
     let reportPdfPath = "";
     let pdfs = [];
     if (reportPdf) {
       const pdfMain = path.join(workdir, "report-main.pdf");
       const pdfLscp = path.join(workdir, "report-landscape.pdf");
-
-      // Portrait main (reduced margins already set in renderPdfFromHtml)
       await renderPdfFromHtml(htmlMain, pdfMain, { landscape: false });
-      // Landscape sections (graphs/paths) with tighter margins to keep title + graph on the same page
       await renderPdfFromHtml(htmlLandscape, pdfLscp, { landscape: true });
-
-      // Merge into final report.pdf
       reportPdfPath = path.join(workdir, "report.pdf");
       await mergePdfs([pdfMain, pdfLscp], reportPdfPath);
       pdfs = [pdfMain, pdfLscp, reportPdfPath];
       core.info(`PDFs generated: ${pdfs.join(", ")}`);
     }
 
-    // Save raw scans/diff for artifact
     const grypeBasePath = path.join(workdir, "grype-base.json");
     const grypeHeadPath = path.join(workdir, "grype-head.json");
     fs.writeFileSync(grypeBasePath, JSON.stringify(baseScan, null, 2));
@@ -418,7 +468,6 @@ async function run() {
     const diffJsonPath = path.join(workdir, "diff.json");
     fs.writeFileSync(diffJsonPath, JSON.stringify({ news: d.news, removed: d.removed, unchanged: d.unchanged }, null, 2));
 
-    // Upload artifact bundle
     if (uploadArtifact) {
       const client = new artifact.DefaultArtifactClient();
       const files = [

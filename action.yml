@@ -60,6 +60,14 @@ inputs:
     description: "GitHub token with permission to write PR comments (defaults to GITHUB_TOKEN)"
     required: false
     default: ""
+  slack_webhook_url:
+    description: "Slack Incoming Webhook URL (if set, notify on NEW vulns)"
+    required: false
+    default: ""
+  slack_channel:
+    description: "Slack channel override (optional, default from webhook config)"
+    required: false
+    default: ""
 
 
 
