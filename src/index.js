@@ -363,27 +363,81 @@ async function run() {
       }
     }
 
-    // ---------------- Slack notification (NEW) ----------------
+    // ---------------- Slack notification  ----------------
+
     if (slackWebhookUrl && d.news.length > 0) {
-      // Compact text message with top-5 table (full table may be too long for Slack)
-      const top5 = renderMarkdownTable(d.news.slice(0, 5), [], []);
+      // Severity ordering + icons
+      const order = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, UNKNOWN: 4 };
+      const sevIcon = (s) => {
+        const x = (s || "UNKNOWN").toUpperCase();
+        return x === "CRITICAL" ? "🔴"
+          : x === "HIGH"       ? "🟠"
+          : x === "MEDIUM"     ? "🟡"
+          : x === "LOW"        ? "🟢"
+          : "⚪";
+      };
+
+      const bySeverityThenId = (a, b) => {
+        const sa = (a.severity || "UNKNOWN").toUpperCase();
+        const sb = (b.severity || "UNKNOWN").toUpperCase();
+        const oa = order[sa] ?? 9, ob = order[sb] ?? 9;
+        if (oa !== ob) return oa - ob;
+        return String(a.vulnId || a.id || "").localeCompare(String(b.vulnId || b.id || ""));
+      };
+
+      // Build advisory URL
+      function advisoryUrl(id, fallbackUrl) {
+        if (!id) return fallbackUrl || "";
+        if (/^GHSA-/i.test(id)) return `https://github.com/advisories/${id}`;
+        if (/^CVE-/i.test(id))  return `https://nvd.nist.gov/vuln/detail/${id}`;
+        return fallbackUrl || `https://www.google.com/search?q=${encodeURIComponent(id + " vulnerability")}`;
+      }
+
+      // Package label
+      function pkgLabel(entry) {
+        if (entry.pv) return entry.pv; // e.g. "name:version"
+        const name = entry.pkg || entry.package || entry.packageName || entry.name || "";
+        const ver  = entry.version || entry.packageVersion || entry.ver || "";
+        if (name && ver) return `${name}:${ver}`;
+        if (name) return name;
+        return entry.artifact || "unknown";
+      }
+
+      const LIMIT = 20;
+      const sorted = [...d.news].sort(bySeverityThenId);
+      const shown = sorted.slice(0, LIMIT);
+      const extra = d.news.length - shown.length;
+
+      const bullets = shown.map((e) => {
+        const id = e.vulnId || e.id;
+        const url = advisoryUrl(id, e.url);
+        const link = url ? `<${url}|${id}>` : `${id}`;
+        const pkg = pkgLabel(e);
+        const sev = (e.severity || "UNKNOWN").toUpperCase();
+        return `• ${sevIcon(sev)} *${sev}* — ${link} → \`${pkg}\``;
+      });
+
       const prLink = (() => {
         const ctx = github.context;
         if (ctx.eventName === "pull_request" && ctx.payload?.pull_request?.html_url) return ctx.payload.pull_request.html_url;
-        // fallback: repo URL
         if (process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY) {
           return `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`;
         }
         return "";
       })();
 
-      const text =
-        `*🚨 ${d.news.length} new vulnerabilities introduced*\n` +
+      const header =
+        `*:rotating_light: ${d.news.length} new vulnerabilities introduced*\n` +
         `• Repo: \`${repository}\`\n` +
         `• Base: \`${baseLabel}\` → \`${shortSha(baseSha)}\`\n` +
-        `• Head: \`${headLabel}\` → \`${shortSha(headSha)}\`\n` +
-        (prLink ? `• PR: ${prLink}\n` : "") +
-        `\n*Top 5 (by severity)*\n${top5}`;
+        `• Head: \`${headLabel}\` → \`${shortSha(headSha)}\`` +
+        (prLink ? `\n• PR: ${prLink}` : "");
+
+      const footer = extra > 0
+        ? `\n…and *${extra} more*. Download the artifact or open the PR for full details.`
+        : "";
+
+      const text = [header, "", "*New Vulnerabilities:*", bullets.join("\n"), footer].filter(Boolean).join("\n");
 
       try {
         const res = await sendSlackMessage(slackWebhookUrl, { text });
