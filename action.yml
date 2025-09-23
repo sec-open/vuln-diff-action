@@ -1,35 +1,35 @@
-name: "Vulnerability Diff (Syft+Grype)"
-description: "Compare vulnerabilities between two refs (base/head) and output a Markdown table, JSON diff, and upload artifacts"
+name: "Vulnerability Diff Action"
+description: "Compare vulnerabilities between two refs using Syft+Grype (enhanced HTML/PDF reporting, PR comment, Slack)"
 author: "sec-open"
-runs:
-  using: "node20"
-  main: "dist/index.js"
+branding:
+  color: "purple"
+  icon: "shield"
 
 inputs:
   base_ref:
-    description: "Base ref/branch/sha to compare against (e.g., main)"
+    description: "Base ref (branch, tag, or commit SHA)"
     required: true
   head_ref:
-    description: "Head ref/branch/sha to compare"
+    description: "Head ref (branch, tag, or commit SHA)"
     required: true
   path:
-    description: "Subdirectory to scan (monorepo). Default: repo root"
+    description: "Path to scan (relative to repo root)"
     required: false
     default: "."
   build_command:
-    description: "Optional build command before scanning"
+    description: "Optional build command to run in each worktree before SBOM (e.g., mvn -q -DskipTests package)"
     required: false
     default: ""
   min_severity:
-    description: "Minimum severity to report: LOW|MEDIUM|HIGH|CRITICAL (inclusive)"
+    description: "Minimum severity to include (LOW, MEDIUM, HIGH, CRITICAL)"
     required: false
     default: "LOW"
   write_summary:
-    description: "Write Markdown table to GITHUB_STEP_SUMMARY"
+    description: "Write GitHub job summary"
     required: false
     default: "true"
   upload_artifact:
-    description: "Upload SBOMs, grype outputs and a full report as artifact"
+    description: "Upload artifacts (SBOMs, scans, diff, reports)"
     required: false
     default: "true"
   artifact_name:
@@ -37,56 +37,48 @@ inputs:
     required: false
     default: "vuln-diff-artifacts"
   graph_max_nodes:
-    description: "Max nodes to include in the Mermaid dependency graph"
+    description: "Max nodes for dependency graphs"
     required: false
     default: "150"
-  report_pdf:
-    description: "Also render report.pdf using Puppeteer, default true"
+
+  # Reporting v2 options
+  report_html:
+    description: "Generate HTML report (besides PDF)"
     required: false
     default: "true"
-  setup_script:
-    description: "Shell script to run inside each worktree (BASE and HEAD) before build/SBOM"
+  report_pdf:
+    description: "Generate PDF report"
+    required: false
+    default: "true"
+  title_logo_url:
+    description: "Optional logo URL for report cover"
     required: false
     default: ""
+
+  # PR comment
   pr_comment:
-    description: "Post/Update a reusable PR comment with NEW vulnerabilities"
+    description: "Upsert a reusable PR comment"
     required: false
     default: "false"
   pr_comment_marker:
-    description: "Hidden marker used to find the existing reusable comment"
+    description: "Hidden marker used to find/update the PR comment"
     required: false
     default: "<!-- vuln-diff-action:comment -->"
   github_token:
-    description: "GitHub token with permission to write PR comments (defaults to GITHUB_TOKEN)"
+    description: "GitHub token (required for PR comment)"
     required: false
     default: ""
+
+  # Slack
   slack_webhook_url:
-    description: "Slack Incoming Webhook URL (if set, notify on NEW vulns)"
+    description: "Slack Incoming Webhook URL (secret)"
     required: false
     default: ""
   slack_channel:
-    description: "Slack channel override (optional, default from webhook config)"
+    description: "Optional Slack channel override (may be ignored by your webhook)"
     required: false
     default: ""
 
-
-
-outputs:
-  new_count:
-    description: "Number of NEW vulnerabilities introduced by head over base"
-  removed_count:
-    description: "Number of vulnerabilities REMOVED by head vs base"
-  unchanged_count:
-    description: "Number of unchanged vulnerabilities"
-  diff_markdown_table:
-    description: "Markdown table with Severity | VulnerabilityID | package:version | branches"
-  diff_json:
-    description: "JSON diff payload"
-  base_sha:
-    description: "Resolved base commit SHA"
-  head_sha:
-    description: "Resolved head commit SHA"
-  base_input:
-    description: "Raw base input ref"
-  head_input:
-    description: "Raw head input ref"
+runs:
+  using: "node20"
+  main: "dist/index.js"
