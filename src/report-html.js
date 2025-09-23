@@ -1,16 +1,16 @@
-// Build HTML for portrait (main) and landscape (graphs/paths) reports.
-// - Cover with optional logo
-// - TOC
-// - Introduction + Summary
-// - Severity distribution (BASE vs HEAD) side-by-side pies (SVG)
-// - Diff table (Markdown rendered as HTML)
-// - Landscape: dependency graph BASE, dependency graph HEAD, dependency paths BASE, dependency paths HEAD.
-//
-// NOTE: We keep CSS minimal and inline for portability (Puppeteer PDF).
+// src/report-html.js
+// Builds the HTML used for the portrait (main) report and the landscape appendix.
+// Robust against missing/odd data. No external network needed beyond images you pass by URL.
 
-// --- helpers for severity distribution (robust) ---
 const SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
 
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// -------------------- Severity helpers (robust) --------------------
 function toSeverity(value) {
   const s = String(value || "UNKNOWN").toUpperCase();
   return SEVERITY_ORDER.includes(s) ? s : "UNKNOWN";
@@ -19,12 +19,11 @@ function toSeverity(value) {
 function countSeverities(matches) {
   const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
   for (const m of (matches || [])) {
-    // Grype JSON: try vulnerability.severity, fallback to m.severity
-    const sev = toSeverity(
+    const sev =
       (m && m.vulnerability && m.vulnerability.severity) ||
-      (m && m.severity)
-    );
-    counts[sev] += 1;
+      (m && m.severity) ||
+      "UNKNOWN";
+    counts[toSeverity(sev)] += 1;
   }
   return counts;
 }
@@ -33,7 +32,7 @@ function renderCountsTable(title, counts) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   return `
   <div class="severity-box">
-    <h3>${title}</h3>
+    <h3>${esc(title)}</h3>
     <table class="sev-table">
       <thead><tr><th>Severity</th><th>Count</th><th>%</th></tr></thead>
       <tbody>
@@ -48,160 +47,9 @@ function renderCountsTable(title, counts) {
   </div>`;
 }
 
-
-
-const { svgPie } = require("./svg-charts");
-const marked = (md) => {
-  // Tiny Markdown to HTML converter (very limited) to render our tables safely.
-  // If you already use a proper renderer, replace this function accordingly.
-  // Here we only handle code fences and tables minimally.
-  return String(md || "")
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") // escape
-    .replace(/^\|([\s\S]+?)\|\s*$/gm, (m) => {
-      // naive table rows: | a | b |
-      const cells = m.trim().slice(1, -1).split("|").map(c => c.trim());
-      return `<tr>${cells.map(c => `<td>${c}</td>`).join("")}</tr>`;
-    })
-    .replace(/```([\s\S]*?)```/g, (_m, code) => `<pre><code>${code}</code></pre>`)
-    .replace(/^### (.+)$/gm, "<h3>$1</h3>")
-    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
-    .replace(/^# (.+)$/gm, "<h1>$1</h1>")
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/\n/g, "<br/>")
-    ;
-};
-
-function severityBuckets(matches) {
-  const b = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
-  for (const m of matches || []) {
-    const s = (m.severity || m.vulnerability?.severity || "LOW").toUpperCase();
-    if (b[s] == null) b.LOW++; else b[s]++;
-  }
-  return b;
-}
-
-function cssBase() {
-  return `
-  <style>
-    :root {
-      --fg: #222;
-      --muted: #666;
-      --sep: #e5e7eb;
-      --accent: #6b46c1;
-    }
-    html, body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: var(--fg); }
-    h1,h2,h3 { margin: 0.2rem 0 0.6rem }
-    h1 { font-size: 1.8rem; }
-    h2 { font-size: 1.4rem; border-bottom: 1px solid var(--sep); padding-bottom: .3rem; }
-    h3 { font-size: 1.1rem; }
-    p, li { line-height: 1.5; }
-    .muted { color: var(--muted); }
-    .grid { display: grid; gap: 16px; }
-    .two { grid-template-columns: repeat(2, minmax(0,1fr)); }
-    .toc { font-size: .95rem; line-height: 1.4; }
-    .card { border: 1px solid var(--sep); border-radius: 8px; padding: 12px; }
-    .kv { margin: 4px 0; }
-    .kv b { display: inline-block; width: 100px; }
-    .page-break { page-break-before: always; }
-    table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12px; }
-    td, th { border: 1px solid var(--sep); padding: 6px 8px; vertical-align: top; }
-    th { background: #f9fafb; text-align: left; }
-    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-    .cover { display:flex; flex-direction:column; align-items:center; justify-content:center; height: 80vh; text-align:center; }
-    .cover .logo { margin-bottom: 16px; }
-    .meta { margin-top: 6px; color: var(--muted); font-size: 0.95rem; }
-    .severity-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .severity-box { border: 1px solid #eee; padding: 12px; border-radius: 8px; }
-    .sev-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .sev-table th, .sev-table td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
-    .sev-table thead th { background: #f6f8fa; }
-    .sev-table tfoot td { font-weight: 600; }
-  </style>
-  `;
-}
-
-function coverHtml({ repository, baseLabel, headLabel, nowStr, title_logo_url }) {
-  const logo = title_logo_url
-    ? `<img class="logo" src="${title_logo_url}" alt="logo" width="96" height="96"/>`
-    : "";
-  return `
-  <section class="cover">
-    ${logo}
-    <h1>Security Report</h1>
-    <div class="meta">${repository}</div>
-    <div class="meta">Comparison of branches <strong>${baseLabel}</strong> vs <strong>${headLabel}</strong></div>
-    <div class="meta">${nowStr}</div>
-  </section>
-  `;
-}
-
-function tocHtml() {
-  return `
-  <section>
-    <h2>Table of Contents</h2>
-    <div class="toc">
-      <ol>
-        <li>Introduction</li>
-        <li>Summary</li>
-        <li>Severity distribution</li>
-        <li>Vulnerability diff table</li>
-      </ol>
-    </div>
-  </section>
-  `;
-}
-
-function introHtml() {
-  return `
-  <section class="page-break">
-    <h2>Introduction</h2>
-    <p>
-      This report compares software vulnerabilities between two branches to
-      detect issues that are introduced or fixed in a development cycle.
-      It uses <strong>Syft</strong> to generate SBOMs (CycloneDX) and
-      <strong>Grype</strong> to scan them for known vulnerabilities (CVEs/GHSAs).
-    </p>
-    <p>
-      Sections include: a summary with commit details and metrics, severity distributions
-      for both branches, a detailed vulnerability diff table, and (in the landscape report)
-      dependency graphs and dependency paths to understand transitive risk.
-    </p>
-  </section>
-  `;
-}
-
-function summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel, headInput, headSha, headCommitLine, minSeverity, counts }) {
-  return `
-  <section class="page-break">
-    <h2>Summary</h2>
-    <div class="grid two">
-      <div class="card">
-        <h3>Base</h3>
-        <div class="kv"><b>Branch</b> <code>${baseLabel}</code> (input: <code>${baseInput}</code>)</div>
-        <div class="kv"><b>Commit</b> <code>${baseSha}</code></div>
-        <div class="kv"><b>Message</b> ${baseCommitLine}</div>
-      </div>
-      <div class="card">
-        <h3>Head</h3>
-        <div class="kv"><b>Branch</b> <code>${headLabel}</code> (input: <code>${headInput}</code>)</div>
-        <div class="kv"><b>Commit</b> <code>${headSha}</code></div>
-        <div class="kv"><b>Message</b> ${headCommitLine}</div>
-      </div>
-    </div>
-    <div class="card" style="margin-top:12px">
-      <div class="kv"><b>Min severity</b> ${minSeverity}</div>
-      <div class="kv"><b>Counts</b> NEW=${counts.new} · REMOVED=${counts.removed} · UNCHANGED=${counts.unchanged}</div>
-    </div>
-  </section>
-  `;
-}
-
-// Robust severity section: never calls unknown functions; accepts arrays safely
 function severitySectionHtml({ baseMatches = [], headMatches = [], baseLabel = "BASE", headLabel = "HEAD" } = {}) {
   const baseCounts = countSeverities(baseMatches);
   const headCounts = countSeverities(headMatches);
-
   return `
   <section class="section">
     <h2>Severity distribution</h2>
@@ -212,80 +60,230 @@ function severitySectionHtml({ baseMatches = [], headMatches = [], baseLabel = "
   </section>`;
 }
 
+// -------------------- Small helpers --------------------
+function sectionTitle(title) {
+  return `<section class="section"><h2>${esc(title)}</h2>`;
+}
+function sectionEnd() { return `</section>`; }
 
-function diffTableSectionHtml({ diffTableMarkdown }) {
-  // Start on a new page and inject the Markdown diff table
+function twoCol(labelLeft, valueLeft, labelRight, valueRight) {
   return `
-  <section class="page-break">
+  <div class="two-col">
+    <div><div class="muted">${esc(labelLeft)}</div><div>${esc(valueLeft)}</div></div>
+    <div><div class="muted">${esc(labelRight)}</div><div>${esc(valueRight)}</div></div>
+  </div>`;
+}
+
+function keyValue(label, valueHtml) {
+  return `<div class="kv"><span class="k">${esc(label)}:</span> <span class="v">${valueHtml}</span></div>`;
+}
+
+function cssBase() {
+  return `
+  <style>
+    :root { --fg: #24292f; --muted: #57606a; --border: #d0d7de; --bg: #ffffff; --subtle: #f6f8fa; }
+    * { box-sizing: border-box; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, Helvetica, "Apple Color Emoji", "Segoe UI Emoji"; color: var(--fg); background: var(--bg); margin: 0; }
+    .page { padding: 24px 20px; }
+    h1 { font-size: 28px; margin: 8px 0 4px; }
+    h2 { font-size: 20px; margin: 18px 0 10px; }
+    h3 { font-size: 16px; margin: 12px 0 8px; }
+    .muted { color: var(--muted); }
+    .section { margin: 18px 0; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .kv { margin: 4px 0; }
+    .kv .k { color: var(--muted); margin-right: 6px; }
+    .panel { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: #fff; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .severity-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .severity-box { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: #fff; }
+    .sev-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .sev-table th, .sev-table td { border: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; }
+    .sev-table thead th { background: var(--subtle); }
+    .sev-table tfoot td { font-weight: 600; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    .toc ul { margin: 0 0 0 18px; padding: 0; }
+    .toc li { margin: 4px 0; }
+    .hr { height: 1px; background: var(--border); margin: 12px 0; }
+    .md { font-size: 13px; }
+    pre { background: var(--subtle); padding: 10px; border-radius: 6px; overflow: auto; }
+    .center { text-align: center; }
+    .small { font-size: 12px; }
+    .logo { width: 96px; height: 96px; object-fit: contain; }
+  </style>`;
+}
+
+function coverHtml({ titleLogoUrl, repo, baseLabel, headLabel, nowStr }) {
+  return `
+  <div class="page center">
+    ${titleLogoUrl ? `<img class="logo" src="${esc(titleLogoUrl)}" alt="logo" />` : ""}
+    <h1>Security Report</h1>
+    <div class="muted">${esc(repo)}</div>
+    <div class="hr"></div>
+    <div class="mono">Comparison of branches ${esc(baseLabel)} vs ${esc(headLabel)}</div>
+    <div style="height: 30vh;"></div>
+    <div class="muted small">${esc(nowStr)}</div>
+  </div>`;
+}
+
+function tocHtml() {
+  return `
+  <div class="page">
+    <h2>Table of contents</h2>
+    <div class="toc">
+      <ul>
+        <li>Introduction</li>
+        <li>Summary</li>
+        <li>Severity distribution</li>
+        <li>Vulnerability diff table</li>
+        <li>Dependency graph base</li>
+        <li>Dependency graph head</li>
+        <li>Dependency path base</li>
+        <li>Dependency path head</li>
+      </ul>
+    </div>
+  </div>`;
+}
+
+function introductionHtml() {
+  return `
+  <div class="page">
+    <h2>Introduction</h2>
+    <p>
+      This report compares the software vulnerabilities found between two code references (branches or commits).
+      Its goal is to highlight newly introduced vulnerabilities and those removed by changes.
+    </p>
+    <p>
+      Tools used:
+      <ul>
+        <li><b>CycloneDX Maven plugin</b> – Generates a precise SBOM (Software Bill of Materials) for Java multi-module builds.</li>
+        <li><b>Syft</b> – Generates SBOMs for non-Maven or general directories (fallback when no <code>pom.xml</code>).</li>
+        <li><b>Grype</b> – Scans the SBOM and produces a list of vulnerabilities with severity.</li>
+        <li><b>Puppeteer</b> – Renders this report to PDF.</li>
+      </ul>
+    </p>
+  </div>`;
+}
+
+function summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel, headInput, headSha, headCommitLine, minSeverity, counts }) {
+  return `
+  <div class="page">
+    <h2>Summary</h2>
+    ${twoCol("Base", `${esc(baseLabel)} (input: ${esc(baseInput)}) → <span class="mono">${esc(baseSha.slice(0,12))}</span>`,
+             "Head", `${esc(headLabel)} (input: ${esc(headInput)}) → <span class="mono">${esc(headSha.slice(0,12))}</span>`)}
+    <div class="panel" style="margin-top:12px;">
+      ${keyValue("Base commit", `<span class="mono">${esc(baseCommitLine)}</span>`)}
+      ${keyValue("Head commit", `<span class="mono">${esc(headCommitLine)}</span>`)}
+      ${keyValue("Minimum severity", `<b>${esc(minSeverity)}</b>`)}
+      ${keyValue("Counts", `NEW=${counts.new} · REMOVED=${counts.removed} · UNCHANGED=${counts.unchanged}`)}
+    </div>
+  </div>`;
+}
+
+function diffTableSection(diffTableMarkdown) {
+  // Render Markdown as <pre> for simplicity here; your pipeline already provides a formatted table.
+  return `
+  <div class="page">
     <h2>Vulnerability diff table</h2>
-    ${marked(diffTableMarkdown)}
-  </section>
-  `;
+    <div class="md"><pre>${esc(diffTableMarkdown)}</pre></div>
+  </div>`;
 }
 
-function landscapeGraphsHtml({ baseLabel, headLabel, mermaidBase, mermaidHead, pathsBaseMd, pathsHeadMd }) {
-  // Mermaid render via script (works in headless Chromium)
+function mermaidSection(title, mermaidCode) {
+  // We inline the mermaid code for reference (PDF won’t execute JS). If later you want image rendering, we can prerender SVG.
   return `
-  <html>
-    <head>
-      ${cssBase()}
-      <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-      <script>mermaid.initialize({ startOnLoad: true, securityLevel: 'loose' });</script>
-    </head>
-    <body>
-      <section>
-        <h2>Dependency graph — BASE: ${baseLabel}</h2>
-        <div class="mermaid">${mermaidBase}</div>
-      </section>
-
-      <section class="page-break">
-        <h2>Dependency graph — HEAD: ${headLabel}</h2>
-        <div class="mermaid">${mermaidHead}</div>
-      </section>
-
-      <section class="page-break">
-        <h2>Dependency paths — BASE: ${baseLabel}</h2>
-        ${marked(pathsBaseMd)}
-      </section>
-
-      <section class="page-break">
-        <h2>Dependency paths — HEAD: ${headLabel}</h2>
-        ${marked(pathsHeadMd)}
-      </section>
-    </body>
-  </html>
-  `;
+  <div class="page">
+    <h2>${esc(title)}</h2>
+    <pre class="mono">${esc(mermaidCode || "// (graph omitted or too large)")}</pre>
+  </div>`;
 }
 
-function buildHtmlMain(opts) {
-  const {
-    repository, baseLabel, baseInput, baseSha, baseCommitLine,
-    headLabel, headInput, headSha, headCommitLine,
-    minSeverity, counts, diffTableMarkdown,
-    baseMatches, headMatches, nowStr, title_logo_url
-  } = opts;
-
+function dependencyPathsSection(title, pathsMarkdown) {
   return `
-  <html>
-    <head>
-      ${cssBase()}
-      <meta charset="utf-8"/>
-      <title>Security Report</title>
-    </head>
-    <body>
-      ${coverHtml({ repository, baseLabel, headLabel, nowStr, title_logo_url })}
-      ${tocHtml()}
-      ${introHtml()}
-      ${summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel, headInput, headSha, headCommitLine, minSeverity, counts })}
-      ${severitySectionHtml({baseMatches: options.baseMatches || [], headMatches: options.headMatches || [], baseLabel: options.baseLabel || "BASE", headLabel: options.headLabel || "HEAD" })}
-      ${diffTableSectionHtml({ diffTableMarkdown })}
-    </body>
-  </html>
-  `;
+  <div class="page">
+    <h2>${esc(title)}</h2>
+    <div class="md"><pre>${esc(pathsMarkdown || "(no data)")}</pre></div>
+  </div>`;
 }
 
-function buildHtmlLandscape(opts) {
-  return landscapeGraphsHtml(opts);
+// -------------------- Build main (portrait) HTML --------------------
+function buildHtmlMain(options) {
+  options = options || {};
+  const repo            = options.repository || "";
+  const baseLabel       = options.baseLabel || "BASE";
+  const baseInput       = options.baseInput || "";
+  const baseSha         = options.baseSha || "";
+  const baseCommitLine  = options.baseCommitLine || "";
+  const headLabel       = options.headLabel || "HEAD";
+  const headInput       = options.headInput || "";
+  const headSha         = options.headSha || "";
+  const headCommitLine  = options.headCommitLine || "";
+  const minSeverity     = options.minSeverity || "LOW";
+  const counts          = options.counts || { new: 0, removed: 0, unchanged: 0 };
+  const diffTableMd     = options.diffTableMarkdown || "";
+  const baseMatches     = options.baseMatches || [];
+  const headMatches     = options.headMatches || [];
+  const nowStr          = options.nowStr || "";
+  const titleLogoUrl    = options.title_logo_url || "";
+  const disableSeverity = !!options.disableSeveritySection;
+
+  let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Security Report</title>${cssBase()}</head><body>`;
+
+  // Cover
+  html += coverHtml({ titleLogoUrl, repo, baseLabel, headLabel, nowStr });
+
+  // TOC
+  html += tocHtml();
+
+  // Introduction
+  html += introductionHtml();
+
+  // Summary
+  html += summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel, headInput, headSha, headCommitLine, minSeverity, counts });
+
+  // Severity distribution
+  if (!disableSeverity) {
+    html += `<div class="page">` +
+              severitySectionHtml({ baseMatches, headMatches, baseLabel, headLabel }) +
+            `</div>`;
+  }
+
+  // Diff table
+  html += diffTableSection(diffTableMd);
+
+  html += `</body></html>`;
+  return html;
 }
 
-module.exports = { buildHtmlMain, buildHtmlLandscape };
+// -------------------- Build landscape appendix HTML --------------------
+function buildHtmlLandscape(options) {
+  options = options || {};
+  const baseLabel   = options.baseLabel || "BASE";
+  const headLabel   = options.headLabel || "HEAD";
+  const mermaidBase = options.mermaidBase || "";
+  const mermaidHead = options.mermaidHead || "";
+  const pathsBaseMd = options.pathsBaseMd || "";
+  const pathsHeadMd = options.pathsHeadMd || "";
+
+  let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Appendix</title>${cssBase()}</head><body>`;
+
+  // Dependency graph BASE (landscape page)
+  html += mermaidSection(`Dependency graph base — ${baseLabel}`, mermaidBase);
+
+  // Dependency graph HEAD (landscape page)
+  html += mermaidSection(`Dependency graph head — ${headLabel}`, mermaidHead);
+
+  // Dependency paths BASE (landscape page)
+  html += dependencyPathsSection(`Dependency path base`, pathsBaseMd);
+
+  // Dependency paths HEAD (landscape page)
+  html += dependencyPathsSection(`Dependency path head`, pathsHeadMd);
+
+  html += `</body></html>`;
+  return html;
+}
+
+module.exports = {
+  buildHtmlMain,
+  buildHtmlLandscape
+};
