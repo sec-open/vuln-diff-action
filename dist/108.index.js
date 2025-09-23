@@ -1977,7 +1977,7 @@ const REQUIRE_DIRECTORY_ERROR = 'loading a directory of commands is not supporte
 
 let esm_dirname;
 try {
-  esm_dirname = (0,external_url_.fileURLToPath)(import.meta.url);
+  esm_dirname = (0,external_url_.fileURLToPath)(require("url").pathToFileURL(__filename).href);
 } catch (e) {
   esm_dirname = process.cwd();
 }
