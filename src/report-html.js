@@ -8,6 +8,48 @@
 //
 // NOTE: We keep CSS minimal and inline for portability (Puppeteer PDF).
 
+// --- helpers for severity distribution (robust) ---
+const SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
+
+function toSeverity(value) {
+  const s = String(value || "UNKNOWN").toUpperCase();
+  return SEVERITY_ORDER.includes(s) ? s : "UNKNOWN";
+}
+
+function countSeverities(matches) {
+  const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
+  for (const m of (matches || [])) {
+    // Grype JSON: try vulnerability.severity, fallback to m.severity
+    const sev = toSeverity(
+      (m && m.vulnerability && m.vulnerability.severity) ||
+      (m && m.severity)
+    );
+    counts[sev] += 1;
+  }
+  return counts;
+}
+
+function renderCountsTable(title, counts) {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  return `
+  <div class="severity-box">
+    <h3>${title}</h3>
+    <table class="sev-table">
+      <thead><tr><th>Severity</th><th>Count</th><th>%</th></tr></thead>
+      <tbody>
+        ${SEVERITY_ORDER.map(s => {
+          const n = counts[s] || 0;
+          const pct = total ? ((n * 100) / total).toFixed(1) : "0.0";
+          return `<tr><td>${s}</td><td>${n}</td><td>${pct}%</td></tr>`;
+        }).join("")}
+      </tbody>
+      <tfoot><tr><td>Total</td><td>${total}</td><td>100%</td></tr></tfoot>
+    </table>
+  </div>`;
+}
+
+
+
 const { svgPie } = require("./svg-charts");
 const marked = (md) => {
   // Tiny Markdown to HTML converter (very limited) to render our tables safely.
@@ -69,6 +111,12 @@ function cssBase() {
     .cover { display:flex; flex-direction:column; align-items:center; justify-content:center; height: 80vh; text-align:center; }
     .cover .logo { margin-bottom: 16px; }
     .meta { margin-top: 6px; color: var(--muted); font-size: 0.95rem; }
+    .severity-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .severity-box { border: 1px solid #eee; padding: 12px; border-radius: 8px; }
+    .sev-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .sev-table th, .sev-table td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+    .sev-table thead th { background: #f6f8fa; }
+    .sev-table tfoot td { font-weight: 600; }
   </style>
   `;
 }
@@ -149,20 +197,21 @@ function summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel,
   `;
 }
 
-function severitySectionHtml({ baseLabel, headLabel, baseMatches, headMatches }) {
-  const colors = { CRITICAL: "#c62828", HIGH: "#ef6c00", MEDIUM: "#fbc02d", LOW: "#2e7d32" };
-  const basePie = svgPie({ data: severityBuckets(baseMatches), colors, label: `Base: ${baseLabel}` });
-  const headPie = svgPie({ data: severityBuckets(headMatches), colors, label: `Head: ${headLabel}` });
+// Robust severity section: never calls unknown functions; accepts arrays safely
+function severitySectionHtml({ baseMatches = [], headMatches = [], baseLabel = "BASE", headLabel = "HEAD" } = {}) {
+  const baseCounts = countSeverities(baseMatches);
+  const headCounts = countSeverities(headMatches);
+
   return `
-  <section class="page-break">
+  <section class="section">
     <h2>Severity distribution</h2>
-    <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start">
-      ${basePie}
-      ${headPie}
+    <div class="severity-grid">
+      ${renderCountsTable(`${baseLabel}`, baseCounts)}
+      ${renderCountsTable(`${headLabel}`, headCounts)}
     </div>
-  </section>
-  `;
+  </section>`;
 }
+
 
 function diffTableSectionHtml({ diffTableMarkdown }) {
   // Start on a new page and inject the Markdown diff table
@@ -228,7 +277,7 @@ function buildHtmlMain(opts) {
       ${tocHtml()}
       ${introHtml()}
       ${summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel, headInput, headSha, headCommitLine, minSeverity, counts })}
-      ${severitySectionHtml({ baseLabel, headLabel, baseMatches, headMatches })}
+      ${severitySectionHtml({baseMatches: options.baseMatches || [], headMatches: options.headMatches || [], baseLabel: options.baseLabel || "BASE", headLabel: options.headLabel || "HEAD" })}
       ${diffTableSectionHtml({ diffTableMarkdown })}
     </body>
   </html>
