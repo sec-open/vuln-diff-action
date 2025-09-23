@@ -23,7 +23,7 @@ const {
 } = require("./report");
 const { buildHtmlMain, buildHtmlLandscape } = require("./report-html");
 
-// ----------------------- utils -----------------------
+// -------------- utils -----------------------
 async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); }
 async function tryRevParse(ref) {
   let out = "";
@@ -82,6 +82,7 @@ async function ensureChromeForPuppeteer(version = "24.10.2") {
 }
 async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
   const puppeteer = require("puppeteer");
+  // Ensure managed Chrome is available; no external workflow step needed.
   await ensureChromeForPuppeteer();
   const browser = await puppeteer.launch({
     channel: "chrome",
@@ -120,28 +121,17 @@ async function mergePdfs(pdfPaths, outPath) {
   fs.writeFileSync(outPath, finalBytes);
 }
 
-// setup_script
-async function runSetupScriptIfAny(setupScript, role, dir, envExtras) {
-  if (!setupScript || !setupScript.trim()) return;
-  await sh(setupScript, {
-    cwd: dir,
-    env: { ...process.env, ...envExtras, WORKTREE_ROLE: role, WORKTREE_DIR: dir }
-  });
-}
-
-// PR comment helpers
-async function upsertPrComment({ token, owner, repo, prNumber, marker, body }) {
-  const octokit = github.getOctokit(token);
-  const { data: comments } = await octokit.rest.issues.listComments({
-    owner, repo, issue_number: prNumber, per_page: 100,
-  });
-  const existing = comments.find(c => (c.body || "").includes(marker));
+// PR comment utils
+async function upsertPrComment(octokit, { owner, repo, issue_number, marker, body }) {
+  const { data: comments } = await octokit.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+  const existing = comments.find(c => typeof c.body === "string" && c.body.includes(marker));
+  const payload = { owner, repo, issue_number, body };
   if (existing) {
     await octokit.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
-    return { action: "updated", id: existing.id };
+    return { updated: true, id: existing.id };
   } else {
-    const { data: created } = await octokit.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
-    return { action: "created", id: created.id };
+    const res = await octokit.rest.issues.createComment(payload);
+    return { created: true, id: res.data.id };
   }
 }
 
@@ -231,10 +221,9 @@ async function run() {
       createdHeadWorktree = true;
     }
 
-    // Optional setup
+    // Labels
     const baseLabel = guessLabel(baseRefInput);
     const headLabel = guessLabel(headRefInput);
-    // If you need setup_script, keep it from v1; omitted here since no changes for v2.
 
     // Optional build
     if (buildCommand) {
@@ -286,51 +275,23 @@ async function run() {
     }
 
     // PR comment (reusable)
-    const ghToken = ghTokenInput || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
-    if (prCommentEnabled) {
-      const ctx = github.context;
-      const isPr = (ctx.eventName === "pull_request" || ctx.eventName === "pull_request_target") && ctx.payload?.pull_request;
-      if (!isPr) {
-        core.info("PR comment requested but this run is not a pull_request event; skipping comment.");
-      } else if (!ghToken) {
-        core.warning("PR comment requested but no github_token provided; skipping comment.");
+    if (prCommentEnabled && github.context.eventName === "pull_request") {
+      const token = ghTokenInput || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
+      if (!token) {
+        core.warning("PR comment requested but no github_token provided.");
       } else {
-        const prNumber = ctx.payload.pull_request.number;
-        const [owner, repo] = (process.env.GITHUB_REPOSITORY || "").split("/");
-        const onlyNewTable = renderMarkdownTable(d.news, [], []);
-        const maxSevOrder = ["CRITICAL","HIGH","MEDIUM","LOW","UNKNOWN"];
-        const maxSev = (arr => {
-          let idx = 999;
-          for (const s of arr) idx = Math.min(idx, maxSevOrder.indexOf((s || "UNKNOWN").toUpperCase()));
-          return maxSevOrder[Math.max(0, idx)];
-        })(d.news.map(x => x.severity));
-        const icon = d.news.length === 0 ? "✅" : (maxSev === "CRITICAL" ? "🛑" : "🚨");
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = github.context.repo;
+        const prNumber = github.context.payload.pull_request.number;
+        const siren = d.news.length > 0 ? "🚨" : "✅";
+        const body = `${prMarker}
+${siren} **${d.news.length} new vulnerabilities introduced**
+- Repo: ${repository}
+- Base: ${baseLabel} → \`${shortSha(baseSha)}\`
+- Head: ${headLabel} → \`${shortSha(headSha)}\`
 
-        const lines = [];
-        if (d.news.length > 0) {
-          lines.push(`## ${icon} New vulnerabilities introduced (${d.news.length})`);
-          lines.push("");
-        } else {
-          lines.push(`## ${icon} No new vulnerabilities introduced`);
-          lines.push("");
-        }
-        lines.push(`- **Base**: \`${baseLabel}\` → \`${shortSha(baseSha)}\``);
-        lines.push(`- **Head**: \`${headLabel}\` → \`${shortSha(headSha)}\``);
-        lines.push(`- **Minimum severity**: \`${minSeverity}\``);
-        lines.push("");
-        if (d.news.length > 0) {
-          lines.push(onlyNewTable);
-          lines.push("");
-        }
-        lines.push(`_Updated automatically by vuln-diff-action._`);
-        lines.push(prMarker);
-
-        try {
-          const res = await upsertPrComment({ token: ghToken, owner, repo, prNumber, marker: prMarker, body: lines.join("\n") });
-          core.info(`PR comment ${res.action} (id=${res.id})`);
-        } catch (e) {
-          core.warning(`Failed to upsert PR comment: ${e.message || e}`);
-        }
+${renderMarkdownTable(d.news, [], [])}`;
+        await upsertPrComment(octokit, { owner, repo, issue_number: prNumber, marker: prMarker, body });
       }
     }
 
@@ -362,48 +323,29 @@ async function run() {
         if (entry.pv) return entry.pv;
         const name = entry.pkg || entry.package || entry.packageName || entry.name || "";
         const ver  = entry.version || entry.packageVersion || entry.ver || "";
-        if (name && ver) return `${name}:${ver}`;
-        if (name) return name;
-        return entry.artifact || "unknown";
+        return ver ? `${name}:${ver}` : name;
       }
-      const LIMIT = 20;
-      const sorted = [...d.news].sort(bySeverityThenId);
-      const shown = sorted.slice(0, LIMIT);
-      const extra = d.news.length - shown.length;
-      const bullets = shown.map((e) => {
-        const id = e.vulnId || e.id;
-        const url = advisoryUrl(id, e.url);
-        const link = url ? `<${url}|${id}>` : `${id}`;
-        const pkg = pkgLabel(e);
-        const sev = (e.severity || "UNKNOWN").toUpperCase();
-        return `• ${sevIcon(sev)} *${sev}* — ${link} → \`${pkg}\``;
-      });
-      const prLink = (() => {
-        const ctx = github.context;
-        if (ctx.eventName === "pull_request" && ctx.payload?.pull_request?.html_url) return ctx.payload.pull_request.html_url;
-        if (process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY) {
-          return `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`;
-        }
-        return "";
-      })();
-      const header =
-        `*:rotating_light: ${d.news.length} new vulnerabilities introduced*\n` +
-        `• Repo: \`${repository}\`\n` +
-        `• Base: \`${baseLabel}\` → \`${shortSha(baseSha)}\`\n` +
-        `• Head: \`${headLabel}\` → \`${shortSha(headSha)}\`` +
-        (prLink ? `\n• PR: ${prLink}` : "");
-      const footer = extra > 0 ? `\n…and *${extra} more*. See the PR/artifact for details.` : "";
-      const text = [header, "", "*New Vulnerabilities:*", bullets.join("\n"), footer].filter(Boolean).join("\n");
+      const top = [...d.news].sort(bySeverityThenId).slice(0, 10);
+      const bullet = top.map(n =>
+        `• ${sevIcon(n.severity)} <${advisoryUrl(n.vulnId, n.url)}|${n.vulnId}> → ${pkgLabel(n)}`
+      ).join("\n");
+      const text = `:rotating_light: ${d.news.length} new vulnerabilities introduced
+• Repo: ${repository}
+• Base: ${baseLabel} → ${shortSha(baseSha)}
+• Head: ${headLabel} → ${shortSha(headSha)}
+${bullet}`;
+      const payload = slackChannel
+        ? { channel: slackChannel, text }
+        : { text };
       try {
-        const payload = slackChannel ? { text, channel: slackChannel } : { text };
         const res = await sendSlackMessage(slackWebhookUrl, payload);
-        core.info(`Slack notification sent (status ${res.status})`);
+        core.info(`Slack notified: status=${res.status}`);
       } catch (e) {
-        core.warning(`Failed to send Slack message: ${e.message || e}`);
+        core.warning(`Slack notification failed: ${e && e.stack ? e.stack : e}`);
       }
     }
 
-    // Markdown report (for artifact)
+    // Markdown report (artifact/debug)
     const reportMdPath = path.join(workdir, "report.md");
     fs.writeFileSync(
       reportMdPath,
@@ -420,53 +362,59 @@ async function run() {
       "utf8"
     );
 
-    // Landscape data
-    const baseBomJson = JSON.parse(fs.readFileSync(baseSbom, "utf8"));
-    const headBomJson = JSON.parse(fs.readFileSync(headSbom, "utf8"));
-    const mermaidBase = buildMermaidGraphFromBOMImproved(baseBomJson, baseScan.matches || [], graphMaxNodes);
-    const mermaidHead = buildMermaidGraphFromBOMImproved(headBomJson, headScan.matches || [], graphMaxNodes);
-    const pathsBaseMd = renderPathsMarkdownTable(
-      buildDependencyPathsTable(baseBomJson, baseScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 })
-    );
-    const pathsHeadMd = renderPathsMarkdownTable(
-      buildDependencyPathsTable(headBomJson, headScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 })
-    );
+    // ===== Reporting (HTML/PDF) guarded to avoid hard-fail =====
+    let reportHtmlMainPath = "", reportHtmlLscpPath = "", reportPdfPath = "", pdfs = [];
+    try {
+      // Landscape data
+      const baseBomJson = JSON.parse(fs.readFileSync(baseSbom, "utf8"));
+      const headBomJson = JSON.parse(fs.readFileSync(headSbom, "utf8"));
+      const mermaidBase = buildMermaidGraphFromBOMImproved(baseBomJson, baseScan.matches || [], graphMaxNodes);
+      const mermaidHead = buildMermaidGraphFromBOMImproved(headBomJson, headScan.matches || [], graphMaxNodes);
+      const pathsBaseMd = renderPathsMarkdownTable(
+        buildDependencyPathsTable(baseBomJson, baseScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 })
+      );
+      const pathsHeadMd = renderPathsMarkdownTable(
+        buildDependencyPathsTable(headBomJson, headScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 })
+      );
 
-    // HTMLs
-    const repositoryEnv = process.env.GITHUB_REPOSITORY || repository;
-    const htmlMain = buildHtmlMain({
-      repository: repositoryEnv,
-      baseLabel, baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
-      headLabel, headInput: headRefInput, headSha, headCommitLine: headCommit,
-      minSeverity,
-      counts: { new: d.news.length, removed: d.removed.length, unchanged: d.unchanged.length },
-      diffTableMarkdown: table,
-      baseMatches: baseScan.matches || [],
-      headMatches: headScan.matches || [],
-      nowStr,
-      title_logo_url: titleLogo
-    });
-    const htmlLandscape = buildHtmlLandscape({
-      baseLabel, headLabel, mermaidBase, mermaidHead, pathsBaseMd, pathsHeadMd
-    });
+      // HTMLs
+      const repositoryEnv = process.env.GITHUB_REPOSITORY || repository;
+      const htmlMain = buildHtmlMain({
+        repository: repositoryEnv,
+        baseLabel, baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
+        headLabel, headInput: headRefInput, headSha, headCommitLine: headCommit,
+        minSeverity,
+        counts: { new: d.news.length, removed: d.removed.length, unchanged: d.unchanged.length },
+        diffTableMarkdown: table,
+        baseMatches: baseScan.matches || [],
+        headMatches: headScan.matches || [],
+        nowStr,
+        title_logo_url: titleLogo
+      });
+      const htmlLandscape = buildHtmlLandscape({
+        baseLabel, headLabel, mermaidBase, mermaidHead, pathsBaseMd, pathsHeadMd
+      });
 
-    const reportHtmlMainPath = path.join(workdir, "report-main.html");
-    const reportHtmlLscpPath = path.join(workdir, "report-landscape.html");
-    fs.writeFileSync(reportHtmlMainPath, htmlMain, "utf8");
-    fs.writeFileSync(reportHtmlLscpPath, htmlLandscape, "utf8");
+      const reportHtmlMainPathLocal = path.join(workdir, "report-main.html");
+      const reportHtmlLscpPathLocal = path.join(workdir, "report-landscape.html");
+      fs.writeFileSync(reportHtmlMainPathLocal, htmlMain, "utf8");
+      fs.writeFileSync(reportHtmlLscpPathLocal, htmlLandscape, "utf8");
+      reportHtmlMainPath = reportHtmlMainPathLocal;
+      reportHtmlLscpPath = reportHtmlLscpPathLocal;
 
-    // PDFs
-    let reportPdfPath = "";
-    let pdfs = [];
-    if (reportPdf) {
-      const pdfMain = path.join(workdir, "report-main.pdf");
-      const pdfLscp = path.join(workdir, "report-landscape.pdf");
-      await renderPdfFromHtml(htmlMain, pdfMain, { landscape: false });
-      await renderPdfFromHtml(htmlLandscape, pdfLscp, { landscape: true });
-      reportPdfPath = path.join(workdir, "report.pdf");
-      await mergePdfs([pdfMain, pdfLscp], reportPdfPath);
-      pdfs = [pdfMain, pdfLscp, reportPdfPath];
-      core.info(`PDFs generated: ${pdfs.join(", ")}`);
+      // PDFs
+      if (reportPdf) {
+        const pdfMain = path.join(workdir, "report-main.pdf");
+        const pdfLscp = path.join(workdir, "report-landscape.pdf");
+        await renderPdfFromHtml(htmlMain, pdfMain, { landscape: false });
+        await renderPdfFromHtml(htmlLandscape, pdfLscp, { landscape: true });
+        reportPdfPath = path.join(workdir, "report.pdf");
+        await mergePdfs([pdfMain, pdfLscp], reportPdfPath);
+        pdfs = [pdfMain, pdfLscp, reportPdfPath];
+        core.info(`PDFs generated: ${pdfs.join(", ")}`);
+      }
+    } catch (err) {
+      core.warning(`Reporting (HTML/PDF) failed: ${err && err.stack ? err.stack : err}`);
     }
 
     // Raw data artifacts
@@ -479,13 +427,19 @@ async function run() {
 
     // Upload artifacts
     if (uploadArtifact) {
-      const client = new artifact.DefaultArtifactClient();
-      const files = [
-        reportMdPath, reportHtmlMainPath, reportHtmlLscpPath,
-        baseSbom, headSbom, grypeBasePath, grypeHeadPath, diffJsonPath,
-        ...pdfs
-      ];
-      await client.uploadArtifact(artifactName, files, workdir, { continueOnError: true, retentionDays: 90 });
+      try {
+        const client = new artifact.DefaultArtifactClient();
+        const files = [
+          reportMdPath,
+          ...(reportHtmlMainPath ? [reportHtmlMainPath] : []),
+          ...(reportHtmlLscpPath ? [reportHtmlLscpPath] : []),
+          baseSbom, headSbom, grypeBasePath, grypeHeadPath, diffJsonPath,
+          ...pdfs
+        ];
+        await client.uploadArtifact(artifactName, files, workdir, { continueOnError: true, retentionDays: 90 });
+      } catch (e) {
+        core.warning(`Artifact upload failed: ${e && e.stack ? e.stack : e}`);
+      }
     }
 
     // Cleanup
