@@ -253,7 +253,7 @@ async function run() {
     const headScan = await scanSbom(headSbom);
 
     // Diff
-    const d = diff(baseScan.matches || [], headScan.matches || [], minSeverity, baseLabel, headLabel);
+    const d = diff(baseScan.matches || [], headScan.matches || [], minSeverity);
     const table = renderMarkdownTable(d.news, d.removed, d.unchanged);
 
     // Commit lines
