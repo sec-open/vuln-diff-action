@@ -25,41 +25,130 @@ const { buildHtmlMain, buildHtmlLandscape } = require("./report-html");
 
 // -------------- utils -----------------------
 
-// ---- Minimal Markdown table -> HTML (only tables) ----
+// ---- Markdown table -> HTML (header/separator + inline **bold** and `code`) ----
 function markdownTableToHtml(md) {
   if (!md || !/\|/.test(md)) return `<div class="muted">No data</div>`;
   const lines = md.split(/\r?\n/).filter(l => l.trim().length > 0);
-  // find header line and separator
+
   const headerIdx = lines.findIndex(l => /\|/.test(l));
   if (headerIdx < 0 || headerIdx + 1 >= lines.length) return `<div class="muted">No data</div>`;
   const header = lines[headerIdx];
   const sep = lines[headerIdx + 1];
   if (!/^-{3,}|:?-{3,}:?/.test(sep.replace(/\|/g, "").trim())) {
-    // not a markdown table separator line; fallback render
     return `<pre class="md">${escapeHtml(md)}</pre>`;
   }
+
   const rows = [];
-  // header cells
-  rows.push({ type: "th", cells: header.split("|").map(c => c.trim()).filter((_,i,arr)=> !(i===0 || i===arr.length-1)) });
-  // data rows
+  const normalizeCells = (line) =>
+    line.split("|")
+        .map(c => c.trim())
+        .filter((_,i,arr)=> !(i===0 || i===arr.length-1));
+
+  const headerCells = normalizeCells(header);
+  rows.push({ type: "th", cells: headerCells });
+
   for (let i = headerIdx + 2; i < lines.length; i++) {
-    const l = lines[i];
-    if (!/\|/.test(l)) continue;
-    const cells = l.split("|").map(c => c.trim()).filter((_,i,arr)=> !(i===0 || i===arr.length-1));
-    rows.push({ type: "td", cells });
+    if (!/\|/.test(lines[i])) continue;
+    rows.push({ type: "td", cells: normalizeCells(lines[i]) });
   }
-  // build HTML
+
+  // inline formatting: **bold**, `code`
+  const inline = (txt) => {
+    if (!txt) return "";
+    let s = String(txt);
+    s = s.replace(/`([^`]+)`/g, (_,m) => `<code>${escapeHtml(m)}</code>`);
+    s = s.replace(/\*\*([^*]+)\*\*/g, (_,m) => `<strong>${escapeHtml(m)}</strong>`);
+    return s;
+  };
+
   let html = `<table class="tbl"><thead><tr>`;
-  for (const c of rows[0].cells) html += `<th>${escapeHtml(c)}</th>`;
+  for (const c of rows[0].cells) html += `<th>${inline(c)}</th>`;
   html += `</tr></thead><tbody>`;
   for (let i = 1; i < rows.length; i++) {
     html += `<tr>`;
-    for (const c of rows[i].cells) html += `<td>${escapeHtml(c)}</td>`;
+    for (const c of rows[i].cells) html += `<td>${inline(c)}</td>`;
     html += `</tr>`;
   }
   html += `</tbody></table>`;
   return html;
 }
+
+// ---- Transform dependency-paths markdown table:
+// Move Depth0 -> Module, shift Depth1..n left, strip literal 'pkg' in Module ----
+function transformDependencyPathsMarkdown(md) {
+  if (!md || !/\|/.test(md)) return md;
+
+  const lines = md.split(/\r?\n/);
+  const headerIdx = lines.findIndex(l => /\|/.test(l));
+  if (headerIdx < 0 || headerIdx + 1 >= lines.length) return md;
+
+  const cells = (line) =>
+    line.split("|").map(s => s.trim())
+      .filter((_,i,arr)=> !(i===0 || i===arr.length-1));
+
+  // read header and separator
+  const header = cells(lines[headerIdx]);
+  const sepLine = lines[headerIdx+1];
+
+  const colIdx = {
+    severity: header.findIndex(h => /^severity$/i.test(h)),
+    module:   header.findIndex(h => /^module$/i.test(h)),
+    pkg:      header.findIndex(h => /^package$/i.test(h)),
+    depth0:   header.findIndex(h => /^depth0$/i.test(h)),
+  };
+  // Build new header: Severity | Module | Package | Depth0..Depth(n-1)
+  const otherDepths = header
+    .map((h,i)=> ({h, i}))
+    .filter(x => /^depth\d+$/i.test(x.h))
+    .sort((a,b)=> parseInt(a.h.slice(5)) - parseInt(b.h.slice(5))); // by number
+
+  const newHeader = [];
+  if (colIdx.severity >= 0) newHeader.push(header[colIdx.severity]);
+  newHeader.push("Module");
+  if (colIdx.pkg >= 0) newHeader.push(header[colIdx.pkg]);
+  // take Depth1..DepthN -> become Depth0..Depth(N-1)
+  for (const d of otherDepths) {
+    const n = parseInt(d.h.slice(5),10);
+    if (!isNaN(n) && n >= 1) newHeader.push(`Depth${n-1}`);
+  }
+
+  const out = [];
+  // header
+  out.push("| " + newHeader.join(" | ") + " |");
+  // separator
+  out.push("| " + newHeader.map(()=> "---").join(" | ") + " |");
+
+  // data rows
+  for (let i = headerIdx + 2; i < lines.length; i++) {
+    if (!/\|/.test(lines[i])) continue;
+    const row = cells(lines[i]);
+
+    const get = (idx) => (idx >= 0 && idx < row.length ? row[idx] : "");
+
+    const severity = get(colIdx.severity);
+    const moduleFromDepth0 = get(colIdx.depth0).replace(/^`?pkg`?$/i, "").trim() || get(colIdx.module).replace(/^`?pkg`?$/i, "").trim();
+    const moduleClean = moduleFromDepth0 || "";
+    const pkg = get(colIdx.pkg);
+
+    // collect Depth1..N values shifted
+    const shifted = [];
+    for (const d of otherDepths) {
+      const n = parseInt(d.h.slice(5),10);
+      if (!isNaN(n) && n >= 1) shifted.push(get(d.i));
+    }
+
+    const cellsOut = [];
+    if (colIdx.severity >= 0) cellsOut.push(severity);
+    cellsOut.push(moduleClean);
+    if (colIdx.pkg >= 0) cellsOut.push(pkg);
+    for (const s of shifted) cellsOut.push(s);
+
+    out.push("| " + cellsOut.join(" | ") + " |");
+  }
+
+  return out.join("\n");
+}
+
 function escapeHtml(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
 async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); }
@@ -162,8 +251,10 @@ async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
               datasets: [{ data: data.changes }]
             },
             options: {
-              plugins: { legend: { display: false } },
-              scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+               responsive: true,
+               maintainAspectRatio: false,
+               plugins: { legend: { display: false } },
+               scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
             }
           });
         }
@@ -484,12 +575,19 @@ ${bullet}`;
       const headBomJson = JSON.parse(fs.readFileSync(headSbom, "utf8"));
       const mermaidBase = buildMermaidGraphFromBOMImproved(baseBomJson, baseScan.matches || [], graphMaxNodes);
       const mermaidHead = buildMermaidGraphFromBOMImproved(headBomJson, headScan.matches || [], graphMaxNodes);
-      const pathsBaseMd = renderPathsMarkdownTable(
+      const pathsBaseMdRaw = renderPathsMarkdownTable(
         buildDependencyPathsTable(baseBomJson, baseScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 })
       );
-      const pathsHeadMd = renderPathsMarkdownTable(
+      const pathsHeadMdRaw = renderPathsMarkdownTable(
         buildDependencyPathsTable(headBomJson, headScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 })
       );
+
+      // transform (Depth0 -> Module, shift) + convert to HTML
+      const pathsBaseMd = transformDependencyPathsMarkdown(pathsBaseMdRaw);
+      const pathsHeadMd = transformDependencyPathsMarkdown(pathsHeadMdRaw);
+      const pathsBaseHtml = markdownTableToHtml(pathsBaseMd);
+      const pathsHeadHtml = markdownTableToHtml(pathsHeadMd);
+
 
       // HTMLs
       const htmlMain = buildHtmlMain({
@@ -505,7 +603,8 @@ ${bullet}`;
           title_logo_url: titleLogo
       });
       const htmlLandscape = buildHtmlLandscape({
-        baseLabel, headLabel, mermaidBase, mermaidHead, pathsBaseMd, pathsHeadMd
+        baseLabel, headLabel, mermaidBase, mermaidHead,  pathsBaseMd: pathsBaseHtml,
+                                                          pathsHeadMd: pathsHeadHtml
       });
 
       const reportHtmlMainPathLocal = path.join(workdir, "report-main.html");

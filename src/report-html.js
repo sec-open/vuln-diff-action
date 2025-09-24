@@ -52,17 +52,21 @@ function cssBase() {
 
     /* tables */
     table.tbl { width:100%; border-collapse: collapse; font-size: 12px; }
-    table.tbl th, table.tbl td { border:1px solid #e5e7eb; padding: 6px 8px; text-align: left; }
+    table.tbl th, table.tbl td { border:1px solid #e5e7eb; padding: 6px 8px; text-align: left; vertical-align: top; }
     table.tbl thead th { background: var(--subtle); }
-    table.tbl tfoot td { font-weight: 600; }
+    table.tbl code { background:#f1f5f9; padding:2px 6px; border-radius:6px; display:inline-block }
 
-    /* charts & grid */
+    /* charts */
     .chart-grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:16px; align-items:center }
     .chart-box{ border:1px solid var(--border); border-radius:8px; padding:12px; }
     .chart-box h3{ margin-top:0; margin-bottom:8px }
     canvas{ max-width: 320px; max-height: 320px; }
+    /* full width chart for Change overview */
+    .chart-wide-box { border:1px solid var(--border); border-radius:8px; padding:12px; }
+    #chartChanges { width:100%; height:260px; }
   </style>`;
 }
+
 
 function coverHtml({ titleLogoUrl, repo, baseLabel, headLabel, nowStr }) {
   return `
@@ -166,15 +170,23 @@ function severityChartsHtml({ baseLabel, headLabel }) {
 }
 
 // NEW/REMOVED/UNCHANGED bar chart
-function changesOverviewHtml() {
+function changesOverviewHtml({ baseLabel, headLabel, counts }) {
+  const n1 = counts?.new ?? 0;
+  const n2 = counts?.removed ?? 0;
+  const n3 = counts?.unchanged ?? 0;
   return `
   <div class="page">
     <h2>Change overview</h2>
-    <div class="chart-box">
+    <p>
+      During the development on <b>${esc(headLabel)}</b>, <b>${n1}</b> new vulnerabilities were introduced,
+      <b>${n2}</b> vulnerabilities were fixed, and <b>${n3}</b> remained unchanged compared to <b>${esc(baseLabel)}</b>.
+    </p>
+    <div class="chart-wide-box">
       <canvas id="chartChanges"></canvas>
     </div>
   </div>`;
 }
+
 
 // Diff table as HTML (no markdown)
 function diffTableSectionHtml(diffTableHtml) {
@@ -245,7 +257,7 @@ function buildHtmlMain(options) {
   ${introductionHtml({ baseLabel, headLabel })}
   ${summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel, headInput, headSha, headCommitLine, minSeverity, counts })}
   ${severityChartsHtml({ baseLabel, headLabel })}
-  ${changesOverviewHtml()}
+  ${changesOverviewHtml({ baseLabel, headLabel, counts })}
   ${diffTableSectionHtml(diffTableHtml)}
 
   <!-- Chart datasets; rendering happens in Puppeteer via page.addScriptTag(...) -->
