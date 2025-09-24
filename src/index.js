@@ -24,6 +24,44 @@ const {
 const { buildHtmlMain, buildHtmlLandscape } = require("./report-html");
 
 // -------------- utils -----------------------
+
+// ---- Minimal Markdown table -> HTML (only tables) ----
+function markdownTableToHtml(md) {
+  if (!md || !/\|/.test(md)) return `<div class="muted">No data</div>`;
+  const lines = md.split(/\r?\n/).filter(l => l.trim().length > 0);
+  // find header line and separator
+  const headerIdx = lines.findIndex(l => /\|/.test(l));
+  if (headerIdx < 0 || headerIdx + 1 >= lines.length) return `<div class="muted">No data</div>`;
+  const header = lines[headerIdx];
+  const sep = lines[headerIdx + 1];
+  if (!/^-{3,}|:?-{3,}:?/.test(sep.replace(/\|/g, "").trim())) {
+    // not a markdown table separator line; fallback render
+    return `<pre class="md">${escapeHtml(md)}</pre>`;
+  }
+  const rows = [];
+  // header cells
+  rows.push({ type: "th", cells: header.split("|").map(c => c.trim()).filter((_,i,arr)=> !(i===0 || i===arr.length-1)) });
+  // data rows
+  for (let i = headerIdx + 2; i < lines.length; i++) {
+    const l = lines[i];
+    if (!/\|/.test(l)) continue;
+    const cells = l.split("|").map(c => c.trim()).filter((_,i,arr)=> !(i===0 || i===arr.length-1));
+    rows.push({ type: "td", cells });
+  }
+  // build HTML
+  let html = `<table class="tbl"><thead><tr>`;
+  for (const c of rows[0].cells) html += `<th>${escapeHtml(c)}</th>`;
+  html += `</tr></thead><tbody>`;
+  for (let i = 1; i < rows.length; i++) {
+    html += `<tr>`;
+    for (const c of rows[i].cells) html += `<td>${escapeHtml(c)}</td>`;
+    html += `</tr>`;
+  }
+  html += `</tbody></table>`;
+  return html;
+}
+function escapeHtml(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
 async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); }
 async function tryRevParse(ref) {
   let out = "";
@@ -96,12 +134,13 @@ async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
     // Detect if this is main (with chart placeholders) or landscape (mermaid)
     const hasBaseCanvas = await page.$("#chartBase");
     if (hasBaseCanvas) {
-      // Load Chart.js and render donuts
+      // Load Chart.js and render donuts + changes bar
       await page.addScriptTag({ url: "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" });
       await page.evaluate(() => {
         const elBase = document.getElementById("chartBase");
         const elHead = document.getElementById("chartHead");
-        const data = window.__vulnChartData || { labels:[], base:[], head:[] };
+        const elChanges = document.getElementById("chartChanges");
+        const data = window.__vulnChartData || { labels:[], base:[], head:[], changes:[0,0,0] };
         const colors = ["#b91c1c","#ea580c","#ca8a04","#16a34a","#6b7280"]; // CRIT,HIGH,MED,LOW,UNK
 
         function doughnut(ctx, values){
@@ -111,8 +150,23 @@ async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
             options: { plugins:{ legend:{ position:"bottom" } }, cutout: "60%" }
           });
         }
-        doughnut(elBase.getContext("2d"), data.base);
-        doughnut(elHead.getContext("2d"), data.head);
+        if (elBase && elHead) {
+          doughnut(elBase.getContext("2d"), data.base);
+          doughnut(elHead.getContext("2d"), data.head);
+        }
+        if (elChanges) {
+          new window.Chart(elChanges.getContext("2d"), {
+            type: "bar",
+            data: {
+              labels: ["NEW","REMOVED","UNCHANGED"],
+              datasets: [{ data: data.changes }]
+            },
+            options: {
+              plugins: { legend: { display: false } },
+              scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+            }
+          });
+        }
       });
     } else {
       // Landscape: render Mermaid blocks to SVG (if any)
@@ -293,8 +347,7 @@ async function run() {
     const baseScan = await scanSbom(baseSbom);
     const headScan = await scanSbom(headSbom);
 
-    // Diff and Markdown table
-    // Pass baseLabel and headLabel so that the table shows real branch names (e.g. develop, TASK-7908)
+    // Diff and Markdown table (pass real branch labels)
     const d = diff(
       baseScan.matches || [],
       headScan.matches || [],
@@ -303,8 +356,8 @@ async function run() {
       headLabel
     );
 
-    const table = renderMarkdownTable(d.news, d.removed, d.unchanged);
-
+    const diffMarkdown = renderMarkdownTable(d.news, d.removed, d.unchanged);
+    const diffHtml = markdownTableToHtml(diffMarkdown);
 
     // Commit lines
     const baseCommit = await commitLine(baseSha);
@@ -314,7 +367,7 @@ async function run() {
     core.setOutput("new_count", String(d.news.length));
     core.setOutput("removed_count", String(d.removed.length));
     core.setOutput("unchanged_count", String(d.unchanged.length));
-    core.setOutput("diff_markdown_table", table);
+    core.setOutput("diff_markdown_table", diffMarkdown);
     core.setOutput("diff_json", JSON.stringify(d));
     core.setOutput("base_sha", baseSha);
     core.setOutput("head_sha", headSha);
@@ -331,7 +384,7 @@ async function run() {
       summary.push(`  - ${headCommit}`);
       summary.push(`- **Min severity**: \`${minSeverity}\``);
       summary.push(`- **Counts**: NEW=${d.news.length} · REMOVED=${d.removed.length} · UNCHANGED=${d.unchanged.length}\n`);
-      summary.push(table);
+      summary.push(diffMarkdown);
       await core.summary.addRaw(summary.join("\n")).write();
     }
 
@@ -415,7 +468,7 @@ ${bullet}`;
         headLabel, headInput: headRefInput, headSha, headCommitLine: headCommit,
         minSeverity,
         counts: { new: d.news.length, removed: d.removed.length, unchanged: d.unchanged.length },
-        table,
+        table: diffMarkdown,
         headGrype: headScan,
         headBOM: JSON.parse(fs.readFileSync(headSbom, "utf8")),
         graphMaxNodes
@@ -439,18 +492,17 @@ ${bullet}`;
       );
 
       // HTMLs
-      const repositoryEnv = process.env.GITHUB_REPOSITORY || repository;
       const htmlMain = buildHtmlMain({
-        repository: repositoryEnv,
-        baseLabel, baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
-        headLabel, headInput: headRefInput, headSha, headCommitLine: headCommit,
-        minSeverity,
-        counts: { new: d.news.length, removed: d.removed.length, unchanged: d.unchanged.length },
-        diffTableMarkdown: table,
-        baseMatches: baseScan.matches || [],
-        headMatches: headScan.matches || [],
-        nowStr,
-        title_logo_url: titleLogo
+          repository: repository,
+          baseLabel, baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
+          headLabel, headInput: headRefInput, headSha, headCommitLine: headCommit,
+          minSeverity,
+          counts: { new: d.news.length, removed: d.removed.length, unchanged: d.unchanged.length },
+          diffTableHtml: diffHtml,                    // << now HTML table
+          baseMatches: baseScan.matches || [],
+          headMatches: headScan.matches || [],
+          nowStr,
+          title_logo_url: titleLogo
       });
       const htmlLandscape = buildHtmlLandscape({
         baseLabel, headLabel, mermaidBase, mermaidHead, pathsBaseMd, pathsHeadMd

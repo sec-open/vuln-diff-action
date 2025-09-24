@@ -1,4 +1,12 @@
-// src/report-html.js (v1-style layout with v2 cover/TOC/summary enhancements)
+// src/report-html.js
+// v2 report HTML with v1 layout principles + improvements:
+// - One page per section
+// - Intro mentions branch names
+// - Summary in single column with Commit (short), Commit Id (full) and Message separated
+// - Severity donuts (rendered via Chart.js in Puppeteer)
+// - New "Change overview" bar chart (NEW/REMOVED/UNCHANGED)
+// - Diff table expects HTML (not markdown) for proper rendering
+// - Landscape appendix (mermaid graphs + dependency paths)
 
 const SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
 
@@ -39,15 +47,20 @@ function cssBase() {
     .hr{ height:1px; background:var(--border); margin:12px 0 }
     .small{ font-size:12px }
     .logo{ width:96px; height:96px; object-fit:contain }
-    .two-col{ display:grid; grid-template-columns: 1fr 1fr; gap: 12px }
     .panel{ border:1px solid var(--border); border-radius:8px; padding:12px; background:#fff }
     .md pre{ background:var(--subtle); padding:10px; border-radius:6px; overflow:auto; font-size:12px }
-    /* charts */
-    .chart-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:16px; align-items:center }
+
+    /* tables */
+    table.tbl { width:100%; border-collapse: collapse; font-size: 12px; }
+    table.tbl th, table.tbl td { border:1px solid #e5e7eb; padding: 6px 8px; text-align: left; }
+    table.tbl thead th { background: var(--subtle); }
+    table.tbl tfoot td { font-weight: 600; }
+
+    /* charts & grid */
+    .chart-grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:16px; align-items:center }
     .chart-box{ border:1px solid var(--border); border-radius:8px; padding:12px; }
     .chart-box h3{ margin-top:0; margin-bottom:8px }
     canvas{ max-width: 320px; max-height: 320px; }
-    /* landscape appendix still uses normal pages; Puppeteeer will render landscape for that HTML */
   </style>`;
 }
 
@@ -72,6 +85,7 @@ function tocHtml() {
       <li>Introduction</li>
       <li>Summary</li>
       <li>Severity distribution</li>
+      <li>Change overview</li>
       <li>Vulnerability diff table</li>
       <li>Dependency graph base</li>
       <li>Dependency graph head</li>
@@ -81,42 +95,51 @@ function tocHtml() {
   </div>`;
 }
 
-function introductionHtml() {
+function introductionHtml({ baseLabel, headLabel }) {
   return `
   <div class="page">
     <h2>Introduction</h2>
-    <p>This report compares security vulnerabilities between two Git references (base and head).
-       The goal is to detect vulnerabilities that are introduced and/or fixed between development branches.</p>
+    <p>
+      This report compares security vulnerabilities between <b>${esc(baseLabel)}</b> (base) and
+      <b>${esc(headLabel)}</b> (head). The goal is to detect vulnerabilities that are introduced and/or fixed
+      between development branches.
+    </p>
     <p>Tools used:</p>
     <ul>
       <li><b>CycloneDX Maven plugin</b> – Accurate SBOM for Java multi-module builds.</li>
       <li><b>Syft</b> – SBOM fallback for non-Maven directories.</li>
       <li><b>Grype</b> – Vulnerability scanning of the SBOM.</li>
-      <li><b>Chart.js</b> – Severity distribution charts.</li>
+      <li><b>Chart.js</b> – Severity and changes charts.</li>
       <li><b>Mermaid</b> – Dependency graphs (landscape pages).</li>
       <li><b>Puppeteer</b> – PDF export.</li>
     </ul>
   </div>`;
 }
 
+// Single-column summary as requested
 function summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel, headInput, headSha, headCommitLine, minSeverity, counts }) {
+  const baseShort = (baseSha || "").slice(0,12);
+  const headShort = (headSha || "").slice(0,12);
   return `
   <div class="page">
     <h2>Summary</h2>
-    <div class="two-col">
-      <div>
-        <h3>Base</h3>
-        <div><b>Name:</b> ${esc(baseLabel)} (input: ${esc(baseInput)})</div>
-        <div><b>Commit:</b> <span class="mono">${esc((baseSha||"").slice(0,12))}</span></div>
-        <div><b>Message:</b> <span class="mono">${esc(baseCommitLine)}</span></div>
-      </div>
-      <div>
-        <h3>Head</h3>
-        <div><b>Name:</b> ${esc(headLabel)} (input: ${esc(headInput)})</div>
-        <div><b>Commit:</b> <span class="mono">${esc((headSha||"").slice(0,12))}</span></div>
-        <div><b>Message:</b> <span class="mono">${esc(headCommitLine)}</span></div>
-      </div>
+
+    <h3>Base</h3>
+    <div class="panel">
+      <div><b>Name:</b> ${esc(baseLabel)} (input: ${esc(baseInput)})</div>
+      <div><b>Commit:</b> <span class="mono">${esc(baseShort)}</span></div>
+      <div><b>Commit Id:</b> <span class="mono">${esc(baseSha)}</span></div>
+      <div><b>Message:</b> <span class="mono">${esc(baseCommitLine.replace(baseSha, "").trim())}</span></div>
     </div>
+
+    <h3 style="margin-top:16px">Head</h3>
+    <div class="panel">
+      <div><b>Name:</b> ${esc(headLabel)} (input: ${esc(headInput)})</div>
+      <div><b>Commit:</b> <span class="mono">${esc(headShort)}</span></div>
+      <div><b>Commit Id:</b> <span class="mono">${esc(headSha)}</span></div>
+      <div><b>Message:</b> <span class="mono">${esc(headCommitLine.replace(headSha, "").trim())}</span></div>
+    </div>
+
     <div class="panel" style="margin-top:12px">
       <div><b>Minimum severity:</b> ${esc(minSeverity)}</div>
       <div><b>Counts:</b> NEW=${counts.new} · REMOVED=${counts.removed} · UNCHANGED=${counts.unchanged}</div>
@@ -124,12 +147,12 @@ function summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel,
   </div>`;
 }
 
-// ---- Severity section with Chart.js (two donuts) ----
+// Severity donuts (Chart.js renders in Puppeteer)
 function severityChartsHtml({ baseLabel, headLabel }) {
   return `
   <div class="page">
     <h2>Severity distribution</h2>
-    <div class="chart-grid">
+    <div class="chart-grid2">
       <div class="chart-box">
         <h3>${esc(baseLabel)}</h3>
         <canvas id="chartBase"></canvas>
@@ -142,15 +165,27 @@ function severityChartsHtml({ baseLabel, headLabel }) {
   </div>`;
 }
 
-function diffTableSection(diffTableMarkdown) {
+// NEW/REMOVED/UNCHANGED bar chart
+function changesOverviewHtml() {
   return `
   <div class="page">
-    <h2>Vulnerability diff table</h2>
-    <div class="md"><pre>${esc(diffTableMarkdown || "(no data)")}</pre></div>
+    <h2>Change overview</h2>
+    <div class="chart-box">
+      <canvas id="chartChanges"></canvas>
+    </div>
   </div>`;
 }
 
-// Landscape pages (title + graph/text in same page)
+// Diff table as HTML (no markdown)
+function diffTableSectionHtml(diffTableHtml) {
+  return `
+  <div class="page">
+    <h2>Vulnerability diff table</h2>
+    ${diffTableHtml || "<div class='muted'>No data</div>"}
+  </div>`;
+}
+
+// Landscape appendix
 function mermaidSection(title, code) {
   return `
   <div class="page">
@@ -159,11 +194,13 @@ function mermaidSection(title, code) {
     <div id="mermaid-target"></div>
   </div>`;
 }
-function dependencyPathsSection(title, md) {
+function dependencyPathsSection(title, htmlOrMd) {
+  // Accept HTML; if MD is passed, caller should convert before.
+  const body = htmlOrMd && /<table|<div|<ul|<ol|<pre/i.test(htmlOrMd) ? htmlOrMd : `<div class="md"><pre>${esc(htmlOrMd||"(no data)")}</pre></div>`;
   return `
   <div class="page">
     <h2>${esc(title)}</h2>
-    <div class="md"><pre>${esc(md || "(no data)")}</pre></div>
+    ${body}
   </div>`;
 }
 
@@ -181,18 +218,19 @@ function buildHtmlMain(options) {
   const headCommitLine  = options.headCommitLine || "";
   const minSeverity     = options.minSeverity || "LOW";
   const counts          = options.counts || { new:0, removed:0, unchanged:0 };
-  const diffTableMd     = options.diffTableMarkdown || "";
+  const diffTableHtml   = options.diffTableHtml || "";        // << expects HTML now
   const baseMatches     = options.baseMatches || [];
   const headMatches     = options.headMatches || [];
   const nowStr          = options.nowStr || "";
   const titleLogoUrl    = options.title_logo_url || "";
 
-  // Prepare severity counts for client-side Chart.js render
+  // Precompute severity counts for client-side Chart.js render
   const baseCounts = countSeverities(baseMatches);
   const headCounts = countSeverities(headMatches);
-  const sevLabels = JSON.stringify(SEVERITY_ORDER);
-  const baseData  = JSON.stringify(SEVERITY_ORDER.map(s => baseCounts[s] || 0));
-  const headData  = JSON.stringify(SEVERITY_ORDER.map(s => headCounts[s] || 0));
+  const sevLabels  = JSON.stringify(SEVERITY_ORDER);
+  const baseData   = JSON.stringify(SEVERITY_ORDER.map(s => baseCounts[s] || 0));
+  const headData   = JSON.stringify(SEVERITY_ORDER.map(s => headCounts[s] || 0));
+  const changes    = JSON.stringify([counts.new || 0, counts.removed || 0, counts.unchanged || 0]);
 
   return `<!DOCTYPE html>
 <html>
@@ -204,17 +242,19 @@ function buildHtmlMain(options) {
 <body>
   ${coverHtml({ titleLogoUrl, repo, baseLabel, headLabel, nowStr })}
   ${tocHtml()}
-  ${introductionHtml()}
+  ${introductionHtml({ baseLabel, headLabel })}
   ${summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel, headInput, headSha, headCommitLine, minSeverity, counts })}
   ${severityChartsHtml({ baseLabel, headLabel })}
-  ${diffTableSection(diffTableMd)}
+  ${changesOverviewHtml()}
+  ${diffTableSectionHtml(diffTableHtml)}
 
-  <!-- Chart.js + bootstrap script to render donuts, will be executed in Puppeteer -->
+  <!-- Chart datasets; rendering happens in Puppeteer via page.addScriptTag(...) -->
   <script>
     window.__vulnChartData = {
       labels: ${sevLabels},
       base: ${baseData},
-      head: ${headData}
+      head: ${headData},
+      changes: ${changes}
     };
   </script>
 </body>
@@ -228,8 +268,8 @@ function buildHtmlLandscape(options) {
   const headLabel   = options.headLabel || "HEAD";
   const mermaidBase = options.mermaidBase || "";
   const mermaidHead = options.mermaidHead || "";
-  const pathsBaseMd = options.pathsBaseMd || "";
-  const pathsHeadMd = options.pathsHeadMd || "";
+  const pathsBaseHtml = options.pathsBaseMd || ""; // allow HTML
+  const pathsHeadHtml = options.pathsHeadMd || "";
 
   return `<!DOCTYPE html>
 <html>
@@ -239,11 +279,10 @@ function buildHtmlLandscape(options) {
   ${cssBase()}
 </head>
 <body>
-    ${mermaidSection('Dependency graph base — ' + baseLabel, mermaidBase)}
-    ${mermaidSection('Dependency graph head — ' + headLabel, mermaidHead)}
-    ${dependencyPathsSection('Dependency path base', pathsBaseMd)}
-    ${dependencyPathsSection('Dependency path head', pathsHeadMd)}
-
+  ${mermaidSection('Dependency graph base \u2014 ' + baseLabel, mermaidBase)}
+  ${mermaidSection('Dependency graph head \u2014 ' + headLabel, mermaidHead)}
+  ${dependencyPathsSection("Dependency path base", pathsBaseHtml)}
+  ${dependencyPathsSection("Dependency path head", pathsHeadHtml)}
 </body>
 </html>`;
 }
