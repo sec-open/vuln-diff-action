@@ -239,10 +239,11 @@ function buildHtmlLandscape(options) {
   ${cssBase()}
 </head>
 <body>
-  ${mermaidSection(\`Dependency graph base — \${baseLabel}\`, mermaidBase)}
-  ${mermaidSection(\`Dependency graph head — \${headLabel}\`, mermaidHead)}
-  ${dependencyPathsSection("Dependency path base", pathsBaseMd)}
-  ${dependencyPathsSection("Dependency path head", pathsHeadMd)}
+    ${mermaidSection('Dependency graph base — ' + baseLabel, mermaidBase)}
+    ${mermaidSection('Dependency graph head — ' + headLabel, mermaidHead)}
+    ${dependencyPathsSection('Dependency path base', pathsBaseMd)}
+    ${dependencyPathsSection('Dependency path head', pathsHeadMd)}
+
 </body>
 </html>`;
 }
