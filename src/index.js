@@ -82,17 +82,68 @@ async function ensureChromeForPuppeteer(version = "24.10.2") {
 }
 async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
   const puppeteer = require("puppeteer");
-  // Ensure managed Chrome is available; no external workflow step needed.
-  await ensureChromeForPuppeteer();
+  await ensureChromeForPuppeteer(); // descarga/asegura Chrome gestionado
   const browser = await puppeteer.launch({
     channel: "chrome",
     headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    args: ["--no-sandbox","--disable-setuid-sandbox"]
   });
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.emulateMediaType("screen");
+
+    // Detect if this is main (with chart placeholders) or landscape (mermaid)
+    const hasBaseCanvas = await page.$("#chartBase");
+    if (hasBaseCanvas) {
+      // Load Chart.js and render donuts
+      await page.addScriptTag({ url: "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" });
+      await page.evaluate(() => {
+        const elBase = document.getElementById("chartBase");
+        const elHead = document.getElementById("chartHead");
+        const data = window.__vulnChartData || { labels:[], base:[], head:[] };
+        const colors = ["#b91c1c","#ea580c","#ca8a04","#16a34a","#6b7280"]; // CRIT,HIGH,MED,LOW,UNK
+
+        function doughnut(ctx, values){
+          return new window.Chart(ctx, {
+            type: "doughnut",
+            data: { labels: data.labels, datasets: [{ data: values, backgroundColor: colors }] },
+            options: { plugins:{ legend:{ position:"bottom" } }, cutout: "60%" }
+          });
+        }
+        doughnut(elBase.getContext("2d"), data.base);
+        doughnut(elHead.getContext("2d"), data.head);
+      });
+    } else {
+      // Landscape: render Mermaid blocks to SVG (if any)
+      const hasMermaid = await page.$("[data-mermaid]");
+      if (hasMermaid) {
+        await page.addScriptTag({ url: "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" });
+        await page.evaluate(async () => {
+          try {
+            window.mermaid.initialize({ startOnLoad: false, securityLevel: "antiscript", theme: "default", fontFamily: "ui-sans-serif, system-ui" });
+            const blocks = document.querySelectorAll("[data-mermaid]");
+            for (const block of blocks) {
+              const code = block.getAttribute("data-mermaid") || "";
+              if (code.trim().length === 0) continue;
+              const { svg } = await window.mermaid.render("m"+Math.random().toString(36).slice(2), code);
+              const target = block.nextElementSibling || block.parentElement;
+              const holder = document.createElement("div");
+              holder.innerHTML = svg;
+              // scale a bit to fit page
+              holder.style.transform = "scale(0.9)";
+              holder.style.transformOrigin = "top left";
+              target.appendChild(holder);
+              block.remove();
+            }
+          } catch(e) {
+            console.warn("Mermaid render failed", e);
+          }
+        });
+      }
+    }
+
+    // Export PDF
     const portraitMargins = { top: "10mm", right: "8mm", bottom: "10mm", left: "8mm" };
     const landscapeMargins = { top: "8mm", right: "6mm", bottom: "8mm", left: "6mm" };
     await page.pdf({
@@ -106,6 +157,7 @@ async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
     await browser.close();
   }
 }
+
 async function mergePdfs(pdfPaths, outPath) {
   const docs = [];
   for (const p of pdfPaths) {
@@ -241,9 +293,18 @@ async function run() {
     const baseScan = await scanSbom(baseSbom);
     const headScan = await scanSbom(headSbom);
 
-    // Diff
-    const d = diff(baseScan.matches || [], headScan.matches || [], minSeverity);
+    // Diff and Markdown table
+    // Pass baseLabel and headLabel so that the table shows real branch names (e.g. develop, TASK-7908)
+    const d = diff(
+      baseScan.matches || [],
+      headScan.matches || [],
+      minSeverity,
+      baseLabel,
+      headLabel
+    );
+
     const table = renderMarkdownTable(d.news, d.removed, d.unchanged);
+
 
     // Commit lines
     const baseCommit = await commitLine(baseSha);

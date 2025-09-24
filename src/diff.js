@@ -51,6 +51,7 @@ function toRow(m, branchLabel) {
 /**
  * Diff two match arrays (base vs head) with min severity filter.
  * Returns { news, removed, unchanged } of simplified rows.
+ * baseLabel/headLabel are human-friendly names (e.g., 'develop', 'TASK-7908').
  */
 function diff(baseMatches, headMatches, minSeverity = "LOW", baseLabel = "BASE", headLabel = "HEAD") {
   const baseFiltered = (baseMatches || []).filter(m => passesMinSeverity(m, minSeverity));
@@ -76,8 +77,7 @@ function diff(baseMatches, headMatches, minSeverity = "LOW", baseLabel = "BASE",
     if (!headMap.has(k)) removed.push(toRow(m, baseLabel));
   }
 
-  // Sort: by severity (desc), then by branch (base first? you wanted grouped by branch within severity)
-  // We'll sort branches lexicographically within each severity group for determinism.
+  // Sort: by severity (CRITICAL..LOW), then by branch (lexicographic; BOTH goes detrás)
   const sevIndex = s => SEV_ORDER.indexOf(s);
   const bySevThenBranch = (a, b) => {
     const d = sevIndex(a.severity) - sevIndex(b.severity);
