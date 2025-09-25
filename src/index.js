@@ -243,17 +243,24 @@ async function renderPdfFromHtml(html, outPath, { landscape = false, headerMeta,
       });
     }
 
+    // Header/Footer templates
+    // dentro de renderPdfFromHtml(...)
+
     const meta = headerMeta || {};
     const brandBg = "#111827";
     const brandFg = "#F9FAFB";
     const footerLogo = meta.logo ? `<img src="${escapeHtml(meta.logo)}" style="height:10px; vertical-align:middle; margin-right:8px"/>` : "";
 
+    // 🔧 Evitar template literal anidado: construir la parte izquierda como string normal
+    const titleLeft =
+      'Security Report — ' +
+      escapeHtml(meta.repo || '') +
+      (meta.base && meta.head ? (' — ' + escapeHtml(meta.base) + ' vs ' + escapeHtml(meta.head)) : '');
+
     const headerHtml = `
       <div style="width:100%;">
         <div style="font-size:9px; color:${brandFg}; background:${brandBg}; width:100%; padding:6px 10mm;">
-          <span style="float:left;">
-            Security Report — ${escapeHtml(meta.repo || "")}${meta.base && meta.head ? \` — \${escapeHtml(meta.base)} vs \${escapeHtml(meta.head)}\` : ""}
-          </span>
+          <span style="float:left;">${titleLeft}</span>
           <span style="float:right;">${escapeHtml(meta.section || "")}</span>
         </div>
       </div>`;
@@ -265,6 +272,7 @@ async function renderPdfFromHtml(html, outPath, { landscape = false, headerMeta,
           <span style="float:right;">Page <span class="pageNumber"></span> / <span class="totalPages"></span></span>
         </div>
       </div>`;
+
 
     const portraitMargins = { top: displayHeaderFooter ? "22mm" : "12mm", right: "10mm", bottom: displayHeaderFooter ? "20mm" : "12mm", left: "10mm" };
     const landscapeMargins = { top: displayHeaderFooter ? "20mm" : "10mm", right: "10mm", bottom: displayHeaderFooter ? "18mm" : "10mm", left: "10mm" };
