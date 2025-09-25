@@ -67,7 +67,6 @@ function cssBase() {
   </style>`;
 }
 
-
 function coverHtml({ titleLogoUrl, repo, baseLabel, headLabel, nowStr }) {
   return `
   <div class="page" style="text-align:center">
@@ -186,7 +185,6 @@ function changesOverviewHtml({ baseLabel, headLabel, counts }) {
     </div>
   </div>`;
 }
-
 
 // Diff table as HTML (no markdown)
 function diffTableSectionHtml(diffTableHtml) {

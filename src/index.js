@@ -25,7 +25,7 @@ const { buildHtmlMain, buildHtmlLandscape } = require("./report-html");
 
 // -------------- utils -----------------------
 
-// ---- Markdown table -> HTML (header/separator + inline **bold** and `code`) ----
+// ---- Markdown table -> HTML (header/separator + inline **bold**, `code`, GHSA/CVE links) ----
 function markdownTableToHtml(md) {
   if (!md || !/\|/.test(md)) return `<div class="muted">No data</div>`;
   const lines = md.split(/\r?\n/).filter(l => l.trim().length > 0);
@@ -52,12 +52,25 @@ function markdownTableToHtml(md) {
     rows.push({ type: "td", cells: normalizeCells(lines[i]) });
   }
 
-  // inline formatting: **bold**, `code`
+  const linkify = (txt) => {
+    // GHSA-xxxx-xxxx-xxxx
+    txt = txt.replace(/\b(GHSA-[A-Za-z0-9-]{9,})\b/g, (_m,id) =>
+      `<a href="https://github.com/advisories/${id}" target="_blank" rel="noopener">${escapeHtml(id)}</a>`
+    );
+    // CVE-YYYY-NNNN+
+    txt = txt.replace(/\b(CVE-\d{4}-\d{4,7})\b/g, (_m,id) =>
+      `<a href="https://nvd.nist.gov/vuln/detail/${id}" target="_blank" rel="noopener">${escapeHtml(id)}</a>`
+    );
+    return txt;
+  };
+
+  // inline formatting: **bold**, `code`, then linkify
   const inline = (txt) => {
     if (!txt) return "";
     let s = String(txt);
     s = s.replace(/`([^`]+)`/g, (_,m) => `<code>${escapeHtml(m)}</code>`);
     s = s.replace(/\*\*([^*]+)\*\*/g, (_,m) => `<strong>${escapeHtml(m)}</strong>`);
+    s = linkify(s);
     return s;
   };
 
@@ -72,6 +85,7 @@ function markdownTableToHtml(md) {
   html += `</tbody></table>`;
   return html;
 }
+
 
 // ---- Transform dependency-paths markdown table:
 // Move Depth0 -> Module, shift Depth1..n left, strip literal 'pkg' in Module ----
@@ -207,9 +221,9 @@ async function ensureChromeForPuppeteer(version = "24.10.2") {
   await sh(cmd);
   return cacheDir;
 }
-async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
+async function renderPdfFromHtml(html, outPath, { landscape = false, headerMeta } = {}) {
   const puppeteer = require("puppeteer");
-  await ensureChromeForPuppeteer(); // descarga/asegura Chrome gestionado
+  await ensureChromeForPuppeteer();
   const browser = await puppeteer.launch({
     channel: "chrome",
     headless: "new",
@@ -220,18 +234,16 @@ async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.emulateMediaType("screen");
 
-    // Detect if this is main (with chart placeholders) or landscape (mermaid)
+    // Render charts / mermaid (igual que ya tenías)
     const hasBaseCanvas = await page.$("#chartBase");
     if (hasBaseCanvas) {
-      // Load Chart.js and render donuts + changes bar
       await page.addScriptTag({ url: "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" });
       await page.evaluate(() => {
         const elBase = document.getElementById("chartBase");
         const elHead = document.getElementById("chartHead");
         const elChanges = document.getElementById("chartChanges");
         const data = window.__vulnChartData || { labels:[], base:[], head:[], changes:[0,0,0] };
-        const colors = ["#b91c1c","#ea580c","#ca8a04","#16a34a","#6b7280"]; // CRIT,HIGH,MED,LOW,UNK
-
+        const colors = ["#b91c1c","#ea580c","#ca8a04","#16a34a","#6b7280"];
         function doughnut(ctx, values){
           return new window.Chart(ctx, {
             type: "doughnut",
@@ -246,21 +258,16 @@ async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
         if (elChanges) {
           new window.Chart(elChanges.getContext("2d"), {
             type: "bar",
-            data: {
-              labels: ["NEW","REMOVED","UNCHANGED"],
-              datasets: [{ data: data.changes }]
-            },
+            data: { labels: ["NEW","REMOVED","UNCHANGED"], datasets: [{ data: data.changes }] },
             options: {
-               responsive: true,
-               maintainAspectRatio: false,
-               plugins: { legend: { display: false } },
-               scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
             }
           });
         }
       });
     } else {
-      // Landscape: render Mermaid blocks to SVG (if any)
       const hasMermaid = await page.$("[data-mermaid]");
       if (hasMermaid) {
         await page.addScriptTag({ url: "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" });
@@ -275,33 +282,50 @@ async function renderPdfFromHtml(html, outPath, { landscape = false } = {}) {
               const target = block.nextElementSibling || block.parentElement;
               const holder = document.createElement("div");
               holder.innerHTML = svg;
-              // scale a bit to fit page
               holder.style.transform = "scale(0.9)";
               holder.style.transformOrigin = "top left";
               target.appendChild(holder);
               block.remove();
             }
-          } catch(e) {
-            console.warn("Mermaid render failed", e);
-          }
+          } catch(e) { console.warn("Mermaid render failed", e); }
         });
       }
     }
 
-    // Export PDF
-    const portraitMargins = { top: "10mm", right: "8mm", bottom: "10mm", left: "8mm" };
-    const landscapeMargins = { top: "8mm", right: "6mm", bottom: "8mm", left: "6mm" };
+    // Header/Footer templates
+    const meta = headerMeta || {};
+    const headerHtml = `
+      <div style="font-size:9px; color:#6b7280; width:100%; padding:0 10mm;">
+        <span style="float:left;">
+          Security Report — ${escapeHtml(meta.repo || "")}${meta.base && meta.head ? ` — ${escapeHtml(meta.base)} vs ${escapeHtml(meta.head)}` : ""}
+        </span>
+        <span style="float:right;">${escapeHtml(meta.section || "")}</span>
+      </div>`;
+
+    const footerHtml = `
+      <div style="font-size:9px; color:#6b7280; width:100%; padding:0 10mm;">
+        <span style="float:left;">${escapeHtml(meta.date || "")}</span>
+        <span style="float:right;">Page <span class="pageNumber"></span> / <span class="totalPages"></span></span>
+      </div>`;
+
+    const portraitMargins = { top: "18mm", right: "8mm", bottom: "15mm", left: "8mm" };
+    const landscapeMargins = { top: "16mm", right: "8mm", bottom: "12mm", left: "8mm" };
+
     await page.pdf({
       path: outPath,
       format: "A4",
       landscape,
       printBackground: true,
+      displayHeaderFooter: true,
+      headerTemplate: headerHtml,
+      footerTemplate: footerHtml,
       margin: landscape ? landscapeMargins : portraitMargins
     });
   } finally {
     await browser.close();
   }
 }
+
 
 async function mergePdfs(pdfPaths, outPath) {
   const docs = [];
@@ -618,8 +642,30 @@ ${bullet}`;
       if (reportPdf) {
         const pdfMain = path.join(workdir, "report-main.pdf");
         const pdfLscp = path.join(workdir, "report-landscape.pdf");
-        await renderPdfFromHtml(htmlMain, pdfMain, { landscape: false });
-        await renderPdfFromHtml(htmlLandscape, pdfLscp, { landscape: true });
+        // Main (portrait)
+        await renderPdfFromHtml(htmlMain, pdfMain, {
+          landscape: false,
+          headerMeta: {
+            repo: repository,
+            base: baseLabel,
+            head: headLabel,
+            section: "Main",
+            date: nowStr
+          }
+        });
+
+        // Landscape (graphs & paths)
+        await renderPdfFromHtml(htmlLandscape, pdfLscp, {
+          landscape: true,
+          headerMeta: {
+            repo: repository,
+            base: baseLabel,
+            head: headLabel,
+            section: "Appendix",
+            date: nowStr
+          }
+        });
+
         reportPdfPath = path.join(workdir, "report.pdf");
         await mergePdfs([pdfMain, pdfLscp], reportPdfPath);
         pdfs = [pdfMain, pdfLscp, reportPdfPath];
