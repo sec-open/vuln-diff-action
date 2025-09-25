@@ -529,9 +529,11 @@ async function run() {
 
     // Cleanup
     await sh(`git worktree remove ${baseDir} --force || true`);
-    // only remove if we created it
-    let createdHeadWorktree = fs.existsSync(headDir) && headDir !== workdir;
-    if (createdHeadWorktree) await sh(`git worktree remove ${headDir} --force || true`);
+    // only remove if we created it earlier
+    if (createdHeadWorktree) {
+      await sh(`git worktree remove ${headDir} --force || true`);
+    }
+
 
   } catch (error) {
     core.setFailed(error.message || String(error));
