@@ -1,9 +1,9 @@
 // src/report-html.js
-// v2 PDF layout refinado con portada dedicada:
-// - Portada (1 página) generada por buildHtmlCover() — sin header/footer
-// - Main y Appendix como antes, con secciones numeradas
-// - TOC mejorado
-// - Diff table espera HTML (no MD)
+// v2 — HTML templates for PDF export:
+// - buildHtmlCover(): single-page cover without header/footer
+// - buildHtmlMain(): portrait pages (TOC, Introduction, Summary, Severity distribution, Change overview, Diff table)
+// - buildHtmlLandscape(): landscape appendix (Dependency graphs + Dependency paths)
+// Notes: All section titles and figures are numbered; tables are HTML (no raw markdown).
 
 const SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
 
@@ -13,47 +13,43 @@ function esc(s) {
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-// ---- Severity helpers ----
-function toSeverity(value) {
-  const s = String(value || "UNKNOWN").toUpperCase();
-  return SEVERITY_ORDER.includes(s) ? s : "UNKNOWN";
-}
-function countSeverities(matches) {
-  const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
-  for (const m of (matches || [])) {
-    const sev = (m && m.vulnerability && m.vulnerability.severity) || (m && m.severity) || "UNKNOWN";
-    counts[toSeverity(sev)] += 1;
-  }
-  return counts;
-}
-
 function cssBase() {
   return `
   <style>
-    :root { --fg:#1f2937; --muted:#6b7280; --border:#e5e7eb; --bg:#ffffff; --subtle:#f9fafb; }
+    :root {
+      --fg:#1f2937;     /* slate-800 */
+      --muted:#6b7280;  /* gray-500 */
+      --border:#e5e7eb; /* gray-200 */
+      --bg:#ffffff;     /* white */
+      --subtle:#f9fafb; /* gray-50  */
+      --brand-bg:#111827; /* header/footer background (gray-900) */
+      --brand-fg:#F9FAFB; /* header/footer text (gray-50) */
+    }
     *{ box-sizing:border-box }
-    body{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, Helvetica;
-          color:var(--fg); background:var(--bg); margin:0 }
+    html,body{ margin:0; padding:0 }
+    body{
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, Helvetica;
+      color:var(--fg); background:var(--bg);
+    }
     .page{ padding:24px 20px; page-break-after: always; }
     .page:last-of-type{ page-break-after: auto; }
+
     h1{ font-size:28px; margin:8px 0 4px }
     h2{ font-size:20px; margin:18px 0 10px }
     h3{ font-size:16px; margin:12px 0 8px }
+    p{ line-height:1.55 }
     .muted{ color:var(--muted) }
     .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace }
-    .hr{ height:1px; background:var(--border); margin:12px 0 }
     .small{ font-size:12px }
-    .logo{ width:96px; height:96px; object-fit:contain }
+    .hr{ height:1px; background:var(--border); margin:12px 0 }
     .panel{ border:1px solid var(--border); border-radius:8px; padding:12px; background:#fff }
-    .md pre{ background:var(--subtle); padding:10px; border-radius:6px; overflow:auto; font-size:12px }
+    .logo{ width:96px; height:96px; object-fit:contain }
 
     /* tables */
     table.tbl { width:100%; border-collapse: collapse; font-size: 12px; }
     table.tbl th, table.tbl td { border:1px solid #e5e7eb; padding: 6px 8px; text-align: left; vertical-align: top; }
     table.tbl thead th { background: var(--subtle); }
     table.tbl code { background:#f1f5f9; padding:2px 6px; border-radius:6px; display:inline-block }
-
-    /* captions */
     .caption { font-size: 11px; color: var(--muted); margin-top: 6px; }
 
     /* charts */
@@ -61,14 +57,21 @@ function cssBase() {
     .chart-box{ border:1px solid var(--border); border-radius:8px; padding:12px; }
     .chart-box h3{ margin-top:0; margin-bottom:8px }
     canvas{ max-width: 320px; max-height: 320px; }
-    /* full width chart for Change overview */
     .chart-wide-box { border:1px solid var(--border); border-radius:8px; padding:12px; }
     #chartChanges { width:100%; height:260px; }
 
     /* TOC */
-    .toc-wrap { max-width: 580px; }
-    ol.toc { list-style: decimal; padding-left: 20px; line-height: 1.7; font-size: 14px; }
-    ol.toc li { margin: 3px 0; }
+    .toc-wrap { max-width: 620px; }
+    ol.toc { list-style: decimal; padding-left: 20px; line-height: 1.8; font-size: 14px; }
+    ol.toc li { margin: 4px 0; }
+
+    /* helper blocks */
+    .md pre{ background:var(--subtle); padding:10px; border-radius:6px; overflow:auto; font-size:12px }
+
+    /* layout helpers to keep space balanced in cover */
+    .cover-flex{
+      text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:90vh;
+    }
   </style>`;
 }
 
@@ -82,12 +85,14 @@ function buildHtmlCover({ titleLogoUrl, repo, baseLabel, headLabel, nowStr }) {
   ${cssBase()}
 </head>
 <body>
-  <div class="page" style="text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:90vh;">
+  <div class="page cover-flex">
     ${titleLogoUrl ? `<img class="logo" src="${esc(titleLogoUrl)}" alt="logo" />` : ""}
     <h1 style="font-size:34px; letter-spacing:0.2px;">Security Report</h1>
     <div class="muted" style="font-size:16px; margin-top:4px;">${esc(repo)}</div>
     <div class="hr" style="width:420px;"></div>
-    <div class="mono" style="font-size:14px; margin-top:6px;">Comparison of branches <b>${esc(baseLabel)}</b> vs <b>${esc(headLabel)}</b></div>
+    <div class="mono" style="font-size:14px; margin-top:6px;">
+      Comparison of branches <b>${esc(baseLabel)}</b> vs <b>${esc(headLabel)}</b>
+    </div>
     <div style="height:28vh"></div>
     <div class="muted small">${esc(nowStr)}</div>
   </div>
@@ -95,29 +100,30 @@ function buildHtmlCover({ titleLogoUrl, repo, baseLabel, headLabel, nowStr }) {
 </html>`;
 }
 
-/* -------------------- TOC mejorado -------------------- */
+/* -------------------- TOC mejorado (numerado) -------------------- */
 function tocHtml() {
   return `
   <div class="page">
     <h2>Table of contents</h2>
     <div class="toc-wrap">
       <ol class="toc">
-        <li>Introduction</li>
-        <li>Summary</li>
-        <li>Severity distribution</li>
-        <li>Change overview</li>
-        <li>Vulnerability diff table</li>
-        <li>Dependency graph base</li>
-        <li>Dependency graph head</li>
-        <li>Dependency path base</li>
-        <li>Dependency path head</li>
+        <li>1. Introduction</li>
+        <li>2. Summary</li>
+        <li>3. Severity distribution</li>
+        <li>4. Change overview</li>
+        <li>5. Vulnerability diff table</li>
+        <li>6. Dependency graph base</li>
+        <li>7. Dependency graph head</li>
+        <li>8. Dependency path base</li>
+        <li>9. Dependency path head</li>
       </ol>
     </div>
   </div>`;
 }
 
 /* -------------------- Introducción extendida -------------------- */
-function introductionHtml({ baseLabel, headLabel, repo }) {
+function introductionHtml({ baseLabel, headLabel, repo, toolVersions }) {
+  const v = toolVersions || {};
   return `
   <div class="page">
     <h2>1. Introduction</h2>
@@ -132,22 +138,24 @@ function introductionHtml({ baseLabel, headLabel, repo }) {
       helps developers and maintainers ensure that the evolution of the project does not unintentionally increase its
       security risks.
     </p>
-    <p>Tools and methodology:</p>
+    <p>Tools and methodology (versions detected during this run):</p>
     <ul>
-      <li><b>CycloneDX Maven plugin</b> – Accurate SBOM for Java multi-module builds.</li>
-      <li><b>Syft</b> – SBOM fallback for non-Maven directories.</li>
-      <li><b>Grype</b> – Vulnerability scanning of the SBOM.</li>
-      <li><b>Chart.js</b> – Severity and change overview visualizations.</li>
-      <li><b>Mermaid</b> – Dependency graphs on landscape pages.</li>
-      <li><b>Puppeteer</b> – PDF export.</li>
+      <li><b>CycloneDX Maven plugin</b>${v.cyclonedx ? " (v"+esc(v.cyclonedx)+")" : ""} – Accurate SBOM for Java multi-module builds.</li>
+      <li><b>Syft</b>${v.syft ? " (v"+esc(v.syft)+")" : ""} – SBOM fallback for non-Maven directories.</li>
+      <li><b>Grype</b>${v.grype ? " (v"+esc(v.grype)+")" : ""} – Vulnerability scanning over SBOMs (CVEs, advisories).</li>
+      <li><b>Chart.js</b>${v.chartjs ? " (v"+esc(v.chartjs)+")" : ""} – Severity and change overview visualizations.</li>
+      <li><b>Mermaid</b>${v.mermaid ? " (v"+esc(v.mermaid)+")" : ""} – Dependency graphs on landscape pages.</li>
+      <li><b>Puppeteer</b>${v.puppeteer ? " (v"+esc(v.puppeteer)+")" : ""} – Automated PDF export.</li>
     </ul>
   </div>`;
 }
 
-/* -------------------- Summary en una columna -------------------- */
+/* -------------------- Summary (una columna: primero Base, luego Head) -------------------- */
 function summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel, headInput, headSha, headCommitLine, minSeverity, counts }) {
   const baseShort = (baseSha || "").slice(0,12);
   const headShort = (headSha || "").slice(0,12);
+  const baseMsg = (baseCommitLine || "").replace(baseSha || "", "").trim();
+  const headMsg = (headCommitLine || "").replace(headSha || "", "").trim();
   return `
   <div class="page">
     <h2>2. Summary</h2>
@@ -157,7 +165,7 @@ function summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel,
       <div><b>Name:</b> ${esc(baseLabel)} (input: ${esc(baseInput)})</div>
       <div><b>Commit:</b> <span class="mono">${esc(baseShort)}</span></div>
       <div><b>Commit Id:</b> <span class="mono">${esc(baseSha)}</span></div>
-      <div><b>Message:</b> <span class="mono">${esc(baseCommitLine.replace(baseSha, "").trim())}</span></div>
+      <div><b>Commit message:</b> <span class="mono">${esc(baseMsg)}</span></div>
     </div>
 
     <h3 style="margin-top:16px">Head</h3>
@@ -165,7 +173,7 @@ function summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel,
       <div><b>Name:</b> ${esc(headLabel)} (input: ${esc(headInput)})</div>
       <div><b>Commit:</b> <span class="mono">${esc(headShort)}</span></div>
       <div><b>Commit Id:</b> <span class="mono">${esc(headSha)}</span></div>
-      <div><b>Message:</b> <span class="mono">${esc(headCommitLine.replace(headSha, "").trim())}</span></div>
+      <div><b>Commit message:</b> <span class="mono">${esc(headMsg)}</span></div>
     </div>
 
     <div class="panel" style="margin-top:12px">
@@ -175,7 +183,7 @@ function summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel,
   </div>`;
 }
 
-/* -------------------- Severities (donuts) -------------------- */
+/* -------------------- Severities (dos donuts) -------------------- */
 function severityChartsHtml({ baseLabel, headLabel }) {
   return `
   <div class="page">
@@ -194,7 +202,7 @@ function severityChartsHtml({ baseLabel, headLabel }) {
   </div>`;
 }
 
-/* -------------------- Change overview (barra) -------------------- */
+/* -------------------- Change overview (barra + texto introductorio) -------------------- */
 function changesOverviewHtml({ baseLabel, headLabel, counts }) {
   const n1 = counts?.new ?? 0;
   const n2 = counts?.removed ?? 0;
@@ -213,7 +221,7 @@ function changesOverviewHtml({ baseLabel, headLabel, counts }) {
   </div>`;
 }
 
-/* -------------------- Diff table (HTML) -------------------- */
+/* -------------------- Diff table (HTML ya interpretada) -------------------- */
 function diffTableSectionHtml(diffTableHtml) {
   return `
   <div class="page">
@@ -264,7 +272,9 @@ function buildHtmlMain(options) {
   const headMatches     = options.headMatches || [];
   const nowStr          = options.nowStr || "";
   const titleLogoUrl    = options.title_logo_url || "";
+  const toolVersions    = options.toolVersions || {};
 
+  // chart data
   const baseCounts = countSeverities(baseMatches);
   const headCounts = countSeverities(headMatches);
   const sevLabels  = JSON.stringify(SEVERITY_ORDER);
@@ -280,21 +290,9 @@ function buildHtmlMain(options) {
   ${cssBase()}
 </head>
 <body>
-  <!-- Portada NO incluida aquí; se genera con buildHtmlCover() -->
-  <div class="page">
-    <h2>Table of contents</h2>
-    <div class="toc-wrap">
-      <ol class="toc">
-        <li>Introduction</li>
-        <li>Summary</li>
-        <li>Severity distribution</li>
-        <li>Change overview</li>
-        <li>Vulnerability diff table</li>
-      </ol>
-    </div>
-  </div>
-
-  ${introductionHtml({ baseLabel, headLabel, repo })}
+  <!-- Cover is not here; it is built with buildHtmlCover() -->
+  ${tocHtml()}
+  ${introductionHtml({ baseLabel, headLabel, repo, toolVersions })}
   ${summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel, headInput, headSha, headCommitLine, minSeverity, counts })}
   ${severityChartsHtml({ baseLabel, headLabel })}
   ${changesOverviewHtml({ baseLabel, headLabel, counts })}
@@ -336,6 +334,19 @@ function buildHtmlLandscape(options) {
   ${dependencyPathsSection("9. Dependency path head", pathsHeadHtml, 6)}
 </body>
 </html>`;
+}
+
+function toSeverity(value) {
+  const s = String(value || "UNKNOWN").toUpperCase();
+  return SEVERITY_ORDER.includes(s) ? s : "UNKNOWN";
+}
+function countSeverities(matches) {
+  const counts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
+  for (const m of (matches || [])) {
+    const sev = (m && m.vulnerability && m.vulnerability.severity) || (m && m.severity) || "UNKNOWN";
+    counts[toSeverity(sev)] += 1;
+  }
+  return counts;
 }
 
 module.exports = {

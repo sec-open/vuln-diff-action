@@ -1,4 +1,7 @@
 // src/index.js
+// v2 main — Orchestrates SBOM/scan/diff, builds HTML (cover+main+appendix) and exports PDFs.
+// Adds: header/footer with dark background + light text, footer logo, UK time, HTML tables with links, transformed dependency-paths table.
+
 const core = require("@actions/core");
 const exec = require("@actions/exec");
 const artifact = require("@actions/artifact");
@@ -20,8 +23,11 @@ const {
 } = require("./report");
 const { buildHtmlCover, buildHtmlMain, buildHtmlLandscape } = require("./report-html");
 
-// ---------------------- small utils ----------------------
-function escapeHtml(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+// ---------------------- helpers ----------------------
+function escapeHtml(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+                  .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
 async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); }
 async function tryRevParse(ref) {
   let out = "";
@@ -40,10 +46,35 @@ async function resolveRefToSha(ref) {
 }
 function shortSha(sha) { return (sha || "").substring(0, 12); }
 function guessLabel(ref) { const m = (ref || "").match(/^(?:refs\/remotes\/\w+\/|origin\/)?(.+)$/); return m ? m[1] : (ref || ""); }
-async function commitLine(sha) { let out = ""; await exec.exec("bash", ["-lc", `git --no-pager log -1 --format="%H %s" ${sha}`], { listeners: { stdout: d => (out += d.toString()) }}); return out.trim(); }
-function fmtNow() { const pad = n => String(n).padStart(2, "0"); const d = new Date(); return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
 
-// ---------------------- Markdown table -> HTML ----------------------
+async function commitLine(sha) {
+  let out = "";
+  await exec.exec("bash", ["-lc", `git --no-pager log -1 --format="%H %s" ${sha}`], {
+    listeners: { stdout: d => (out += d.toString()) },
+  });
+  return out.trim();
+}
+
+// Cambridge/UK time
+function fmtNowUK() {
+  try {
+    const dt = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/London",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hour12: false
+    }).format(new Date());
+    // en-GB usually yields dd/mm/yyyy, we need dd-MM-yyyy HH:mm:ss
+    const m = dt.match(/^(\d{2})\/(\d{2})\/(\d{4}),?\s+(\d{2}):(\d{2}):(\d{2})$/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}`;
+    return dt;
+  } catch {
+    const d = new Date(); const pad = n => String(n).padStart(2,"0");
+    return `${pad(d.getDate())}-${pad(d.getMonth()+1)}-${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+}
+
+// Markdown table -> HTML with inline **bold**, `code` and GHSA/CVE links
 function markdownTableToHtml(md) {
   if (!md || !/\|/.test(md)) return `<div class="muted">No data</div>`;
   const lines = md.split(/\r?\n/).filter(l => l.trim().length > 0);
@@ -80,6 +111,9 @@ function markdownTableToHtml(md) {
   return html;
 }
 
+// Transform dependency-paths markdown table:
+// - Move Depth0 -> Module (strip literal "pkg")
+// - Shift Depth1..n left (Depth1 -> Depth0, etc.)
 function transformDependencyPathsMarkdown(md) {
   if (!md || !/\|/.test(md)) return md;
   const lines = md.split(/\r?\n/);
@@ -93,14 +127,17 @@ function transformDependencyPathsMarkdown(md) {
     depth0:   header.findIndex(h => /^depth0$/i.test(h)),
   };
   const otherDepths = header.map((h,i)=> ({h,i})).filter(x => /^depth\d+$/i.test(x.h)).sort((a,b)=> parseInt(a.h.slice(5)) - parseInt(b.h.slice(5)));
+
   const newHeader = [];
   if (colIdx.severity >= 0) newHeader.push(header[colIdx.severity]);
   newHeader.push("Module");
   if (colIdx.pkg >= 0) newHeader.push(header[colIdx.pkg]);
   for (const d of otherDepths) { const n = parseInt(d.h.slice(5),10); if (!isNaN(n) && n >= 1) newHeader.push(`Depth${n-1}`); }
+
   const out = [];
   out.push("| " + newHeader.join(" | ") + " |");
   out.push("| " + newHeader.map(()=> "---").join(" | ") + " |");
+
   for (let i = headerIdx + 2; i < lines.length; i++) {
     if (!/\|/.test(lines[i])) continue;
     const row = cells(lines[i]); const get = (idx) => (idx >= 0 && idx < row.length ? row[idx] : "");
@@ -110,6 +147,7 @@ function transformDependencyPathsMarkdown(md) {
     const pkg = get(colIdx.pkg);
     const shifted = [];
     for (const d of otherDepths) { const n = parseInt(d.h.slice(5),10); if (!isNaN(n) && n >= 1) shifted.push(get(d.i)); }
+
     const cellsOut = [];
     if (colIdx.severity >= 0) cellsOut.push(severity);
     cellsOut.push(moduleClean);
@@ -120,7 +158,7 @@ function transformDependencyPathsMarkdown(md) {
   return out.join("\n");
 }
 
-// ---------------------- Puppeteer + PDF ----------------------
+// ---------- Puppeteer + PDF ----------
 async function ensureChromeForPuppeteer(version = "24.10.2") {
   const cacheDir = process.env.PUPPETEER_CACHE_DIR || `${os.homedir()}/.cache/puppeteer`;
   const cmd = `PUPPETEER_CACHE_DIR=${cacheDir} npx --yes puppeteer@${version} browsers install chrome`;
@@ -130,9 +168,9 @@ async function ensureChromeForPuppeteer(version = "24.10.2") {
 
 /**
  * Render HTML to PDF.
- * - displayHeaderFooter=false para la portada
+ * - displayHeaderFooter=false for cover
  * - headerMeta: { repo, base, head, section, date, logo }
- * - Header/Footer con fondo oscuro y texto claro
+ * - Header/Footer with dark background (brand) and light text; subtle framing simulated via background bar.
  */
 async function renderPdfFromHtml(html, outPath, { landscape = false, headerMeta, displayHeaderFooter = true } = {}) {
   const puppeteer = require("puppeteer");
@@ -147,7 +185,7 @@ async function renderPdfFromHtml(html, outPath, { landscape = false, headerMeta,
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.emulateMediaType("screen");
 
-    // Charts
+    // Chart.js inject & render
     const hasAnyCanvas = await page.$("canvas");
     if (hasAnyCanvas) {
       await page.addScriptTag({ url: "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" });
@@ -181,7 +219,7 @@ async function renderPdfFromHtml(html, outPath, { landscape = false, headerMeta,
       });
     }
 
-    // Mermaid
+    // Mermaid inject & render
     const hasMermaid = await page.$("[data-mermaid]");
     if (hasMermaid) {
       await page.addScriptTag({ url: "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" });
@@ -206,15 +244,15 @@ async function renderPdfFromHtml(html, outPath, { landscape = false, headerMeta,
     }
 
     const meta = headerMeta || {};
-    const brandBg = "#111827";     // fondo (gris muy oscuro)
-    const brandFg = "#F9FAFB";     // texto claro
+    const brandBg = "#111827";
+    const brandFg = "#F9FAFB";
     const footerLogo = meta.logo ? `<img src="${escapeHtml(meta.logo)}" style="height:10px; vertical-align:middle; margin-right:8px"/>` : "";
 
     const headerHtml = `
       <div style="width:100%;">
         <div style="font-size:9px; color:${brandFg}; background:${brandBg}; width:100%; padding:6px 10mm;">
           <span style="float:left;">
-            Security Report — ${escapeHtml(meta.repo || "")}${meta.base && meta.head ? ` — ${escapeHtml(meta.base)} vs ${escapeHtml(meta.head)}` : ""}
+            Security Report — ${escapeHtml(meta.repo || "")}${meta.base && meta.head ? \` — \${escapeHtml(meta.base)} vs \${escapeHtml(meta.head)}\` : ""}
           </span>
           <span style="float:right;">${escapeHtml(meta.section || "")}</span>
         </div>
@@ -242,7 +280,8 @@ async function renderPdfFromHtml(html, outPath, { landscape = false, headerMeta,
       margin: landscape ? landscapeMargins : portraitMargins
     });
   } finally {
-    await browser.close();
+    // ensure browser closes even on failure
+    try { await browser.close(); } catch {}
   }
 }
 
@@ -261,11 +300,11 @@ async function mergePdfs(pdfPaths, outPath) {
   fs.writeFileSync(outPath, finalBytes);
 }
 
-// ---------------------- PR/Slack helpers (omitidos aquí por brevedad; deja los tuyos) ----------------------
+// ---------------------- PR comment / Slack (tu lógica existente puede quedarse) ----------------------
 
 async function run() {
   try {
-    // Inputs (igual que ya tenías) ...
+    // Inputs
     const baseRefInput   = core.getInput("base_ref", { required: true });
     const headRefInput   = core.getInput("head_ref", { required: true });
     const scanPath       = core.getInput("path") || ".";
@@ -280,7 +319,7 @@ async function run() {
     const titleLogo      = core.getInput("title_logo_url") || "";
 
     const repository = process.env.GITHUB_REPOSITORY || "";
-    const nowStr = fmtNow();
+    const nowStrUK = fmtNowUK();
 
     const workdir = process.cwd();
     const baseDir = path.join(workdir, "__base__");
@@ -310,6 +349,7 @@ async function run() {
     const baseScan = await scanSbom(baseSbom);
     const headScan = await scanSbom(headSbom);
 
+    // Diff (renders with branch labels)
     const d = diff(baseScan.matches || [], headScan.matches || [], minSeverity, baseLabel, headLabel);
     const diffMarkdown = renderMarkdownTable(d.news, d.removed, d.unchanged);
     const diffHtml = markdownTableToHtml(diffMarkdown);
@@ -317,6 +357,7 @@ async function run() {
     const baseCommit = await commitLine(baseSha);
     const headCommit = await commitLine(headSha);
 
+    // Summary
     if (writeSummary) {
       const summary = [];
       summary.push("### Vulnerability Diff (Syft+Grype)\n");
@@ -330,7 +371,7 @@ async function run() {
       await core.summary.addRaw(summary.join("\n")).write();
     }
 
-    // -------- Reporting (HTML/PDF) --------
+    // ------------- Reporting (HTML/PDF) -------------
     let reportHtmlMainPath = "", reportHtmlLscpPath = "", reportPdfPath = "";
     try {
       const baseBomJson = JSON.parse(fs.readFileSync(baseSbom, "utf8"));
@@ -338,6 +379,7 @@ async function run() {
       const mermaidBase = buildMermaidGraphFromBOMImproved(baseBomJson, baseScan.matches || [], graphMaxNodes);
       const mermaidHead = buildMermaidGraphFromBOMImproved(headBomJson, headScan.matches || [], graphMaxNodes);
 
+      // Dependency paths => markdown -> transform -> HTML
       const pathsBaseMdRaw = renderPathsMarkdownTable(buildDependencyPathsTable(baseBomJson, baseScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 }));
       const pathsHeadMdRaw = renderPathsMarkdownTable(buildDependencyPathsTable(headBomJson, headScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 }));
       const pathsBaseMd = transformDependencyPathsMarkdown(pathsBaseMdRaw);
@@ -345,8 +387,18 @@ async function run() {
       const pathsBaseHtml = markdownTableToHtml(pathsBaseMd);
       const pathsHeadHtml = markdownTableToHtml(pathsHeadMd);
 
+      // tool versions (best-effort; optional)
+      const toolVersions = {
+        cyclonedx: "auto",
+        syft: "auto",
+        grype: "auto",
+        chartjs: "4.4.1",
+        mermaid: "10.x",
+        puppeteer: "24.10.2"
+      };
+
       // Cover / Main / Landscape HTML
-      const htmlCover = buildHtmlCover({ titleLogoUrl: titleLogo, repo: repository, baseLabel, headLabel, nowStr });
+      const htmlCover = buildHtmlCover({ titleLogoUrl: titleLogo, repo: repository, baseLabel, headLabel, nowStr: nowStrUK });
       const htmlMain = buildHtmlMain({
         repository,
         baseLabel, baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
@@ -356,8 +408,9 @@ async function run() {
         diffTableHtml: diffHtml,
         baseMatches: baseScan.matches || [],
         headMatches: headScan.matches || [],
-        nowStr,
-        title_logo_url: titleLogo
+        nowStr: nowStrUK,
+        title_logo_url: titleLogo,
+        toolVersions
       });
       const htmlLandscape = buildHtmlLandscape({
         baseLabel, headLabel,
@@ -366,7 +419,7 @@ async function run() {
         pathsHeadMd: pathsHeadHtml
       });
 
-      // Save HTML (opcional, útil como artifact)
+      // Save HTML (optional artifacts)
       const reportHtmlMainPathLocal = path.join(workdir, "report-main.html");
       const reportHtmlLscpPathLocal = path.join(workdir, "report-landscape.html");
       fs.writeFileSync(reportHtmlMainPathLocal, htmlMain, "utf8");
@@ -380,13 +433,13 @@ async function run() {
         const pdfMain  = path.join(workdir, "report-main.pdf");
         const pdfLscp  = path.join(workdir, "report-landscape.pdf");
 
-        // 1) COVER — sin header/footer
+        // Cover — no header/footer
         await renderPdfFromHtml(htmlCover, pdfCover, {
           landscape: false,
           displayHeaderFooter: false
         });
 
-        // 2) MAIN — con header/footer y logo
+        // Main — header/footer + logo + UK time
         await renderPdfFromHtml(htmlMain, pdfMain, {
           landscape: false,
           headerMeta: {
@@ -394,13 +447,13 @@ async function run() {
             base: baseLabel,
             head: headLabel,
             section: "Main",
-            date: nowStr,
+            date: nowStrUK,
             logo: titleLogo
           },
           displayHeaderFooter: true
         });
 
-        // 3) APPENDIX (landscape) — con header/footer y logo
+        // Appendix (landscape) — header/footer + logo + UK time
         await renderPdfFromHtml(htmlLandscape, pdfLscp, {
           landscape: true,
           headerMeta: {
@@ -408,7 +461,7 @@ async function run() {
             base: baseLabel,
             head: headLabel,
             section: "Appendix",
-            date: nowStr,
+            date: nowStrUK,
             logo: titleLogo
           },
           displayHeaderFooter: true
@@ -422,7 +475,7 @@ async function run() {
       core.warning(`Reporting (HTML/PDF) failed: ${err && err.stack ? err.stack : err}`);
     }
 
-    // Artifacts (igual que ya tenías) ...
+    // Raw data artifacts
     const grypeBasePath = path.join(workdir, "grype-base.json");
     const grypeHeadPath = path.join(workdir, "grype-head.json");
     fs.writeFileSync(grypeBasePath, JSON.stringify(baseScan, null, 2));
@@ -430,19 +483,24 @@ async function run() {
     const diffJsonPath = path.join(workdir, "diff.json");
     fs.writeFileSync(diffJsonPath, JSON.stringify({ news: d.news, removed: d.removed, unchanged: d.unchanged }, null, 2));
 
+    // Markdown report (debug/extra)
     const reportMdPath = path.join(workdir, "report.md");
-    fs.writeFileSync(reportMdPath, buildMarkdownReport({
-      baseLabel, baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
-      headLabel, headInput: headRefInput, headSha, headCommitLine: headCommit,
-      minSeverity,
-      counts: { new: d.news.length, removed: d.removed.length, unchanged: d.unchanged.length },
-      table: diffMarkdown,
-      headGrype: headScan,
-      headBOM: JSON.parse(fs.readFileSync(headSbom, "utf8")),
-      graphMaxNodes
-    }), "utf8");
+    fs.writeFileSync(
+      reportMdPath,
+      buildMarkdownReport({
+        baseLabel, baseInput: baseRefInput, baseSha, baseCommitLine: baseCommit,
+        headLabel, headInput: headRefInput, headSha, headCommitLine: headCommit,
+        minSeverity,
+        counts: { new: d.news.length, removed: d.removed.length, unchanged: d.unchanged.length },
+        table: renderMarkdownTable(d.news, d.removed, d.unchanged),
+        headGrype: headScan,
+        headBOM: JSON.parse(fs.readFileSync(headSbom, "utf8")),
+        graphMaxNodes
+      }),
+      "utf8"
+    );
 
-    if ((core.getInput("upload_artifact") || "true") === "true") {
+    if (uploadArtifact) {
       try {
         const client = new artifact.DefaultArtifactClient();
         const files = [
@@ -455,15 +513,18 @@ async function run() {
         for (const n of ["report-cover.pdf","report-main.pdf","report-landscape.pdf","report.pdf"]) {
           const p = path.join(workdir, n); if (fs.existsSync(p)) extra.push(p);
         }
-        await client.uploadArtifact(core.getInput("artifact_name") || "vuln-diff-artifacts", [...files, ...extra], workdir, { continueOnError: true, retentionDays: 90 });
+        await client.uploadArtifact(artifactName, [...files, ...extra], workdir, { continueOnError: true, retentionDays: 90 });
       } catch (e) {
         core.warning(`Artifact upload failed: ${e && e.stack ? e.stack : e}`);
       }
     }
 
-    // Cleanup worktrees
+    // Cleanup
     await sh(`git worktree remove ${baseDir} --force || true`);
+    // only remove if we created it
+    let createdHeadWorktree = fs.existsSync(headDir) && headDir !== workdir;
     if (createdHeadWorktree) await sh(`git worktree remove ${headDir} --force || true`);
+
   } catch (error) {
     core.setFailed(error.message || String(error));
   }
