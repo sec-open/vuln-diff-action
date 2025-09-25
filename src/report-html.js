@@ -1,13 +1,9 @@
 // src/report-html.js
-// v2 PDF layout refinado:
-// - Portada separada (sin header/footer), título + repo + ramas + fecha
-// - Table of Contents mejorado (ol numerado, más interlineado)
-// - Secciones numeradas: 1..9
-// - Gráficas con pie de figura: "Figure N — ..."
-// - Summary en una columna (Base y Head uno debajo del otro)
+// v2 PDF layout refinado con portada dedicada:
+// - Portada (1 página) generada por buildHtmlCover() — sin header/footer
+// - Main y Appendix como antes, con secciones numeradas
+// - TOC mejorado
 // - Diff table espera HTML (no MD)
-// - Landscape appendix con mermaid y dependency paths (HTML)
-// Nota: los headers/footers se aplican desde index.js al PDF "main" y "appendix", NO a la portada.
 
 const SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
 
@@ -34,7 +30,7 @@ function countSeverities(matches) {
 function cssBase() {
   return `
   <style>
-    :root { --fg:#24292f; --muted:#57606a; --border:#d0d7de; --bg:#fff; --subtle:#f6f8fa; }
+    :root { --fg:#1f2937; --muted:#6b7280; --border:#e5e7eb; --bg:#ffffff; --subtle:#f9fafb; }
     *{ box-sizing:border-box }
     body{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, Helvetica;
           color:var(--fg); background:var(--bg); margin:0 }
@@ -70,24 +66,33 @@ function cssBase() {
     #chartChanges { width:100%; height:260px; }
 
     /* TOC */
-    .toc-wrap { max-width: 560px; }
-    ol.toc { list-style: decimal; padding-left: 20px; line-height: 1.65; }
-    ol.toc li { margin: 2px 0; }
+    .toc-wrap { max-width: 580px; }
+    ol.toc { list-style: decimal; padding-left: 20px; line-height: 1.7; font-size: 14px; }
+    ol.toc li { margin: 3px 0; }
   </style>`;
 }
 
-/* -------------------- Portada (sin header/footer) -------------------- */
-function coverHtml({ titleLogoUrl, repo, baseLabel, headLabel, nowStr }) {
-  return `
-  <div class="page" style="text-align:center">
+/* -------------------- Portada (1 página, sin header/footer) -------------------- */
+function buildHtmlCover({ titleLogoUrl, repo, baseLabel, headLabel, nowStr }) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Security Report — Cover</title>
+  ${cssBase()}
+</head>
+<body>
+  <div class="page" style="text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:90vh;">
     ${titleLogoUrl ? `<img class="logo" src="${esc(titleLogoUrl)}" alt="logo" />` : ""}
-    <h1>Security Report</h1>
-    <div class="muted">${esc(repo)}</div>
-    <div class="hr"></div>
-    <div class="mono">Comparison of branches ${esc(baseLabel)} vs ${esc(headLabel)}</div>
-    <div style="height:30vh"></div>
+    <h1 style="font-size:34px; letter-spacing:0.2px;">Security Report</h1>
+    <div class="muted" style="font-size:16px; margin-top:4px;">${esc(repo)}</div>
+    <div class="hr" style="width:420px;"></div>
+    <div class="mono" style="font-size:14px; margin-top:6px;">Comparison of branches <b>${esc(baseLabel)}</b> vs <b>${esc(headLabel)}</b></div>
+    <div style="height:28vh"></div>
     <div class="muted small">${esc(nowStr)}</div>
-  </div>`;
+  </div>
+</body>
+</html>`;
 }
 
 /* -------------------- TOC mejorado -------------------- */
@@ -170,7 +175,7 @@ function summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel,
   </div>`;
 }
 
-/* -------------------- Severities (donuts) con figura -------------------- */
+/* -------------------- Severities (donuts) -------------------- */
 function severityChartsHtml({ baseLabel, headLabel }) {
   return `
   <div class="page">
@@ -189,7 +194,7 @@ function severityChartsHtml({ baseLabel, headLabel }) {
   </div>`;
 }
 
-/* -------------------- Change overview (barra) con figura -------------------- */
+/* -------------------- Change overview (barra) -------------------- */
 function changesOverviewHtml({ baseLabel, headLabel, counts }) {
   const n1 = counts?.new ?? 0;
   const n2 = counts?.removed ?? 0;
@@ -229,7 +234,6 @@ function mermaidSection(title, code, figureNumber) {
 }
 
 function dependencyPathsSection(title, htmlOrMd, figureNumber) {
-  // htmlOrMd ya nos llega en HTML (index.js lo convierte); fallback si viniera MD.
   const body = htmlOrMd && /<table|<div|<ul|<ol|<pre/i.test(htmlOrMd)
     ? htmlOrMd
     : `<div class="md"><pre>${esc(htmlOrMd||"(no data)")}</pre></div>`;
@@ -241,7 +245,7 @@ function dependencyPathsSection(title, htmlOrMd, figureNumber) {
   </div>`;
 }
 
-/* -------------------- Build main (portrait) HTML -------------------- */
+/* -------------------- Build main (portrait) -------------------- */
 function buildHtmlMain(options) {
   options = options || {};
   const repo            = options.repository || "";
@@ -255,13 +259,12 @@ function buildHtmlMain(options) {
   const headCommitLine  = options.headCommitLine || "";
   const minSeverity     = options.minSeverity || "LOW";
   const counts          = options.counts || { new:0, removed:0, unchanged:0 };
-  const diffTableHtml   = options.diffTableHtml || "";        // HTML
+  const diffTableHtml   = options.diffTableHtml || "";
   const baseMatches     = options.baseMatches || [];
   const headMatches     = options.headMatches || [];
   const nowStr          = options.nowStr || "";
   const titleLogoUrl    = options.title_logo_url || "";
 
-  // Precompute severity counts for client-side Chart.js render
   const baseCounts = countSeverities(baseMatches);
   const headCounts = countSeverities(headMatches);
   const sevLabels  = JSON.stringify(SEVERITY_ORDER);
@@ -277,15 +280,26 @@ function buildHtmlMain(options) {
   ${cssBase()}
 </head>
 <body>
-  ${coverHtml({ titleLogoUrl, repo, baseLabel, headLabel, nowStr })}
-  ${tocHtml()}
+  <!-- Portada NO incluida aquí; se genera con buildHtmlCover() -->
+  <div class="page">
+    <h2>Table of contents</h2>
+    <div class="toc-wrap">
+      <ol class="toc">
+        <li>Introduction</li>
+        <li>Summary</li>
+        <li>Severity distribution</li>
+        <li>Change overview</li>
+        <li>Vulnerability diff table</li>
+      </ol>
+    </div>
+  </div>
+
   ${introductionHtml({ baseLabel, headLabel, repo })}
   ${summaryHtml({ baseLabel, baseInput, baseSha, baseCommitLine, headLabel, headInput, headSha, headCommitLine, minSeverity, counts })}
   ${severityChartsHtml({ baseLabel, headLabel })}
   ${changesOverviewHtml({ baseLabel, headLabel, counts })}
   ${diffTableSectionHtml(diffTableHtml)}
 
-  <!-- Chart datasets; rendering happens in Puppeteer via page.addScriptTag(...) -->
   <script>
     window.__vulnChartData = {
       labels: ${sevLabels},
@@ -298,14 +312,14 @@ function buildHtmlMain(options) {
 </html>`;
 }
 
-/* -------------------- Build landscape appendix HTML -------------------- */
+/* -------------------- Build landscape appendix -------------------- */
 function buildHtmlLandscape(options) {
   options = options || {};
   const baseLabel     = options.baseLabel || "BASE";
   const headLabel     = options.headLabel || "HEAD";
   const mermaidBase   = options.mermaidBase || "";
   const mermaidHead   = options.mermaidHead || "";
-  const pathsBaseHtml = options.pathsBaseMd || ""; // allow HTML
+  const pathsBaseHtml = options.pathsBaseMd || "";
   const pathsHeadHtml = options.pathsHeadMd || "";
 
   return `<!DOCTYPE html>
@@ -324,4 +338,8 @@ function buildHtmlLandscape(options) {
 </html>`;
 }
 
-module.exports = { buildHtmlMain, buildHtmlLandscape };
+module.exports = {
+  buildHtmlCover,
+  buildHtmlMain,
+  buildHtmlLandscape
+};
