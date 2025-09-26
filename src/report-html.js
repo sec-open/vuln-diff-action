@@ -107,19 +107,20 @@ function tocHtml() {
     <h2>Table of contents</h2>
     <div class="toc-wrap">
       <ol class="toc">
-        <li>1. Introduction</li>
-        <li>2. Summary</li>
-        <li>3. Severity distribution</li>
-        <li>4. Change overview</li>
-        <li>5. Vulnerability diff table</li>
-        <li>6. Dependency graph base</li>
-        <li>7. Dependency graph head</li>
-        <li>8. Dependency path base</li>
-        <li>9. Dependency path head</li>
+        <li>Introduction</li>
+        <li>Summary</li>
+        <li>Severity distribution</li>
+        <li>Change overview</li>
+        <li>Vulnerability diff table</li>
+        <li>Dependency graph base</li>
+        <li>Dependency graph head</li>
+        <li>Dependency path base</li>
+        <li>Dependency path head</li>
       </ol>
     </div>
   </div>`;
 }
+
 
 /* -------------------- Introducción extendida -------------------- */
 function introductionHtml({ baseLabel, headLabel, repo, toolVersions }) {

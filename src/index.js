@@ -249,7 +249,7 @@ async function renderPdfFromHtml(html, outPath, { landscape = false, headerMeta,
     const meta = headerMeta || {};
     const brandBg = "#111827";
     const brandFg = "#F9FAFB";
-    const footerLogo = meta.logo ? `<img src="${escapeHtml(meta.logo)}" style="height:10px; vertical-align:middle; margin-right:8px"/>` : "";
+    const footerLogo = meta.logo ? `<img src="${escapeHtml(meta.logo)}" style="height:14px; vertical-align:middle; margin-right:8px"/>` : "";
 
     // 🔧 Evitar template literal anidado: construir la parte izquierda como string normal
     const titleLeft =
@@ -265,13 +265,14 @@ async function renderPdfFromHtml(html, outPath, { landscape = false, headerMeta,
         </div>
       </div>`;
 
+    /* Footer without page numbers; show only brand bar + logo (if any) + date (optional) */
     const footerHtml = `
-      <div style="width:100%;">
+      <div style="width:100%; text-align:left;">
         <div style="font-size:9px; color:${brandFg}; background:${brandBg}; width:100%; padding:6px 10mm;">
-          <span style="float:left;">${footerLogo}${escapeHtml(meta.date || "")}</span>
-          <span style="float:right;">Page <span class="pageNumber"></span> / <span class="totalPages"></span></span>
+          ${footerLogo}${escapeHtml(meta.date || "")}
         </div>
       </div>`;
+
 
 
     const portraitMargins = { top: displayHeaderFooter ? "22mm" : "12mm", right: "10mm", bottom: displayHeaderFooter ? "20mm" : "12mm", left: "10mm" };
