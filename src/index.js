@@ -521,8 +521,8 @@ window.__meta__ = {
 html,body{margin:0;padding:0}
 body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Arial,Helvetica;background:var(--bg);color:var(--fg)}
 .app-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--brand);color:var(--brand-fg)}
-.brand{display:flex;align-items:center;gap:12px}
-.logo{width:36px;height:36px;object-fit:contain}
+.brand{display:flex;align-items:center;gap:160px}
+.logo{height:36px;object-fit:contain}
 .titles h1{margin:0;font-size:18px}
 .titles .subtitle{font-size:12px;color:#cbd5e1}
 .meta{font-size:12px;color:#cbd5e1}
