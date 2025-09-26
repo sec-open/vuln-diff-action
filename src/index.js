@@ -117,9 +117,10 @@ code{background:#f1f5f9;padding:2px 6px;border-radius:6px}
 @media (max-width:900px){.app-body{grid-template-columns:1fr}.sidebar{grid-row:2}.content{grid-row:1}}
 `;
 
-  const APP_JS = `'use strict';
+const APP_JS = `'use strict';
 
 // Simple hash router
+
 const view = document.getElementById('view');
 const routes = {
   "/intro": renderIntro,
@@ -261,7 +262,7 @@ async function renderMermaid(targetId, code){
 
 async function extractSection(path, title){
   const html = await fetch(path).then(r=>r.text());
-  const re = new RegExp('<h2>[^<]*'+title.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&')+'[^<]*</h2>[\\\\s\\\\S]*?(<table[\\\\s\\\\S]*?</table>)','i');
+  const re = new RegExp('<h2>[^<]*'+title.replace(/[.*+?^\\$\\{\\}()|[\\]\\\\]/g,'\\\\$&')+'[^<]*<\\/h2>[\\\\s\\\\S]*?(<table[\\\\s\\\\S]*?<\\/table>)','i');
   const m = html.match(re);
   return m ? m[1] : '<div class="panel">No data</div>';
 }
