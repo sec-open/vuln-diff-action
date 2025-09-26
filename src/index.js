@@ -25,6 +25,22 @@ const { buildHtmlCover, buildHtmlMain, buildHtmlLandscape } = require("./report-
 
 // ---------------------- helpers ----------------------
 
+// Recursively collect file paths inside a directory
+function listFilesRecursively(dir) {
+  const out = [];
+  function walk(d) {
+    if (!fs.existsSync(d)) return;
+    for (const e of fs.readdirSync(d)) {
+      const p = path.join(d, e);
+      const st = fs.statSync(p);
+      if (st.isDirectory()) walk(p);
+      else out.push(p);
+    }
+  }
+  walk(dir);
+  return out;
+}
+
 // --- HTML interactive report bundle (standalone, independent from PDF) ---
 function writeHtmlReportBundle(workdir, { repository, baseLabel, headLabel, logoUrl, generatedAt }) {
   const htmlDir = path.join(workdir, "html");
@@ -824,8 +840,18 @@ async function run() {
           const p = path.join(workdir, n); if (fs.existsSync(p)) extra.push(p);
         }
         // ⬇️ include complete html folder
-        extra.push(path.join(workdir, "html"));
-        await client.uploadArtifact(artifactName, [...files, ...extra], workdir, { continueOnError: true, retentionDays: 90 });
+        const htmlDir = path.join(workdir, "html");
+        const htmlFiles = listFilesRecursively(htmlDir);
+
+        const allFiles = [...files, ...extra, ...htmlFiles];
+
+        await client.uploadArtifact(
+          artifactName,
+          allFiles,
+          workdir, // rootDirectory: mantenemos el workdir para que queden rutas relativas limpias
+          { continueOnError: true, retentionDays: 90 }
+        );
+
       } catch (e) {
         core.warning(`Artifact upload failed: ${e && e.stack ? e : e}`);
       }
