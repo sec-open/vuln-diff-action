@@ -24,6 +24,29 @@ const {
 const { buildHtmlCover, buildHtmlMain, buildHtmlLandscape } = require("./report-html");
 
 // ---------------------- helpers ----------------------
+// --- fetch remote image and return data URI (for header/footer templates) ---
+function fetchToDataUri(url, defaultMime = "image/png") {
+  return new Promise((resolve) => {
+    try {
+      if (!url) return resolve(null);
+      const mod = url.startsWith("https://") ? require("https") : require("http");
+      mod.get(url, (res) => {
+        if (res.statusCode !== 200) return resolve(null);
+        const chunks = [];
+        res.on("data", (d) => chunks.push(d));
+        res.on("end", () => {
+          const buf = Buffer.concat(chunks);
+          const mime = res.headers["content-type"] || defaultMime;
+          const b64 = buf.toString("base64");
+          resolve(`data:${mime};base64,${b64}`);
+        });
+      }).on("error", () => resolve(null));
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
 function escapeHtml(s){
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
                   .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -243,15 +266,20 @@ async function renderPdfFromHtml(html, outPath, { landscape = false, headerMeta,
       });
     }
 
-    // Header/Footer templates
-    // dentro de renderPdfFromHtml(...)
-
     const meta = headerMeta || {};
     const brandBg = "#111827";
     const brandFg = "#F9FAFB";
-    const footerLogo = meta.logo ? `<img src="${escapeHtml(meta.logo)}" style="height:14px; vertical-align:middle; margin-right:8px"/>` : "";
 
-    // 🔧 Evitar template literal anidado: construir la parte izquierda como string normal
+    // Intenta convertir el logo a data URI (necesario para header/footer)
+    let footerLogoSrc = null;
+    if (meta.logo) {
+      footerLogoSrc = await fetchToDataUri(meta.logo);
+    }
+    const footerLogo = footerLogoSrc
+      ? `<img src="${escapeHtml(footerLogoSrc)}" style="height:14px; vertical-align:middle; margin-right:8px"/>`
+      : "";
+
+    // Construir título sin backticks anidados
     const titleLeft =
       'Security Report — ' +
       escapeHtml(meta.repo || '') +
@@ -272,6 +300,7 @@ async function renderPdfFromHtml(html, outPath, { landscape = false, headerMeta,
           ${footerLogo}${escapeHtml(meta.date || "")}
         </div>
       </div>`;
+
 
 
 
