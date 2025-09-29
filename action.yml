@@ -1,84 +1,78 @@
 name: "Vulnerability Diff Action"
-description: "Compare vulnerabilities between two refs using Syft+Grype (enhanced HTML/PDF reporting, PR comment, Slack)"
+description: "Compare vulnerabilities between two refs using Syft+Grype → base.json, head.json, diff.json → Markdown/HTML/PDF renderers"
 author: "sec-open"
-branding:
-  color: "purple"
-  icon: "shield"
+runs:
+  using: "node20"
+  main: "dist/index.js"
 
 inputs:
   base_ref:
-    description: "Base ref (branch, tag, or commit SHA)"
+    description: "Base branch/tag/SHA"
     required: true
   head_ref:
-    description: "Head ref (branch, tag, or commit SHA)"
+    description: "Head branch/tag/SHA"
     required: true
   path:
-    description: "Path to scan (relative to repo root)"
+    description: "Directory to scan"
     required: false
     default: "."
   build_command:
-    description: "Optional build command to run in each worktree before SBOM (e.g., mvn -q -DskipTests package)"
+    description: "Optional build command (e.g. mvn -q -DskipTests package)"
     required: false
     default: ""
   min_severity:
-    description: "Minimum severity to include (LOW, MEDIUM, HIGH, CRITICAL)"
+    description: "LOW|MEDIUM|HIGH|CRITICAL"
     required: false
     default: "LOW"
   write_summary:
-    description: "Write GitHub job summary"
+    description: "Write GitHub job summary (markdown)"
+    required: false
+    default: "true"
+  report_html:
+    description: "Generate interactive HTML report"
+    required: false
+    default: "true"
+  report_pdf:
+    description: "Generate PDF (cover + main + landscape)"
     required: false
     default: "true"
   upload_artifact:
-    description: "Upload artifacts (SBOMs, scans, diff, reports)"
+    description: "Upload artifacts (JSON/HTML/PDF)"
     required: false
     default: "true"
   artifact_name:
     description: "Artifact name"
     required: false
-    default: "vuln-diff-artifacts"
-  graph_max_nodes:
-    description: "Max nodes for dependency graphs"
-    required: false
-    default: "150"
-
-  # Reporting v2 options
-  report_html:
-    description: "Generate HTML report (besides PDF)"
-    required: false
-    default: "true"
-  report_pdf:
-    description: "Generate PDF report"
-    required: false
-    default: "true"
+    default: "vulnerability-diff"
   title_logo_url:
-    description: "Optional logo URL for report cover"
+    description: "Optional logo URL for cover/header/footer"
     required: false
     default: ""
-
-  # PR comment
+  graph_max_nodes:
+    description: "Max graph nodes (mermaid)"
+    required: false
+    default: "150"
   pr_comment:
-    description: "Upsert a reusable PR comment"
+    description: "Create/update PR comment with NEW vulns"
     required: false
     default: "false"
   pr_comment_marker:
-    description: "Hidden marker used to find/update the PR comment"
+    description: "Hidden marker for updatable PR comment"
     required: false
     default: "<!-- vuln-diff-action:comment -->"
   github_token:
-    description: "GitHub token (required for PR comment)"
+    description: "GitHub token for PR comment"
     required: false
     default: ""
-
-  # Slack
   slack_webhook_url:
-    description: "Slack Incoming Webhook URL (secret)"
-    required: false
-    default: ""
-  slack_channel:
-    description: "Optional Slack channel override (may be ignored by your webhook)"
+    description: "Optional Slack incoming webhook"
     required: false
     default: ""
 
-runs:
-  using: "node20"
-  main: "dist/index.js"
+outputs:
+  new_count:
+    description: "Number of NEW vulns"
+  removed_count:
+    description: "Number of REMOVED vulns"
+  unchanged_count:
+    description: "Number of UNCHANGED vulns"
