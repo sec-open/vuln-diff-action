@@ -1,6 +1,7 @@
 // src/index.js
-// v2 — Orchestrates SBOM/scan/diff, builds HTML bundle + PDFs (cover/main/landscape), uploads artifacts, PR/summary, and now Dashboard (Chart.js).
-// Comments are in English as requested.
+// v2 — Orchestrates SBOM/scan/diff, builds HTML bundle + PDFs (cover/main/landscape),
+// uploads artifacts, PR/summary, Slack (si está configurado) y Dashboard (Chart.js).
+// Comments in English as requested.
 
 const core = require("@actions/core");
 const exec = require("@actions/exec");
@@ -166,6 +167,56 @@ function listFilesRecursively(dir) {
 // ------------------------------------------------------------
 // HTML helpers (tables/paths normalization for dashboard)
 // ------------------------------------------------------------
+
+// Normalize dependency-path rows to a stable JSON structure for the dashboard.
+// Accepts arrays, {rows:[...]}, or JSON strings; returns [] if not parseable.
+function normalizePathsForJson(rowsLike) {
+  let rows = [];
+  try {
+    if (Array.isArray(rowsLike)) {
+      rows = rowsLike;
+    } else if (rowsLike && Array.isArray(rowsLike.rows)) {
+      rows = rowsLike.rows;
+    } else if (typeof rowsLike === "string") {
+      try {
+        const parsed = JSON.parse(rowsLike);
+        if (Array.isArray(parsed)) rows = parsed;
+        else if (parsed && Array.isArray(parsed.rows)) rows = parsed.rows;
+      } catch {
+        rows = [];
+      }
+    } else if (rowsLike && typeof rowsLike === "object") {
+      const keys = Object.keys(rowsLike);
+      if (keys.some((k) => /^depth\d+/i.test(k)) || "module" in rowsLike || "package" in rowsLike) {
+        rows = [rowsLike];
+      } else {
+        rows = [];
+      }
+    }
+  } catch {
+    rows = [];
+  }
+
+  if (!Array.isArray(rows)) rows = [];
+
+  return rows.map((r) => {
+    const severity = r.severity || (r.vulnerability && r.vulnerability.severity) || "UNKNOWN";
+    const moduleName = r.module || r.depth0 || (Array.isArray(r.path) && r.path[0]) || "";
+    const pkg = r.package || r.pkg || r.name || "";
+    const pathArr = Array.isArray(r.path)
+      ? r.path.slice()
+      : Object.keys(r || {})
+          .filter((k) => /^depth\d+/i.test(k))
+          .sort((a, b) => parseInt(a.slice(5), 10) - parseInt(b.slice(5), 10))
+          .map((k) => r[k])
+          .filter(Boolean);
+    const depth = Number.isFinite(r.depth) ? r.depth : pathArr.length;
+    const vulnId = r.vulnId || r.id || undefined;
+    return { severity, module: moduleName, package: pkg, path: pathArr, depth, vulnId };
+  });
+}
+
+// Convert markdown table → simple HTML table (for inline rendering)
 function markdownTableToHtml(md) {
   if (!md || !/\|/.test(md)) return '<div class="muted">No data</div>';
   const lines = md.split(/\r?\n/).filter((l) => l.trim());
@@ -174,12 +225,23 @@ function markdownTableToHtml(md) {
   if (!sep.replace(/\|/g, "").trim().match(/^-{3,}|:?-{3,}:?/)) return '<pre class="md">' + esc(md) + "</pre>";
 
   const cells = function (l) {
-    return l.split("|").map(function (c) { return c.trim(); }).filter(function (_v, i, a) { return !(i === 0 || i === a.length - 1); });
+    return l
+      .split("|")
+      .map(function (c) {
+        return c.trim();
+      })
+      .filter(function (_v, i, a) {
+        return !(i === 0 || i === a.length - 1);
+      });
   };
   const inline = function (t) {
     return String(t || "")
-      .replace(/`([^`]+)`/g, function (_m, v) { return "<code>" + esc(v) + "</code>"; })
-      .replace(/\*\*([^*]+)\*\*/g, function (_m, v) { return "<strong>" + esc(v) + "</strong>"; })
+      .replace(/`([^`]+)`/g, function (_m, v) {
+        return "<code>" + esc(v) + "</code>";
+      })
+      .replace(/\*\*([^*]+)\*\*/g, function (_m, v) {
+        return "<strong>" + esc(v) + "</strong>";
+      })
       .replace(/\b(GHSA-[A-Za-z0-9-]{9,})\b/g, function (_m, id) {
         return '<a href="https://github.com/advisories/' + id + '" target="_blank" rel="noopener" title="Open ' + id + '">' + id + "</a>";
       })
@@ -189,7 +251,9 @@ function markdownTableToHtml(md) {
   };
 
   let html = '<table class="tbl"><thead><tr>';
-  cells(header).forEach(function (h) { html += "<th>" + inline(h) + "</th>"; });
+  cells(header).forEach(function (h) {
+    html += "<th>" + inline(h) + "</th>";
+  });
   html += "</tr></thead><tbody>";
   for (let i = 2; i < lines.length; i++) {
     const row = cells(lines[i]).map(inline);
@@ -199,32 +263,12 @@ function markdownTableToHtml(md) {
   return html;
 }
 
-// Normalize dependency-path rows for JSON (used by dashboard)
-function normalizePathsForJson(rows) {
-  return (rows || []).map(function (r) {
-    const severity = r.severity || (r.vulnerability && r.vulnerability.severity) || "UNKNOWN";
-    const moduleName =
-      r.module || r.depth0 || (Array.isArray(r.path) && r.path[0]) || "";
-    const pkg = r.package || r.pkg || r.name || "";
-    const pathArr = Array.isArray(r.path)
-      ? r.path.slice()
-      : Object.keys(r)
-          .filter(function (k) { return /^depth\d+/i.test(k); })
-          .sort(function (a, b) { return parseInt(a.slice(5), 10) - parseInt(b.slice(5), 10); })
-          .map(function (k) { return r[k]; })
-          .filter(Boolean);
-    const depth = Number.isFinite(r.depth) ? r.depth : pathArr.length;
-    const vulnId = r.vulnId || r.id || undefined;
-    return { severity: severity, module: moduleName, package: pkg, path: pathArr, depth: depth, vulnId: vulnId };
-  });
-}
-
 // ------------------------------------------------------------
 // Puppeteer + PDF (kept simple; Chrome installed at runtime)
 // ------------------------------------------------------------
 async function ensureChromeForPuppeteer(version) {
   const ver = version || "24.10.2";
-  const cacheDir = process.env.PUPPETEER_CACHE_DIR || (os.homedir() + "/.cache/puppeteer");
+  const cacheDir = process.env.PUPPETEER_CACHE_DIR || path.join(os.homedir(), ".cache/puppeteer");
   const cmd = "PUPPETEER_CACHE_DIR=" + cacheDir + " npx --yes puppeteer@" + ver + " browsers install chrome";
   await sh(cmd);
   return cacheDir;
@@ -418,8 +462,8 @@ function writeHtmlReportBundle(workdir, meta) {
     ["diff.json", "diff.json"],
     ["grype-base.json", "grype-base.json"],
     ["grype-head.json", "grype-head.json"],
-    ["paths-base.json", "paths-base.json"],   // new
-    ["paths-head.json", "paths-head.json"],   // new
+    ["paths-base.json", "paths-base.json"],
+    ["paths-head.json", "paths-head.json"],
     ["report-landscape.html", "report-landscape.html"],
     ["report.md", "report.md"],
   ];
@@ -429,48 +473,56 @@ function writeHtmlReportBundle(workdir, meta) {
     if (fs.existsSync(from)) fs.copyFileSync(from, to);
   }
 
-  const INDEX_HTML =
-    '<!DOCTYPE html><html lang="en"><head>' +
-    '<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>' +
-    "<title>Security Report — " + esc(repository) + "</title>" +
-    '<link rel="stylesheet" href="./css/style.css"/>' +
-    '<link rel="stylesheet" href="./css/dashboard.css"/>' +
-    "<script>window.__meta__=" + JSON.stringify({
-      repo: repository,
-      baseLabel: baseLabel,
-      headLabel: headLabel,
-      baseSha: baseSha,
-      headSha: headSha,
-      generatedAt: generatedAt
-    }) + ";</script>" +
-    '<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>' +
-    '<script defer src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>' +
-    '<script defer src="./js/app.js"></script>' +
-    '<script defer src="./js/dashboard.js"></script>' +
-    "</head><body>" +
-    '<header class="app-header"><div class="brand">' +
-    (logoUrl ? '<img class="logo" src="' + esc(logoUrl) + '" alt="logo"/>' : "") +
+  const INDEX_HTML = [
+    "<!DOCTYPE html>",
+    '<html lang="en"><head>',
+    '<meta charset="utf-8"/>',
+    '<meta name="viewport" content="width=device-width,initial-scale=1"/>',
+    "<title>Security Report — " + esc(repository) + "</title>",
+    '<link rel="stylesheet" href="./css/style.css"/>',
+    '<link rel="stylesheet" href="./css/dashboard.css"/>',
+    "<script>window.__meta__=" +
+      JSON.stringify({
+        repo: repository,
+        baseLabel: baseLabel,
+        headLabel: headLabel,
+        baseSha: baseSha,
+        headSha: headSha,
+        generatedAt: generatedAt,
+      }) +
+      ";</script>",
+    '<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>',
+    '<script defer src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>',
+    '<script defer src="./js/app.js"></script>',
+    '<script defer src="./js/dashboard.js"></script>',
+    "</head><body>",
+    '<header class="app-header"><div class="brand">',
+    logoUrl ? '<img class="logo" src="' + esc(logoUrl) + '" alt="logo"/>' : "",
     '<div class="titles"><div class="subtitle">Comparison of branches <b>' +
-    esc(baseLabel) + "</b> vs <b>" + esc(headLabel) + "</b></div>" +
-    "<h1>" + esc(repository) + "</h1></div></div>" +
-    '<div class="meta">Generated: ' + esc(generatedAt) + "</div></header>" +
-    '<div class="app-body">' +
-    '<aside class="sidebar"><nav>' +
-    '<a href="#/dashboard" class="nav-link">Dashboard</a>' +
-    '<a href="#/intro" class="nav-link">Introduction</a>' +
-    '<a href="#/summary" class="nav-link">Summary</a>' +
-    '<a href="#/severity" class="nav-link">Severity distribution</a>' +
-    '<a href="#/changes" class="nav-link">Change overview</a>' +
-    '<a href="#/diff" class="nav-link">Vulnerability diff</a>' +
-    '<a href="#/graph-base" class="nav-link">Dependency graph (base)</a>' +
-    '<a href="#/graph-head" class="nav-link">Dependency graph (head)</a>' +
-    '<a href="#/paths-base" class="nav-link">Dependency paths (base)</a>' +
-    '<a href="#/paths-head" class="nav-link">Dependency paths (head)</a>' +
-    "</nav></aside>" +
-    '<main id="view" class="content"><noscript>Enable JavaScript to view the interactive report.</noscript></main>' +
-    "</div>" +
-    '<footer class="app-footer"><span>Security Report — ' + esc(repository) + "</span></footer>" +
-    "</body></html>";
+      esc(baseLabel) +
+      "</b> vs <b>" +
+      esc(headLabel) +
+      "</b></div>",
+    "<h1>" + esc(repository) + "</h1></div></div>",
+    '<div class="meta">Generated: ' + esc(generatedAt) + "</div></header>",
+    '<div class="app-body">',
+    '<aside class="sidebar"><nav>',
+    '<a href="#/dashboard" class="nav-link">Dashboard</a>',
+    '<a href="#/intro" class="nav-link">Introduction</a>',
+    '<a href="#/summary" class="nav-link">Summary</a>',
+    '<a href="#/severity" class="nav-link">Severity distribution</a>',
+    '<a href="#/changes" class="nav-link">Change overview</a>',
+    '<a href="#/diff" class="nav-link">Vulnerability diff</a>',
+    '<a href="#/graph-base" class="nav-link">Dependency graph (base)</a>',
+    '<a href="#/graph-head" class="nav-link">Dependency graph (head)</a>',
+    '<a href="#/paths-base" class="nav-link">Dependency paths (base)</a>',
+    '<a href="#/paths-head" class="nav-link">Dependency paths (head)</a>',
+    "</nav></aside>",
+    '<main id="view" class="content"><noscript>Enable JavaScript to view the interactive report.</noscript></main>',
+    "</div>",
+    '<footer class="app-footer"><span>Security Report — ' + esc(repository) + "</span></footer>",
+    "</body></html>",
+  ].join("\n");
 
   const STYLE_CSS =
     ":root{--bg:#ffffff;--fg:#1f2937;--muted:#6b7280;--border:#e5e7eb;--brand:#111827;--brand-fg:#F9FAFB;--side:#0f172a;--side-fg:#e5e7eb}" +
@@ -501,75 +553,120 @@ function writeHtmlReportBundle(workdir, meta) {
     ".grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.chart-wrap{position:relative;width:100%;min-height:260px}.muted{color:#6b7280}" +
     "@media (max-width:1100px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}";
 
+  // app.js — use array-of-lines to avoid nested quotes issues with ncc
   const APP_JS = [
-    '\'use strict\';',
-    'var view=document.getElementById(\'view\');',
-    'var routes={',
-    '  \'/dashboard\': function(){ return window.renderDashboard && window.renderDashboard(); },',
-    '  \'/intro\': renderIntro,',
-    '  \'/summary\': renderSummary,',
-    '  \'/severity\': renderSeverity,',
-    '  \'/changes\': renderChanges,',
-    '  \'/diff\': renderDiff,',
-    '  \'/graph-base\': renderGraphBase,',
-    '  \'/graph-head\': renderGraphHead,',
-    '  \'/paths-base\': renderPathsBase,',
-    '  \'/paths-head\': renderPathsHead',
-    '};',
-    'function esc(s){return (s==null?\'\':String(s)).replace(/&/g,\'&amp;\').replace(/</g,\'&lt;\').replace(/>/g,\'&gt;\');}',
-    'function route(){',
-    '  var hash=location.hash||\'#/dashboard\';',
-    '  document.querySelectorAll(\'.nav-link\').forEach(function(a){',
-    '    a.classList.toggle(\'active\', a.getAttribute(\'href\')===hash);',
-    '  });',
-    '  var fn=(routes[hash.slice(1)]||renderIntro);',
-    '  Promise.resolve(fn()).catch(function(e){',
+    "'use strict';",
+    "var view=document.getElementById('view');",
+    "var routes={",
+    "  '/dashboard': function(){ return window.renderDashboard && window.renderDashboard(); },",
+    "  '/intro': renderIntro,",
+    "  '/summary': renderSummary,",
+    "  '/severity': renderSeverity,",
+    "  '/changes': renderChanges,",
+    "  '/diff': renderDiff,",
+    "  '/graph-base': renderGraphBase,",
+    "  '/graph-head': renderGraphHead,",
+    "  '/paths-base': renderPathsBase,",
+    "  '/paths-head': renderPathsHead",
+    "};",
+    "function esc(s){return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}",
+    "function route(){",
+    "  var hash=location.hash||'#/dashboard';",
+    "  document.querySelectorAll('.nav-link').forEach(function(a){",
+    "    a.classList.toggle('active', a.getAttribute('href')===hash);",
+    "  });",
+    "  var fn=(routes[hash.slice(1)]||renderIntro);",
+    "  Promise.resolve(fn()).catch(function(e){",
     '    view.innerHTML=\'<div class="panel">Error: \'+esc(e)+\'</div>\';',
-    '  });',
-    '}',
-    'window.addEventListener(\'hashchange\',route);',
-    'window.addEventListener(\'DOMContentLoaded\',route);',
-    'async function loadJson(name){var r=await fetch(\'./\'+name);return r.json();}',
-    'function linkify(txt){',
-    '  return String(txt)',
-    '    .replace(/\\b(GHSA-[A-Za-z0-9-]{9,})\\b/g,function(m,id){',
+    "  });",
+    "}",
+    "window.addEventListener('hashchange',route);",
+    "window.addEventListener('DOMContentLoaded',route);",
+    "async function loadJson(name){var r=await fetch('./'+name);return r.json();}",
+    "function linkify(txt){",
+    "  return String(txt)",
+    "    .replace(/\\b(GHSA-[A-Za-z0-9-]{9,})\\b/g,function(m,id){",
     '      return \'<a title="Open \'+id+\'" href="https://github.com/advisories/\'+id+\'" target="_blank" rel="noopener">\'+id+\'</a>\';',
-    '    })',
-    '    .replace(/\\b(CVE-\\d{4}-\\d{4,7})\\b/g,function(m,id){',
+    "    })",
+    "    .replace(/\\b(CVE-\\d{4}-\\d{4,7})\\b/g,function(m,id){",
     '      return \'<a title="Open \'+id+\'" href="https://nvd.nist.gov/vuln/detail/\'+id+\'" target="_blank" rel="noopener">\'+id+\'</a>\';',
-    '    });',
-    '}',
-    // ... (deja el resto de funciones tal cual las tenías, o también pásalas a este array)
-  ].join('\n');
+    "    });",
+    "}",
+    "async function renderIntro(){var m=window.__meta__||{};var base=esc(m.baseLabel||'base');var head=esc(m.headLabel||'head');view.innerHTML='<h2>Introduction</h2><div class=\"panel\">This report compares security vulnerabilities between <b>'+base+'</b> (base) and <b>'+head+'</b> (head). The goal is to detect vulnerabilities that are introduced and/or fixed between development branches.</div><div class=\"panel\"><b>Tools & pipeline</b><br/><ul><li><b>CycloneDX Maven plugin</b>: generates an accurate SBOM (JSON) per ref.</li><li><b>Syft</b>: generates SBOMs when Maven is not present.</li><li><b>Grype</b>: scans SBOMs and produces vulnerability findings.</li><li><b>Diff logic</b>: classifies NEW, REMOVED, and UNCHANGED vulnerabilities.</li></ul></div>';}",
+    "async function renderSummary(){var d=await loadJson('diff.json');var m=window.__meta__||{};var baseSha=(m.baseSha||'').slice(0,12);var headSha=(m.headSha||'').slice(0,12);view.innerHTML='<h2>Summary</h2><div class=\"panel\"><b>Repository:</b> '+esc(m.repo||'')+'<br/><b>Base:</b> '+esc(m.baseLabel||'')+' — <code>'+esc(baseSha)+'</code><br/><b>Head:</b> '+esc(m.headLabel||'')+' — <code>'+esc(headSha)+'</code><br/><b>Counts:</b> NEW='+d.news.length+' · REMOVED='+d.removed.length+' · UNCHANGED='+d.unchanged.length+'</div>';}",
+    "async function renderSeverity(){var base=await loadJson('grype-base.json');var head=await loadJson('grype-head.json');function count(arr){return (arr||[]).reduce(function(m,x){var s=(x.vulnerability&&x.vulnerability.severity)||'UNKNOWN';m[s]=(m[s]||0)+1;return m;},{})}var baseC=count(base.matches);var headC=count(head.matches);var m=window.__meta__||{};view.innerHTML='<h2>Severity distribution</h2><div class=\"grid2\"><div class=\"chart-box\"><h3>'+esc(m.baseLabel||'BASE')+'</h3><canvas id=\"c1\" style=\"width:100%;height:260px\"></canvas></div><div class=\"chart-box\"><h3>'+esc(m.headLabel||'HEAD')+'</h3><canvas id=\"c2\" style=\"width:100%;height:260px\"></canvas></div></div>';var severities=['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];var colors=['#b91c1c','#ea580c','#ca8a04','#16a34a','#6b7280'];new Chart(document.getElementById('c1'),{type:'doughnut',data:{labels:severities,datasets:[{data:severities.map(function(s){return baseC[s]||0;}),backgroundColor:colors}]},options:{plugins:{legend:{position:'bottom'}},cutout:'60%'}});new Chart(document.getElementById('c2'),{type:'doughnut',data:{labels:severities,datasets:[{data:severities.map(function(s){return headC[s]||0;}),backgroundColor:colors}]},options:{plugins:{legend:{position:'bottom'}},cutout:'60%'}});}",
+    "async function renderChanges(){var d=await loadJson('diff.json');view.innerHTML='<h2>Change overview</h2><div class=\"chart-box\"><canvas id=\"c3\" style=\"height:260px;width:100%\"></canvas></div>';new Chart(document.getElementById('c3'),{type:'bar',data:{labels:['NEW','REMOVED','UNCHANGED'],datasets:[{data:[d.news.length,d.removed.length,d.unchanged.length]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});}",
+    "async function renderDiff(){var md=await fetch('./report.md').then(function(r){return r.text();});var idx=md.split('\\n').findIndex(function(l){return l.trim().startsWith('| Severity |');});var table=idx>=0?md.split('\\n').slice(idx).join('\\n'):md;view.innerHTML='<h2>Vulnerability diff</h2>'+mdTableToHtml(table);}",
+    "async function renderGraphBase(){view.innerHTML='<h2>Dependency graph (base)</h2><div id=\"m1\"></div>';var txt=await fetch('./report-landscape.html').then(function(r){return r.text();});var m=txt.match(/data-mermaid=\"([^\"]*)\"/);if(m){await ensureMermaid();renderMermaid('m1', decodeHtml(m[1]));}}",
+    "async function renderGraphHead(){view.innerHTML='<h2>Dependency graph (head)</h2><div id=\"m2\"></div>';var txt=await fetch('./report-landscape.html').then(function(r){return r.text();});var all=txt.match(/data-mermaid=\"([^\"]*)\"/g)||[];if(all.length>1){var second=(all[1]||'').match(/data-mermaid=\"([^\"]*)\"/);if(second){await ensureMermaid();renderMermaid('m2', decodeHtml(second[1]));}}}",
+    "async function renderPathsBase(){view.innerHTML='<h2>Dependency paths (base)</h2>'+await extractSection('Dependency path base');}",
+    "async function renderPathsHead(){view.innerHTML='<h2>Dependency paths (head)</h2>'+await extractSection('Dependency path head');}",
+    "function decodeHtml(s){return String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');}",
+    "async function ensureMermaid(){if(!window.mermaidInited){window.mermaid.initialize({startOnLoad:false,securityLevel:'antiscript'});window.mermaidInited=true;}}",
+    "async function renderMermaid(id, code){var r=await window.mermaid.render('m'+Math.random().toString(36).slice(2),code);document.getElementById(id).innerHTML=r.svg;}",
+    "function mdTableToHtml(md){if(!md||!md.includes('|'))return '<div class=\"panel\">No data</div>';var lines=md.split(/\\r?\\n/).filter(Boolean);var header=lines[0];var sep=lines[1]||'';if(!sep.replace(/\\|/g,'').trim().match(/^-{3,}|:?-{3,}:?/))return '<pre>'+esc(md)+'</pre>';var cells=function(l){return l.split('|').map(function(c){return c.trim();}).filter(function(_v,i,a){return !(i===0||i===a.length-1);});};var html='<table class=\"tbl\"><thead><tr>';cells(header).forEach(function(h){html+='<th>'+h.replace(/\\*\\*([^*]+)\\*\\*/g,'<b>$1</b>')+'</th>';});html+='</tr></thead><tbody>';for(var i=2;i<lines.length;i++){var row=cells(lines[i]).map(function(c){return linkify(c.replace(/\\`([^\\`]+)\\`/g,'<code>$1</code>').replace(/\\*\\*([^*]+)\\*\\*/g,'<b>$1</b>'));});if(row.length)html+='<tr><td>'+row.join('</td><td>')+'</td></tr>';}html+='</tbody></table>';return html;}",
+    "async function extractSection(title){var html=await fetch('./report-landscape.html').then(function(r){return r.text();});var safe=title.replace(/[.*+?^\\$\\{\\}()|[\\]\\\\]/g,'\\\\$&');var re=new RegExp('<h2>[^<]*'+safe+'[^<]*</h2>[\\\\s\\\\S]*?(<table[\\\\s\\\\S]*?</table>)','i');var m=html.match(re);return m?m[1]:'<div class=\"panel\">No data</div>';}",
+  ].join("\n");
 
-  // Dashboard code is big; written as separate file
-  const DASHBOARD_JS =
-    "(function(){var view=document.getElementById('view');" +
-    "var state={severity:new Set(),status:new Set(),scope:'HEAD',data:{diff:null,pathsBase:[],pathsHead:[]},charts:{}};" +
-    "window.renderDashboard=async function(){if(!state.data.diff){state.data.diff=await (await fetch('./diff.json')).json();}if(!state.data.pathsBase.length){try{state.data.pathsBase=await (await fetch('./paths-base.json')).json();}catch(e){state.data.pathsBase=[];}}if(!state.data.pathsHead.length){try{state.data.pathsHead=await (await fetch('./paths-head.json')).json();}catch(e){state.data.pathsHead=[];}}renderLayout();renderAll();};" +
-    "function renderLayout(){view.innerHTML='<h2>Dashboard</h2><div class=\"filters\"><div class=\"group\"><label>Severity:</label>'+['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'].map(function(s){return chip(\"severity\",s);}).join('')+'</div><div class=\"group\"><label>Status:</label>'+['NEW','REMOVED','UNCHANGED'].map(function(s){return chip(\"status\",s);}).join('')+'</div><div class=\"group\"><label>Scope:</label>'+['BASE','HEAD'].map(function(s){return radio(\"scope\",s,state.scope===s);}).join('')+'</div><div class=\"group\"><button class=\"btn\" id=\"resetFilters\">Reset filters</button></div></div><section class=\"kpis\" id=\"kpis\"></section><section class=\"panel\"><h3>Status × Severity</h3><div class=\"chart-wrap\"><canvas id=\"ch_status_sev\"></canvas></div></section><section class=\"grid2\"><div class=\"panel\"><h3>Severity distribution — NEW</h3><div class=\"chart-wrap\"><canvas id=\"ch_new_donut\"></canvas></div></div><div class=\"panel\"><h3>Severity distribution — REMOVED</h3><div class=\"chart-wrap\"><canvas id=\"ch_removed_donut\"></canvas></div></div></section><section class=\"grid2\"><div class=\"panel\"><h3>Severity distribution — UNCHANGED</h3><div class=\"chart-wrap\"><canvas id=\"ch_unchanged_donut\"></canvas></div></div><div class=\"panel\"><h3>Status distribution per severity</h3><div class=\"chart-wrap\"><canvas id=\"ch_per_severity_stacked\"></canvas></div></div></section><section class=\"grid2\"><div class=\"panel\"><h3>Top modules (BASE)</h3><div class=\"chart-wrap\"><canvas id=\"ch_top_modules_base\"></canvas></div></div><div class=\"panel\"><h3>Top modules (HEAD)</h3><div class=\"chart-wrap\"><canvas id=\"ch_top_modules_head\"></canvas></div></div></section><section class=\"panel\"><h3>Vulnerability diff (filtered)</h3><div id=\"diffTable\"></div></section><section class=\"panel\"><h3>Dependency paths (filtered — <span id=\"scopeLabel\"></span>)</h3><div id=\"pathsTable\"></div></section>';document.getElementById('resetFilters').addEventListener('click',function(){state.severity.clear();state.status.clear();state.scope='HEAD';renderLayout();renderAll();});view.querySelectorAll('[data-chip]').forEach(function(el){el.addEventListener('click',function(){var kind=el.getAttribute('data-kind');var val=el.getAttribute('data-chip');var set=state[kind];if(set.has(val))set.delete(val);else set.add(val);el.classList.toggle('active');renderAll();});});view.querySelectorAll('input[name=\"scope\"]').forEach(function(el){el.addEventListener('change',function(){state.scope=el.value;renderAll();});});}" +
-    "function chip(kind,label){var active=state[kind].has(label);return '<span class=\"chip '+(active?'active':'')+'\" data-kind=\"'+kind+'\" data-chip=\"'+label+'\">'+label+'</span>';}" +
-    "function radio(name,value,checked){var id=name+'_'+value;return '<label class=\"radio\"><input type=\"radio\" name=\"'+name+'\" value=\"'+value+'\" '+(checked?'checked':'')+'/><span>'+value+'</span></label>';}" +
-    "var SEVERITIES=['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];var STATUS=['NEW','REMOVED','UNCHANGED'];var COLORS={CRITICAL:'#b91c1c',HIGH:'#ea580c',MEDIUM:'#ca8a04',LOW:'#16a34a',UNKNOWN:'#6b7280',NEW:'#2563eb',REMOVED:'#059669',UNCHANGED:'#6b7280'};" +
-    "function applyFiltersToDiff(items){var sevOn=state.severity.size?state.severity:null;var stOn=state.status.size?state.status:null;return items.filter(function(x){var okSev=!sevOn||sevOn.has(x.severity||'UNKNOWN');var okSt=!stOn||stOn.has(x.status||x._status||'UNKNOWN');return okSev&&okSt;});}" +
-    "function diffFlat(){var d=state.data.diff||{news:[],removed:[],unchanged:[]};var m=[];d.news.forEach(function(x){m.push(Object.assign({},x,{status:'NEW'}));});d.removed.forEach(function(x){m.push(Object.assign({},x,{status:'REMOVED'}));});d.unchanged.forEach(function(x){m.push(Object.assign({},x,{status:'UNCHANGED'}));});return m;}" +
-    "function renderAll(){renderKPIs();renderStatusSeverity();renderDonuts();renderPerSeverityStacked();renderTopModules();renderDiffTable();renderPathsTable();}" +
-    "function renderKPIs(){var flat=diffFlat();var f=applyFiltersToDiff(flat);var counts={NEW:0,REMOVED:0,UNCHANGED:0};var maxHead='UNKNOWN',maxBase='UNKNOWN';f.forEach(function(x){counts[x.status]++;});function prio(s){var i=SEVERITIES.indexOf(s);return i<0?999:i;}function maxSeverity(kind){if(kind==='HEAD'){var arr=flat.filter(function(x){return x.status!=='REMOVED';});return arr.reduce(function(a,x){return prio(x.severity)<prio(a)?x.severity:a;},'UNKNOWN');}else{var arr2=flat.filter(function(x){return x.status!=='NEW';});return arr2.reduce(function(a,x){return prio(x.severity)<prio(a)?x.severity:a;},'UNKNOWN');}}maxHead=maxSeverity('HEAD');maxBase=maxSeverity('BASE');document.getElementById('kpis').innerHTML='<div class=\"kpi\"><div class=\"label\">NEW</div><div class=\"value\" style=\"color:'+COLORS.NEW+'\">'+counts.NEW+'</div></div><div class=\"kpi\"><div class=\"label\">REMOVED</div><div class=\"value\" style=\"color:'+COLORS.REMOVED+'\">'+counts.REMOVED+'</div></div><div class=\"kpi\"><div class=\"label\">UNCHANGED</div><div class=\"value\" style=\"color:'+COLORS.UNCHANGED+'\">'+counts.UNCHANGED+'</div></div><div class=\"kpi\"><div class=\"label\">Max severity (HEAD)</div><div class=\"value\" style=\"color:'+(COLORS[maxHead]||'#111')+'\">'+maxHead+'</div></div><div class=\"kpi\"><div class=\"label\">Max severity (BASE)</div><div class=\"value\" style=\"color:'+(COLORS[maxBase]||'#111')+'\">'+maxBase+'</div></div>';}" +
-    "function renderStatusSeverity(){var flat=applyFiltersToDiff(diffFlat());var matrix={NEW:{CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,UNKNOWN:0},REMOVED:{CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,UNKNOWN:0},UNCHANGED:{CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,UNKNOWN:0}};flat.forEach(function(x){var st=x.status||'UNKNOWN';var sv=x.severity||'UNKNOWN';if(matrix[st]&&matrix[st][sv]!=null)matrix[st][sv]++;});var ctx=getCtx('ch_status_sev');var datasets=SEVERITIES.map(function(sv){return {label:sv,backgroundColor:COLORS[sv],data:STATUS.map(function(st){return matrix[st][sv]||0;})};});drawOrUpdateBar('statusSev',ctx,{labels:STATUS,datasets:datasets},{stacked:false});}" +
-    "function renderDonuts(){var flat=applyFiltersToDiff(diffFlat());var by={NEW:{},REMOVED:{},UNCHANGED:{}};Object.keys(by).forEach(function(k){SEVERITIES.forEach(function(sv){by[k][sv]=0;});});flat.forEach(function(x){var st=x.status||'UNKNOWN';var sv=x.severity||'UNKNOWN';if(by[st]&&by[st][sv]!=null)by[st][sv]++;});function cfg(id,data){var ctx=getCtx(id);var values=SEVERITIES.map(function(sv){return data[sv]||0;});drawOrUpdateDoughnut(id,ctx,SEVERITIES,values,SEVERITIES.map(function(s){return COLORS[s];}));}cfg('ch_new_donut',by.NEW);cfg('ch_removed_donut',by.REMOVED);cfg('ch_unchanged_donut',by.UNCHANGED);}" +
-    "function renderPerSeverityStacked(){var flat=applyFiltersToDiff(diffFlat());var matrix={CRITICAL:{NEW:0,REMOVED:0,UNCHANGED:0},HIGH:{NEW:0,REMOVED:0,UNCHANGED:0},MEDIUM:{NEW:0,REMOVED:0,UNCHANGED:0},LOW:{NEW:0,REMOVED:0,UNCHANGED:0},UNKNOWN:{NEW:0,REMOVED:0,UNCHANGED:0}};flat.forEach(function(x){var st=x.status||'UNKNOWN';var sv=x.severity||'UNKNOWN';if(matrix[sv]&&matrix[sv][st]!=null)matrix[sv][st]++;});var ctx=getCtx('ch_per_severity_stacked');var datasets=STATUS.map(function(st){return {label:st,backgroundColor:COLORS[st],data:SEVERITIES.map(function(sv){return matrix[sv][st]||0;})};});drawOrUpdateBar('perSeverity',ctx,{labels:SEVERITIES,datasets:datasets},{stacked:true});}" +
-    "function renderTopModules(){function topModules(list){var acc={};list.forEach(function(r){if(!r.module)return;acc[r.module]=(acc[r.module]||0)+1;});return Object.entries(acc).sort(function(a,b){return b[1]-a[1];}).slice(0,10);}var base=filteredPaths('BASE');var head=filteredPaths('HEAD');var ctxB=getCtx('ch_top_modules_base');var ctxH=getCtx('ch_top_modules_head');var tb=topModules(base),th=topModules(head);drawOrUpdateBar('topBase',ctxB,{labels:tb.map(function(x){return x[0];}),datasets:[{label:'BASE',backgroundColor:'#334155',data:tb.map(function(x){return x[1];})}]},{horizontal:true});drawOrUpdateBar('topHead',ctxH,{labels:th.map(function(x){return x[0];}),datasets:[{label:'HEAD',backgroundColor:'#1f2937',data:th.map(function(x){return x[1];})}]},{horizontal:true});}" +
-    "function renderDiffTable(){var rows=applyFiltersToDiff(diffFlat());var html='<table class=\"tbl\"><thead><tr><th>Status</th><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Version</th></tr></thead><tbody>'+rows.map(function(r){return '<tr><td>'+esc(r.status||'')+'</td><td><b>'+esc(r.severity||'UNKNOWN')+'</b></td><td>'+linkify(esc(r.id||''))+'</td><td><code>'+esc(r.package||'')+'</code></td><td><code>'+esc(r.version||'')+'</code></td></tr>';}).join('')+'</tbody></table>';document.getElementById('diffTable').innerHTML=html;}" +
-    "function renderPathsTable(){document.getElementById('scopeLabel').textContent=state.scope;var rows=filteredPaths(state.scope);if(!rows.length){document.getElementById('pathsTable').innerHTML='<div class=\"muted\">No data</div>';return;}var maxDepth=rows.reduce(function(m,r){return Math.max(m, r.depth||(r.path?r.path.length:0));},0);var cols=['Severity','Module','Package'].concat(Array.from({length:maxDepth},function(_,_i){return 'Depth'+_i;}));var html='<table class=\"tbl\"><thead><tr>'+cols.map(function(c){return '<th>'+c+'</th>';}).join('')+'</tr></thead><tbody>'+rows.map(function(r){var base=['<b>'+esc(r.severity||'UNKNOWN')+'</b>','<code>'+esc(r.module||'')+'</code>','<code>'+esc(r.package||'')+'</code>'];var path=(r.path||[]);var pads=Array.from({length:maxDepth},function(_,_i){return '<code>'+esc(path[_i]||'')+'</code>';});return '<tr><td>'+base.concat(pads).join('</td><td>')+'</td></tr>';}).join('')+'</tbody></table>';document.getElementById('pathsTable').innerHTML=html;}" +
-    "function filteredPaths(which){var rows=which==='BASE'?state.data.pathsBase:state.data.pathsHead;if(!rows||!rows.length)return [];var sevOn=state.severity.size?state.severity:null;var out=rows;if(sevOn)out=out.filter(function(r){return sevOn.has(r.severity||'UNKNOWN');});return out;}" +
-    "function getCtx(id){return document.getElementById(id).getContext('2d');}" +
-    "function drawOrUpdateBar(key,ctx,data,opts){opts=opts||{};var stacked=!!opts.stacked;var horizontal=!!opts.horizontal;if(state.charts[key]){var c=state.charts[key];c.data=data;c.options.indexAxis=horizontal?'y':'x';c.options.scales={x:{stacked:stacked},y:{stacked:stacked,beginAtZero:true,ticks:{precision:0}}};c.update();return;}state.charts[key]=new Chart(ctx,{type:'bar',data:data,options:{responsive:true,maintainAspectRatio:false,indexAxis:horizontal?'y':'x',plugins:{legend:{position:'bottom'}},scales:{x:{stacked:stacked},y:{stacked:stacked,beginAtZero:true,ticks:{precision:0}}}}});}" +
-    "function drawOrUpdateDoughnut(key,ctx,labels,values,colors){if(state.charts[key]){var c=state.charts[key];c.data.labels=labels;c.data.datasets[0].data=values;c.update();return;}state.charts[key]=new Chart(ctx,{type:'doughnut',data:{labels:labels,datasets:[{data:values,backgroundColor:colors}]},options:{plugins:{legend:{position:'bottom'}},cutout:'60%'}});}" +
-    "function linkify(txt){return String(txt).replace(/\\b(GHSA-[A-Za-z0-9-]{9,})\\b/g,function(m,id){return '<a title=\"Open '+id+'\" href=\"https://github.com/advisories/'+id+'\" target=\"_blank\" rel=\"noopener\">'+id+'</a>';}).replace(/\\b(CVE-\\d{4}-\\d{4,7})\\b/g,function(m,id){return '<a title=\"Open '+id+'\" href=\"https://nvd.nist.gov/vuln/detail/'+id+'\" target=\"_blank\" rel=\"noopener\">'+id+'</a>';});}" +
-    "function esc(s){return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}" +
-    "})();";
+  // dashboard.js — big block, also built as array-of-lines for safety
+  const DASHBOARD_JS = [
+    "(function(){var view=document.getElementById('view');",
+    "var state={severity:new Set(),status:new Set(),scope:'HEAD',data:{diff:null,pathsBase:[],pathsHead:[]},charts:{}};",
+    "window.renderDashboard=async function(){",
+    " if(!state.data.diff){state.data.diff=await (await fetch('./diff.json')).json();}",
+    " if(!state.data.pathsBase.length){try{state.data.pathsBase=await (await fetch('./paths-base.json')).json();}catch(e){state.data.pathsBase=[];}}",
+    " if(!state.data.pathsHead.length){try{state.data.pathsHead=await (await fetch('./paths-head.json')).json();}catch(e){state.data.pathsHead=[];}}",
+    " renderLayout();renderAll();};",
+    "function renderLayout(){",
+    " view.innerHTML='<h2>Dashboard</h2>' +",
+    "  '<div class=\"filters\">' +",
+    "   '<div class=\"group\"><label>Severity:</label>'+['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'].map(function(s){return chip(\"severity\",s);}).join('')+'</div>' +",
+    "   '<div class=\"group\"><label>Status:</label>'+['NEW','REMOVED','UNCHANGED'].map(function(s){return chip(\"status\",s);}).join('')+'</div>' +",
+    "   '<div class=\"group\"><label>Scope:</label>'+['BASE','HEAD'].map(function(s){return radio(\"scope\",s,state.scope===s);}).join('')+'</div>' +",
+    "   '<div class=\"group\"><button class=\"btn\" id=\"resetFilters\">Reset filters</button></div>' +",
+    "  '</div>' +",
+    "  '<section class=\"kpis\" id=\"kpis\"></section>' +",
+    "  '<section class=\"panel\"><h3>Status × Severity</h3><div class=\"chart-wrap\"><canvas id=\"ch_status_sev\"></canvas></div></section>' +",
+    "  '<section class=\"grid2\">' +",
+    "    '<div class=\"panel\"><h3>Severity distribution — NEW</h3><div class=\"chart-wrap\"><canvas id=\"ch_new_donut\"></canvas></div></div>' +",
+    "    '<div class=\"panel\"><h3>Severity distribution — REMOVED</h3><div class=\"chart-wrap\"><canvas id=\"ch_removed_donut\"></canvas></div></div>' +",
+    "  '</section>' +",
+    "  '<section class=\"grid2\">' +",
+    "    '<div class=\"panel\"><h3>Severity distribution — UNCHANGED</h3><div class=\"chart-wrap\"><canvas id=\"ch_unchanged_donut\"></canvas></div></div>' +",
+    "    '<div class=\"panel\"><h3>Status distribution per severity</h3><div class=\"chart-wrap\"><canvas id=\"ch_per_severity_stacked\"></canvas></div></div>' +",
+    "  '</section>' +",
+    "  '<section class=\"grid2\">' +",
+    "    '<div class=\"panel\"><h3>Top modules (BASE)</h3><div class=\"chart-wrap\"><canvas id=\"ch_top_modules_base\"></canvas></div></div>' +",
+    "    '<div class=\"panel\"><h3>Top modules (HEAD)</h3><div class=\"chart-wrap\"><canvas id=\"ch_top_modules_head\"></canvas></div></div>' +",
+    "  '</section>' +",
+    "  '<section class=\"panel\"><h3>Vulnerability diff (filtered)</h3><div id=\"diffTable\"></div></section>' +",
+    "  '<section class=\"panel\"><h3>Dependency paths (filtered — <span id=\"scopeLabel\"></span>)</h3><div id=\"pathsTable\"></div></section>';",
+    " document.getElementById('resetFilters').addEventListener('click',function(){state.severity.clear();state.status.clear();state.scope='HEAD';renderLayout();renderAll();});",
+    " view.querySelectorAll('[data-chip]').forEach(function(el){el.addEventListener('click',function(){var kind=el.getAttribute('data-kind');var val=el.getAttribute('data-chip');var set=state[kind];if(set.has(val))set.delete(val);else set.add(val);el.classList.toggle('active');renderAll();});});",
+    " view.querySelectorAll('input[name=\"scope\"]').forEach(function(el){el.addEventListener('change',function(){state.scope=el.value;renderAll();});});",
+    "}",
+    "function chip(kind,label){var active=state[kind].has(label);return '<span class=\"chip '+(active?'active':'')+'\" data-kind=\"'+kind+'\" data-chip=\"'+label+'\">'+label+'</span>';}",
+    "function radio(name,value,checked){var id=name+'_'+value;return '<label class=\"radio\"><input type=\"radio\" name=\"'+name+'\" value=\"'+value+'\" '+(checked?'checked':'')+'/><span>'+value+'</span></label>';}",
+    "var SEVERITIES=['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];var STATUS=['NEW','REMOVED','UNCHANGED'];var COLORS={CRITICAL:'#b91c1c',HIGH:'#ea580c',MEDIUM:'#ca8a04',LOW:'#16a34a',UNKNOWN:'#6b7280',NEW:'#2563eb',REMOVED:'#059669',UNCHANGED:'#6b7280'};",
+    "function applyFiltersToDiff(items){var sevOn=state.severity.size?state.severity:null;var stOn=state.status.size?state.status:null;return items.filter(function(x){var okSev=!sevOn||sevOn.has(x.severity||'UNKNOWN');var okSt=!stOn||stOn.has(x.status||x._status||'UNKNOWN');return okSev&&okSt;});}",
+    "function diffFlat(){var d=state.data.diff||{news:[],removed:[],unchanged:[]};var m=[];d.news.forEach(function(x){m.push(Object.assign({},x,{status:'NEW'}));});d.removed.forEach(function(x){m.push(Object.assign({},x,{status:'REMOVED'}));});d.unchanged.forEach(function(x){m.push(Object.assign({},x,{status:'UNCHANGED'}));});return m;}",
+    "function renderAll(){renderKPIs();renderStatusSeverity();renderDonuts();renderPerSeverityStacked();renderTopModules();renderDiffTable();renderPathsTable();}",
+    "function renderKPIs(){var flat=diffFlat();var f=applyFiltersToDiff(flat);var counts={NEW:0,REMOVED:0,UNCHANGED:0};var maxHead='UNKNOWN',maxBase='UNKNOWN';f.forEach(function(x){counts[x.status]++;});function prio(s){var i=SEVERITIES.indexOf(s);return i<0?999:i;}function maxSeverity(kind){if(kind==='HEAD'){var arr=flat.filter(function(x){return x.status!=='REMOVED';});return arr.reduce(function(a,x){return prio(x.severity)<prio(a)?x.severity:a;},'UNKNOWN');}else{var arr2=flat.filter(function(x){return x.status!=='NEW';});return arr2.reduce(function(a,x){return prio(x.severity)<prio(a)?x.severity:a;},'UNKNOWN');}}maxHead=maxSeverity('HEAD');maxBase=maxSeverity('BASE');document.getElementById('kpis').innerHTML='<div class=\"kpi\"><div class=\"label\">NEW</div><div class=\"value\" style=\"color:'+COLORS.NEW+'\">'+counts.NEW+'</div></div><div class=\"kpi\"><div class=\"label\">REMOVED</div><div class=\"value\" style=\"color:'+COLORS.REMOVED+'\">'+counts.REMOVED+'</div></div><div class=\"kpi\"><div class=\"label\">UNCHANGED</div><div class=\"value\" style=\"color:'+COLORS.UNCHANGED+'\">'+counts.UNCHANGED+'</div></div><div class=\"kpi\"><div class=\"label\">Max severity (HEAD)</div><div class=\"value\" style=\"color:'+(COLORS[maxHead]||'#111')+'\">'+maxHead+'</div></div><div class=\"kpi\"><div class=\"label\">Max severity (BASE)</div><div class=\"value\" style=\"color:'+(COLORS[maxBase]||'#111')+'\">'+maxBase+'</div></div>';}",
+    "function renderStatusSeverity(){var flat=applyFiltersToDiff(diffFlat());var matrix={NEW:{CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,UNKNOWN:0},REMOVED:{CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,UNKNOWN:0},UNCHANGED:{CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,UNKNOWN:0}};flat.forEach(function(x){var st=x.status||'UNKNOWN';var sv=x.severity||'UNKNOWN';if(matrix[st]&&matrix[st][sv]!=null)matrix[st][sv]++;});var ctx=getCtx('ch_status_sev');var datasets=SEVERITIES.map(function(sv){return {label:sv,backgroundColor:COLORS[sv],data:STATUS.map(function(st){return matrix[st][sv]||0;})};});drawOrUpdateBar('statusSev',ctx,{labels:STATUS,datasets:datasets},{stacked:false});}",
+    "function renderDonuts(){var flat=applyFiltersToDiff(diffFlat());var by={NEW:{},REMOVED:{},UNCHANGED:{}};Object.keys(by).forEach(function(k){SEVERITIES.forEach(function(sv){by[k][sv]=0;});});flat.forEach(function(x){var st=x.status||'UNKNOWN';var sv=x.severity||'UNKNOWN';if(by[st]&&by[st][sv]!=null)by[st][sv]++;});function cfg(id,data){var ctx=getCtx(id);var values=SEVERITIES.map(function(sv){return data[sv]||0;});drawOrUpdateDoughnut(id,ctx,SEVERITIES,values,SEVERITIES.map(function(s){return COLORS[s];}));}cfg('ch_new_donut',by.NEW);cfg('ch_removed_donut',by.REMOVED);cfg('ch_unchanged_donut',by.UNCHANGED);}",
+    "function renderPerSeverityStacked(){var flat=applyFiltersToDiff(diffFlat());var matrix={CRITICAL:{NEW:0,REMOVED:0,UNCHANGED:0},HIGH:{NEW:0,REMOVED:0,UNCHANGED:0},MEDIUM:{NEW:0,REMOVED:0,UNCHANGED:0},LOW:{NEW:0,REMOVED:0,UNCHANGED:0},UNKNOWN:{NEW:0,REMOVED:0,UNCHANGED:0}};flat.forEach(function(x){var st=x.status||'UNKNOWN';var sv=x.severity||'UNKNOWN';if(matrix[sv]&&matrix[sv][st]!=null)matrix[sv][st]++;});var ctx=getCtx('ch_per_severity_stacked');var datasets=STATUS.map(function(st){return {label:st,backgroundColor:COLORS[st],data:SEVERITIES.map(function(sv){return matrix[sv][st]||0;})};});drawOrUpdateBar('perSeverity',ctx,{labels:SEVERITIES,datasets:datasets},{stacked:true});}",
+    "function renderTopModules(){function topModules(list){var acc={};list.forEach(function(r){if(!r.module)return;acc[r.module]=(acc[r.module]||0)+1;});return Object.entries(acc).sort(function(a,b){return b[1]-a[1];}).slice(0,10);}var base=filteredPaths('BASE');var head=filteredPaths('HEAD');var ctxB=getCtx('ch_top_modules_base');var ctxH=getCtx('ch_top_modules_head');var tb=topModules(base),th=topModules(head);drawOrUpdateBar('topBase',ctxB,{labels:tb.map(function(x){return x[0];}),datasets:[{label:'BASE',backgroundColor:'#334155',data:tb.map(function(x){return x[1];})}]},{horizontal:true});drawOrUpdateBar('topHead',ctxH,{labels:th.map(function(x){return x[0];}),datasets:[{label:'HEAD',backgroundColor:'#1f2937',data:th.map(function(x){return x[1];})}]},{horizontal:true});}",
+    "function renderDiffTable(){var rows=applyFiltersToDiff(diffFlat());var html='<table class=\"tbl\"><thead><tr><th>Status</th><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Version</th></tr></thead><tbody>'+rows.map(function(r){return '<tr><td>'+esc(r.status||'')+'</td><td><b>'+esc(r.severity||'UNKNOWN')+'</b></td><td>'+linkify(esc(r.id||''))+'</td><td><code>'+esc(r.package||'')+'</code></td><td><code>'+esc(r.version||'')+'</code></td></tr>';}).join('')+'</tbody></table>';document.getElementById('diffTable').innerHTML=html;}",
+    "function renderPathsTable(){document.getElementById('scopeLabel').textContent=state.scope;var rows=filteredPaths(state.scope);if(!rows.length){document.getElementById('pathsTable').innerHTML='<div class=\"muted\">No data</div>';return;}var maxDepth=rows.reduce(function(m,r){return Math.max(m, r.depth||(r.path?r.path.length:0));},0);var cols=['Severity','Module','Package'].concat(Array.from({length:maxDepth},function(_,i){return 'Depth'+i;}));var html='<table class=\"tbl\"><thead><tr>'+cols.map(function(c){return '<th>'+c+'</th>';}).join('')+'</tr></thead><tbody>'+rows.map(function(r){var base=['<b>'+esc(r.severity||'UNKNOWN')+'</b>','<code>'+esc(r.module||'')+'</code>','<code>'+esc(r.package||'')+'</code>'];var path=(r.path||[]);var pads=Array.from({length:maxDepth},function(_,i){return '<code>'+esc(path[i]||'')+'</code>';});return '<tr><td>'+base.concat(pads).join('</td><td>')+'</td></tr>';}).join('')+'</tbody></table>';document.getElementById('pathsTable').innerHTML=html;}",
+    "function filteredPaths(which){var rows=which==='BASE'?state.data.pathsBase:state.data.pathsHead;if(!rows||!rows.length)return [];var sevOn=state.severity.size?state.severity:null;var out=rows;if(sevOn)out=out.filter(function(r){return sevOn.has(r.severity||'UNKNOWN');});return out;}",
+    "function getCtx(id){return document.getElementById(id).getContext('2d');}",
+    "function drawOrUpdateBar(key,ctx,data,opts){opts=opts||{};var stacked=!!opts.stacked;var horizontal=!!opts.horizontal;if(state.charts[key]){var c=state.charts[key];c.data=data;c.options.indexAxis=horizontal?'y':'x';c.options.scales={x:{stacked:stacked},y:{stacked:stacked,beginAtZero:true,ticks:{precision:0}}};c.update();return;}state.charts[key]=new Chart(ctx,{type:'bar',data:data,options:{responsive:true,maintainAspectRatio:false,indexAxis:horizontal?'y':'x',plugins:{legend:{position:'bottom'}},scales:{x:{stacked:stacked},y:{stacked:stacked,beginAtZero:true,ticks:{precision:0}}}}});}",
+    "function drawOrUpdateDoughnut(key,ctx,labels,values,colors){if(state.charts[key]){var c=state.charts[key];c.data.labels=labels;c.data.datasets[0].data=values;c.update();return;}state.charts[key]=new Chart(ctx,{type:'doughnut',data:{labels:labels,datasets:[{data:values,backgroundColor:colors}]},options:{plugins:{legend:{position:'bottom'}},cutout:'60%'}});}",
+    "function linkify(txt){return String(txt).replace(/\\b(GHSA-[A-Za-z0-9-]{9,})\\b/g,function(m,id){return '<a title=\"Open '+id+'\" href=\"https://github.com/advisories/'+id+'\" target=\"_blank\" rel=\"noopener\">'+id+'</a>';}).replace(/\\b(CVE-\\d{4}-\\d{4,7})\\b/g,function(m,id){return '<a title=\"Open '+id+'\" href=\"https://nvd.nist.gov/vuln/detail/'+id+'\" target=\"_blank\" rel=\"noopener\">'+id+'</a>';});}",
+    "function esc(s){return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}",
+    "})();",
+  ].join("\n");
 
-  // write bundle files
   fs.writeFileSync(path.join(htmlDir, "index.html"), INDEX_HTML, "utf8");
   fs.writeFileSync(path.join(cssDir, "style.css"), STYLE_CSS, "utf8");
   fs.writeFileSync(path.join(cssDir, "dashboard.css"), DASHBOARD_CSS, "utf8");
@@ -679,18 +776,33 @@ async function run() {
       const mermaidBase = buildMermaidGraphFromBOMImproved(baseBom, baseScan.matches || [], graphMaxNodes);
       const mermaidHead = buildMermaidGraphFromBOMImproved(headBom, headScan.matches || [], graphMaxNodes);
 
-      const pathsBaseRows = buildDependencyPathsTable(baseBom, baseScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 });
-      const pathsHeadRows = buildDependencyPathsTable(headBom, headScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 });
-      const pathsBaseJson = normalizePathsForJson(pathsBaseRows);
-      const pathsHeadJson = normalizePathsForJson(pathsHeadRows);
+      // --- dependency paths (coerce + normalize) ---
+      const _pathsBaseRaw = buildDependencyPathsTable(baseBom, baseScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 });
+      const _pathsHeadRaw = buildDependencyPathsTable(headBom, headScan.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 });
+
+      const pathsBaseRows = normalizePathsForJson(_pathsBaseRaw); // safe array
+      const pathsHeadRows = normalizePathsForJson(_pathsHeadRaw); // safe array
+
+      if (!Array.isArray(_pathsBaseRaw)) {
+        core.warning(`buildDependencyPathsTable(base) returned ${typeof _pathsBaseRaw}; coerced to ${pathsBaseRows.length} rows.`);
+      }
+      if (!Array.isArray(_pathsHeadRaw)) {
+        core.warning(`buildDependencyPathsTable(head) returned ${typeof _pathsHeadRaw}; coerced to ${pathsHeadRows.length} rows.`);
+      }
+      if (pathsBaseRows.length === 0) {
+        core.warning("No dependency paths found for BASE after coercion. The dashboard will show an empty table.");
+      }
+      if (pathsHeadRows.length === 0) {
+        core.warning("No dependency paths found for HEAD after coercion. The dashboard will show an empty table.");
+      }
 
       // JSON for dashboard
       const pathsBaseJsonPath = path.join(workdir, "paths-base.json");
       const pathsHeadJsonPath = path.join(workdir, "paths-head.json");
-      fs.writeFileSync(pathsBaseJsonPath, JSON.stringify(pathsBaseJson, null, 2));
-      fs.writeFileSync(pathsHeadJsonPath, JSON.stringify(pathsHeadJson, null, 2));
+      fs.writeFileSync(pathsBaseJsonPath, JSON.stringify(pathsBaseRows, null, 2));
+      fs.writeFileSync(pathsHeadJsonPath, JSON.stringify(pathsHeadRows, null, 2));
 
-      // Markdown versions (legacy sections)
+      // Markdown versions (legacy sections use array rows)
       const pathsBaseMdRaw = renderPathsMarkdownTable(pathsBaseRows);
       const pathsHeadMdRaw = renderPathsMarkdownTable(pathsHeadRows);
 
