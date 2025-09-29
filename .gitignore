@@ -6,3 +6,8 @@ npm-debug.log*
 __base__/
 __head__/
 sbom-*.json
+/html
+/report*.pdf
+/report-*.pdf
+/dist/*
+!/dist/index.js
