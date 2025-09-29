@@ -10,7 +10,7 @@ const os = require("os");
 
 const { analyzeOneRef, makeDiff } = require("./analyze");
 const { persistAll } = require("./storage");
-const { renderDiffTableMarkdown, linkifyIdsMarkdown } = require("./render/markdown");
+const { renderSummaryTableMarkdown, renderDiffTableMarkdown } = require("./render/markdown");
 const { writeHtmlBundle, markdownTableToHtml } = require("./render/html");
 const {
   buildCoverHtml,
@@ -23,7 +23,7 @@ const {
   buildMermaidGraphFromBOMImproved,
   renderPathsMarkdownTable,
   buildDependencyPathsTable,
-} = require("./report"); // you already had these
+} = require("./report");
 
 const git = require("./git");
 
@@ -34,12 +34,12 @@ async function sh(cmd, opts = {}) {
 
 function shortSha(s) {
   return (s || "").slice(0, 12);
-} // legacy; replaced by git.shortSha in new code
+}
 
 function guessLabel(ref) {
   const m = (ref || "").match(/^(?:refs\/remotes\/\w+\/|origin\/)?(.+)$/);
   return m ? m[1] : ref || "";
-} // legacy; replaced by git.guessLabel
+}
 
 function nowUK() {
   try {
@@ -56,11 +56,8 @@ function nowUK() {
     const m = f.match(/^(\d{2})\/(\d{2})\/(\d{4}),?\s+(\d{2}):(\d{2}):(\d{2})$/);
     return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : f;
   } catch {
-    const d = new Date(),
-      p = (n) => String(n).padStart(2, "0");
-    return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(
-      d.getHours()
-    )}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    const d = new Date(), p = (n) => String(n).padStart(2, "0");
+    return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   }
 }
 
@@ -69,8 +66,7 @@ function listFilesRec(dir) {
   (function walk(d) {
     if (!fs.existsSync(d)) return;
     for (const e of fs.readdirSync(d)) {
-      const p = path.join(d, e),
-        st = fs.statSync(p);
+      const p = path.join(d, e), st = fs.statSync(p);
       if (st.isDirectory()) walk(p);
       else out.push(p);
     }
@@ -108,9 +104,7 @@ async function run() {
     const headSha = await git.resolveRefToSha(headRefInput);
 
     if (baseSha === headSha) {
-      core.setFailed(
-        `Both refs resolve to the same commit (${baseSha}).\nbase='${baseRefInput}', head='${headRefInput}'`
-      );
+      core.setFailed(`Both refs resolve to the same commit (${baseSha}).\nbase='${baseRefInput}', head='${headRefInput}'`);
       return;
     }
 
@@ -151,18 +145,16 @@ async function run() {
     // Phase 2 — Storage
     const stored = persistAll(workdir, baseObj, headObj, diffObj);
 
-    // Summary (markdown only)
+    // --- SUMMARY (Job Summary) ---
     if (writeSummary) {
-      const md = renderDiffTableMarkdown(diffObj, baseLabel, headLabel);
+      const tableMd = renderSummaryTableMarkdown(diffObj, baseLabel, headLabel);
       const out = [];
       out.push("### Vulnerability Diff (Syft+Grype)");
       out.push(`- **Base**: \`${baseLabel}\` → \`${git.shortSha(baseSha)}\``);
       out.push(`- **Head**: \`${headLabel}\` → \`${git.shortSha(headSha)}\``);
       out.push(`- **Min severity**: \`${minSeverity}\``);
-      out.push(
-        `- **Counts**: NEW=${diffObj.news.length} · REMOVED=${diffObj.removed.length} · UNCHANGED=${diffObj.unchanged.length}\n`
-      );
-      out.push(md);
+      out.push(`- **Counts**: NEW=${diffObj.news.length} · REMOVED=${diffObj.removed.length} · UNCHANGED=${diffObj.unchanged.length}\n`);
+      out.push(tableMd);
       await core.summary.addRaw(out.join("\n")).write();
     }
 
@@ -181,14 +173,13 @@ async function run() {
           titleLogoUrl,
         },
         {
-          // Data not needed here because bundle will fetch base.json/head.json/diff.json from /html
+          // The bundle fetches base.json/head.json/diff.json from /html
         }
       );
     }
 
     // PDF (independent)
     if (reportPdf) {
-      // Build mermaid + paths from the stored base/head JSONs
       const baseJson = JSON.parse(fs.readFileSync(stored.basePath, "utf8"));
       const headJson = JSON.parse(fs.readFileSync(stored.headPath, "utf8"));
       const baseGrype = baseJson.grype || {};
@@ -196,37 +187,15 @@ async function run() {
       const baseBom = JSON.parse(fs.readFileSync(baseObj.sbomPath, "utf8"));
       const headBom = JSON.parse(fs.readFileSync(headObj.sbomPath, "utf8"));
 
-      const mermaidBase = buildMermaidGraphFromBOMImproved(
-        baseBom,
-        baseGrype.matches || [],
-        graphMaxNodes
-      );
-      const mermaidHead = buildMermaidGraphFromBOMImproved(
-        headBom,
-        headGrype.matches || [],
-        graphMaxNodes
-      );
+      const mermaidBase = buildMermaidGraphFromBOMImproved(baseBom, baseGrype.matches || [], graphMaxNodes);
+      const mermaidHead = buildMermaidGraphFromBOMImproved(headBom, headGrype.matches || [], graphMaxNodes);
 
       // dependency paths (strictly for PDF; not reusing html)
-      // IMPORTANT: buildDependencyPathsTable returns an OBJECT { rows, depthCols } (see src/report.js).
-      // We must pass that object directly to renderPathsMarkdownTable.
-      const pathsBaseObj = buildDependencyPathsTable(
-        baseBom,
-        baseGrype.matches || [],
-        { maxPathsPerPkg: 3, maxDepth: 10 }
-      );
-      const pathsHeadObj = buildDependencyPathsTable(
-        headBom,
-        headGrype.matches || [],
-        { maxPathsPerPkg: 3, maxDepth: 10 }
-      );
+      const pathsBaseObj = buildDependencyPathsTable(baseBom, baseGrype.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 });
+      const pathsHeadObj = buildDependencyPathsTable(headBom, headGrype.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 });
 
-      const pathsBaseMd = renderPathsMarkdownTable(
-        pathsBaseObj || { rows: [], depthCols: [] }
-      );
-      const pathsHeadMd = renderPathsMarkdownTable(
-        pathsHeadObj || { rows: [], depthCols: [] }
-      );
+      const pathsBaseMd = renderPathsMarkdownTable(pathsBaseObj || { rows: [], depthCols: [] });
+      const pathsHeadMd = renderPathsMarkdownTable(pathsHeadObj || { rows: [], depthCols: [] });
 
       const diffMd = renderDiffTableMarkdown(diffObj, baseLabel, headLabel);
       const diffHtml = markdownTableToHtml(diffMd);
@@ -300,12 +269,7 @@ async function run() {
           path.join(workdir, "sbom-base.json"),
           path.join(workdir, "sbom-head.json"),
         ];
-        for (const n of [
-          "report-cover.pdf",
-          "report-main.pdf",
-          "report-landscape.pdf",
-          "report.pdf",
-        ]) {
+        for (const n of ["report-cover.pdf", "report-main.pdf", "report-landscape.pdf", "report.pdf"]) {
           const p = path.join(workdir, n);
           if (fs.existsSync(p)) files.push(p);
         }
@@ -323,6 +287,7 @@ async function run() {
       }
     }
 
+    // Outputs
     core.setOutput("new_count", String(diffObj.news.length));
     core.setOutput("removed_count", String(diffObj.removed.length));
     core.setOutput("unchanged_count", String(diffObj.unchanged.length));

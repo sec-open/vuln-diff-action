@@ -11,3 +11,4 @@ sbom-*.json
 /report-*.pdf
 /dist/*
 !/dist/index.js
+build.sh
