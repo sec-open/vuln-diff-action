@@ -15,11 +15,12 @@ const { renderDiffTableMarkdown, linkifyIdsMarkdown } = require("./render/markdo
 const { writeHtmlBundle, markdownTableToHtml } = require("./render/html");
 const { buildCoverHtml, buildMainHtml, buildLandscapeHtml, htmlToPdf, mergePdfs } = require("./render/pdf");
 const { buildMermaidGraphFromBOMImproved, renderPathsMarkdownTable, buildDependencyPathsTable } = require("./report"); // you already had these
+const git = require("./git");
 
 // small helpers
-async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); }
-function shortSha(s){return (s||"").slice(0,12);}
-function guessLabel(ref){const m=(ref||"").match(/^(?:refs\/remotes\/\w+\/|origin\/)?(.+)$/);return m?m[1]:(ref||"");}
+async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); } // kept for non-git shell uses
+function shortSha(s){return (s||"").slice(0,12);} // legacy; replaced by git.shortSha in new code
+function guessLabel(ref){const m=(ref||"").match(/^(?:refs\/remotes\/\w+\/|origin\/)?(.+)$/);return m?m[1]:(ref||"");} // legacy; replaced by git.guessLabel
 function nowUK(){
   try{
     const f=new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/London",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(new Date());
@@ -31,28 +32,6 @@ function nowUK(){
   }
 }
 
-async function resolveRefToSha(ref) {
-  // try as-is; origin/<ref>; fetch
-  async function tryRev(r){
-    let out=""; try{ await exec.exec("bash",["-lc","git rev-parse "+r],{listeners:{stdout:d=>out+=d.toString()}}); }catch{}
-    return out.trim()||null;
-  }
-  if (/^[0-9a-f]{7,40}$/i.test(ref||"")){
-    const sha = await tryRev(ref);
-    if (sha) return sha;
-    throw new Error(`Input '${ref}' looks like SHA but not found locally`);
-  }
-  let sha = await tryRev(ref);
-  if (sha) return sha;
-  sha = await tryRev(`refs/remotes/origin/${ref}`);
-  if (sha) return sha;
-  try{
-    await sh(`git fetch origin ${ref}:${ref} --tags --prune`);
-    sha = await tryRev(ref);
-    if (sha) return sha;
-  }catch{}
-  throw new Error(`Cannot resolve ref '${ref}' to a commit SHA.`);
-}
 
 function listFilesRec(dir){
   const out=[];
@@ -87,9 +66,11 @@ async function run() {
     const headDir = path.join(workdir, "__head__");
     fs.mkdirSync(baseDir, { recursive: true });
 
-    await sh("git fetch --all --tags --prune --force");
-    const baseSha = await resolveRefToSha(baseRefInput);
-    const headSha = await resolveRefToSha(headRefInput);
+    await git.sh("git fetch --all --tags --prune --force");
+    await git.ensureRefLocal(baseRefInput);
+    await git.ensureRefLocal(headRefInput);
+    const baseSha = await git.resolveRefToSha(baseRefInput);
+    const headSha = await git.resolveRefToSha(headRefInput);
     if (baseSha === headSha) {
       core.setFailed(`Both refs resolve to the same commit (${baseSha}). base='${baseRefInput}', head='${headRefInput}'`);
       return;
@@ -99,18 +80,18 @@ async function run() {
     await exec.exec("bash", ["-lc", "git rev-parse HEAD"], { listeners:{ stdout: d=> currentSha+=d.toString() }});
     currentSha = currentSha.trim();
 
-    await sh(`git worktree add --detach ${baseDir} ${baseSha}`);
+    await git.addWorktree(baseDir, baseSha);
     let headScanRoot = workdir;
     let createdHeadWorktree = false;
     if (currentSha !== headSha) {
       fs.mkdirSync(headDir, { recursive: true });
-      await sh(`git worktree add --detach ${headDir} ${headSha}`);
+      await git.addWorktree(headDir, headSha);
       headScanRoot = headDir;
       createdHeadWorktree = true;
     }
 
-    const baseLabel = guessLabel(baseRefInput);
-    const headLabel = guessLabel(headRefInput);
+    const baseLabel = git.guessLabel(baseRefInput);
+    const headLabel = git.guessLabel(headRefInput);
 
     if (buildCommand) {
       await sh(buildCommand, { cwd: baseDir });
@@ -132,8 +113,8 @@ async function run() {
       const md = renderDiffTableMarkdown(diffObj, baseLabel, headLabel);
       const out = [];
       out.push("### Vulnerability Diff (Syft+Grype)");
-      out.push(`- **Base**: \`${baseLabel}\` → \`${shortSha(baseSha)}\``);
-      out.push(`- **Head**: \`${headLabel}\` → \`${shortSha(headSha)}\``);
+      out.push(`- **Base**: \`${baseLabel}\` → \`${git.shortSha(baseSha)}\``);
+      out.push(`- **Head**: \`${headLabel}\` → \`${git.shortSha(headSha)}\``);
       out.push(`- **Min severity**: \`${minSeverity}\``);
       out.push(`- **Counts**: NEW=${diffObj.news.length} · REMOVED=${diffObj.removed.length} · UNCHANGED=${diffObj.unchanged.length}\n`);
       out.push(md);
@@ -257,9 +238,9 @@ async function run() {
     core.setOutput("unchanged_count", String(diffObj.unchanged.length));
 
     // Cleanup worktrees
-    await sh(`git worktree remove ${baseDir} --force || true`);
+    await git.removeWorktree(baseDir);
     if (fs.existsSync(headDir) && headDir !== workdir) {
-      await sh(`git worktree remove ${headDir} --force || true`);
+      await git.removeWorktree(headDir);
     }
   } catch (err) {
     core.setFailed(err?.message || String(err));

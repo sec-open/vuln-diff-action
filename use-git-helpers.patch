@@ -1,0 +1,80 @@
+*** Begin Patch
+*** Update File: src/index.js
+@@
+-const { analyzeOneRef, makeDiff } = require("./analyze");
++const { analyzeOneRef, makeDiff } = require("./analyze");
+ const { persistAll } = require("./storage");
+ const { renderDiffTableMarkdown, linkifyIdsMarkdown } = require("./render/markdown");
+ const { writeHtmlBundle, markdownTableToHtml } = require("./render/html");
+ const { buildCoverHtml, buildMainHtml, buildLandscapeHtml, htmlToPdf, mergePdfs } = require("./render/pdf");
+ const { buildMermaidGraphFromBOMImproved, renderPathsMarkdownTable, buildDependencyPathsTable } = require("./report"); // you already had these
++// NEW: centralized git helpers
++const git = require("./git");
+@@
+-async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); }
+-function shortSha(s){return (s||"").slice(0,12);}
+-function guessLabel(ref){const m=(ref||"").match(/^(?:refs\/remotes\/\w+\/|origin\/)?(.+)$/);return m?m[1]:(ref||"");}
++async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); } // kept for non-git shell uses
++function shortSha(s){return (s||"").slice(0,12);} // legacy; replaced by git.shortSha in new code
++function guessLabel(ref){const m=(ref||"").match(/^(?:refs\/remotes\/\w+\/|origin\/)?(.+)$/);return m?m[1]:(ref||"");} // legacy; replaced by git.guessLabel
+@@
+-async function resolveRefToSha(ref) {
+-  // try as-is; origin/<ref>; fetch
+-  async function tryRev(r){
+-    let out=""; try{ await exec.exec("bash",["-lc","git rev-parse "+r],{listeners:{stdout:d=>out+=d.toString()}}); }catch{}
+-    return out.trim()||null;
+-  }
+-  if (/^[0-9a-f]{7,40}$/i.test(ref||"")){
+-    const sha = await tryRev(ref);
+-    if (sha) return sha;
+-    throw new Error(`Input '${ref}' looks like SHA but not found locally`);
+-  }
+-  let sha = await tryRev(ref);
+-  if (sha) return sha;
+-  sha = await tryRev(`refs/remotes/origin/${ref}`);
+-  if (sha) return sha;
+-  try{
+-    await sh(`git fetch origin ${ref}:${ref} --tags --prune`);
+-    sha = await tryRev(ref);
+-    if (sha) return sha;
+-  }catch{}
+-  throw new Error(`Cannot resolve ref '${ref}' to a commit SHA.`);
+-}
++// NOTE: resolveRefToSha now provided by git.resolveRefToSha
+@@
+-    await sh("git fetch --all --tags --prune --force");
+-    const baseSha = await resolveRefToSha(baseRefInput);
+-    const headSha = await resolveRefToSha(headRefInput);
++    await git.sh("git fetch --all --tags --prune --force");
++    // Ensure both refs are present locally (prevents "invalid reference" in runners)
++    await git.ensureRefLocal(baseRefInput);
++    await git.ensureRefLocal(headRefInput);
++    const baseSha = await git.resolveRefToSha(baseRefInput);
++    const headSha = await git.resolveRefToSha(headRefInput);
+@@
+-    await sh(`git worktree add --detach ${baseDir} ${baseSha}`);
++    await git.addWorktree(baseDir, baseSha);
+@@
+-      await sh(`git worktree add --detach ${headDir} ${headSha}`);
++      await git.addWorktree(headDir, headSha);
+@@
+-    const baseLabel = guessLabel(baseRefInput);
+-    const headLabel = guessLabel(headRefInput);
++    const baseLabel = git.guessLabel(baseRefInput);
++    const headLabel = git.guessLabel(headRefInput);
+@@
+-      out.push(`- **Base**: \`${baseLabel}\` → \`${shortSha(baseSha)}\``);
+-      out.push(`- **Head**: \`${headLabel}\` → \`${shortSha(headSha)}\``);
++      out.push(`- **Base**: \`${baseLabel}\` → \`${git.shortSha(baseSha)}\``);
++      out.push(`- **Head**: \`${headLabel}\` → \`${git.shortSha(headSha)}\``);
+@@
+-    await sh(`git worktree remove ${baseDir} --force || true`);
+-    if (fs.existsSync(headDir) && headDir !== workdir) {
+-      await sh(`git worktree remove ${headDir} --force || true`);
+-    }
++    await git.removeWorktree(baseDir);
++    if (fs.existsSync(headDir) && headDir !== workdir) {
++      await git.removeWorktree(headDir);
++    }
+*** End Patch
+
