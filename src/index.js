@@ -501,31 +501,46 @@ function writeHtmlReportBundle(workdir, meta) {
     ".grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.chart-wrap{position:relative;width:100%;min-height:260px}.muted{color:#6b7280}" +
     "@media (max-width:1100px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}";
 
-  const APP_JS =
-    "'use strict';" +
-    "var view=document.getElementById('view');" +
-    "var routes={"/dashboard":function(){return window.renderDashboard&&window.renderDashboard();}, " +
-    '"/intro":renderIntro,"/summary":renderSummary,"/severity":renderSeverity,"/changes":renderChanges,' +
-    '"/diff":renderDiff,"/graph-base":renderGraphBase,"/graph-head":renderGraphHead,"/paths-base":renderPathsBase,"/paths-head":renderPathsHead};' +
-    "function esc(s){return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}" +
-    "function route(){var hash=location.hash||'#/dashboard';document.querySelectorAll('.nav-link').forEach(function(a){a.classList.toggle('active',a.getAttribute('href')===hash);});var fn=(routes[hash.slice(1)]||renderIntro);Promise.resolve(fn()).catch(function(e){view.innerHTML='<div class=\"panel\">Error: '+esc(e)+'</div>';});}" +
-    "window.addEventListener('hashchange',route);window.addEventListener('DOMContentLoaded',route);" +
-    "async function loadJson(name){var r=await fetch('./'+name);return r.json();}" +
-    "function linkify(txt){return String(txt).replace(/\\b(GHSA-[A-Za-z0-9-]{9,})\\b/g,function(m,id){return '<a title=\"Open '+id+'\" href=\"https://github.com/advisories/'+id+'\" target=\"_blank\" rel=\"noopener\">'+id+'</a>';}).replace(/\\b(CVE-\\d{4}-\\d{4,7})\\b/g,function(m,id){return '<a title=\"Open '+id+'\" href=\"https://nvd.nist.gov/vuln/detail/'+id+'\" target=\"_blank\" rel=\"noopener\">'+id+'</a>';});}" +
-    "function mdTableToHtml(md){if(!md||!md.includes('|'))return '<div class=\"panel\">No data</div>';var lines=md.split(/\\r?\\n/).filter(Boolean);var header=lines[0];var sep=lines[1]||'';if(!sep.replace(/\\|/g,'').trim().match(/^-{3,}|:?-{3,}:?/))return '<pre>'+esc(md)+'</pre>';var cells=function(l){return l.split('|').map(function(c){return c.trim();}).filter(function(_v,i,a){return !(i===0||i===a.length-1);});};var html='<table class=\"tbl\"><thead><tr>';cells(header).forEach(function(h){html+='<th>'+h.replace(/\\*\\*([^*]+)\\*\\*/g,'<b>$1</b>')+'</th>';});html+='</tr></thead><tbody>';for(var i=2;i<lines.length;i++){var row=cells(lines[i]).map(function(c){return linkify(c.replace(/\\`([^\\`]+)\\`/g,'<code>$1</code>').replace(/\\*\\*([^*]+)\\*\\*/g,'<b>$1</b>'));});if(row.length)html+='<tr><td>'+row.join('</td><td>')+'</td></tr>';}html+='</tbody></table>';return html;}" +
-    "async function renderIntro(){var m=window.__meta__||{};var base=esc(m.baseLabel||'base');var head=esc(m.headLabel||'head');view.innerHTML='<h2>Introduction</h2><div class=\"panel\">This report compares security vulnerabilities between <b>'+base+'</b> (base) and <b>'+head+'</b> (head). The goal is to detect vulnerabilities that are introduced and/or fixed between development branches.</div><div class=\"panel\"><b>Tools & pipeline</b><br/><ul><li><b>CycloneDX Maven plugin</b>: generates an accurate SBOM (JSON) per ref.</li><li><b>Syft</b>: generates SBOMs when Maven is not present.</li><li><b>Grype</b>: scans SBOMs and produces vulnerability findings.</li><li><b>Diff logic</b>: classifies NEW, REMOVED, and UNCHANGED vulnerabilities.</li></ul></div>';}" +
-    "async function renderSummary(){var d=await loadJson('diff.json');var m=window.__meta__||{};var baseSha=(m.baseSha||'').slice(0,12);var headSha=(m.headSha||'').slice(0,12);view.innerHTML='<h2>Summary</h2><div class=\"panel\"><b>Repository:</b> '+esc(m.repo||'')+'<br/><b>Base:</b> '+esc(m.baseLabel||'')+' — <code>'+esc(baseSha)+'</code><br/><b>Head:</b> '+esc(m.headLabel||'')+' — <code>'+esc(headSha)+'</code><br/><b>Counts:</b> NEW='+d.news.length+' · REMOVED='+d.removed.length+' · UNCHANGED='+d.unchanged.length+'</div>';}" +
-    "async function renderSeverity(){var base=await loadJson('grype-base.json');var head=await loadJson('grype-head.json');function count(arr){return (arr||[]).reduce(function(m,x){var s=(x.vulnerability&&x.vulnerability.severity)||'UNKNOWN';m[s]=(m[s]||0)+1;return m;},{})}var baseC=count(base.matches);var headC=count(head.matches);var m=window.__meta__||{};view.innerHTML='<h2>Severity distribution</h2><div class=\"grid2\"><div class=\"chart-box\"><h3>'+esc(m.baseLabel||'BASE')+'</h3><canvas id=\"c1\" style=\"width:100%;height:260px\"></canvas></div><div class=\"chart-box\"><h3>'+esc(m.headLabel||'HEAD')+'</h3><canvas id=\"c2\" style=\"width:100%;height:260px\"></canvas></div></div>';var severities=['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];var colors=['#b91c1c','#ea580c','#ca8a04','#16a34a','#6b7280'];new Chart(document.getElementById('c1'),{type:'doughnut',data:{labels:severities,datasets:[{data:severities.map(function(s){return baseC[s]||0;}),backgroundColor:colors}]},options:{plugins:{legend:{position:'bottom'}},cutout:'60%'}});new Chart(document.getElementById('c2'),{type:'doughnut',data:{labels:severities,datasets:[{data:severities.map(function(s){return headC[s]||0;}),backgroundColor:colors}]},options:{plugins:{legend:{position:'bottom'}},cutout:'60%'}});}" +
-    "async function renderChanges(){var d=await loadJson('diff.json');view.innerHTML='<h2>Change overview</h2><div class=\"chart-box\"><canvas id=\"c3\" style=\"height:260px;width:100%\"></canvas></div>';new Chart(document.getElementById('c3'),{type:'bar',data:{labels:['NEW','REMOVED','UNCHANGED'],datasets:[{data:[d.news.length,d.removed.length,d.unchanged.length]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});}" +
-    "async function renderDiff(){var md=await fetch('./report.md').then(function(r){return r.text();});var idx=md.split('\\n').findIndex(function(l){return l.trim().startsWith('| Severity |');});var table=idx>=0?md.split('\\n').slice(idx).join('\\n'):md;view.innerHTML='<h2>Vulnerability diff</h2>'+mdTableToHtml(table);}" +
-    "async function renderGraphBase(){view.innerHTML='<h2>Dependency graph (base)</h2><div id=\"m1\"></div>';var txt=await fetch('./report-landscape.html').then(function(r){return r.text();});var m=txt.match(/data-mermaid=\"([^\"]*)\"/);if(m){await ensureMermaid();renderMermaid('m1', decodeHtml(m[1]));}}" +
-    "async function renderGraphHead(){view.innerHTML='<h2>Dependency graph (head)</h2><div id=\"m2\"></div>';var txt=await fetch('./report-landscape.html').then(function(r){return r.text();});var all=txt.match(/data-mermaid=\"([^\"]*)\"/g)||[];if(all.length>1){var second=(all[1]||'').match(/data-mermaid=\"([^\"]*)\"/);if(second){await ensureMermaid();renderMermaid('m2', decodeHtml(second[1]));}}}" +
-    "async function renderPathsBase(){view.innerHTML='<h2>Dependency paths (base)</h2>'+await extractSection('Dependency path base');}" +
-    "async function renderPathsHead(){view.innerHTML='<h2>Dependency paths (head)</h2>'+await extractSection('Dependency path head');}" +
-    "function decodeHtml(s){return String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');}" +
-    "async function ensureMermaid(){if(!window.mermaidInited){window.mermaid.initialize({startOnLoad:false,securityLevel:'antiscript'});window.mermaidInited=true;}}" +
-    "async function renderMermaid(id, code){var r=await window.mermaid.render('m'+Math.random().toString(36).slice(2),code);document.getElementById(id).innerHTML=r.svg;}" +
-    "async function extractSection(title){var html=await fetch('./report-landscape.html').then(function(r){return r.text();});var safe=title.replace(/[.*+?^\\$\\{\\}()|[\\]\\\\]/g,'\\\\$&');var re=new RegExp('<h2>[^<]*'+safe+'[^<]*</h2>[\\\\s\\\\S]*?(<table[\\\\s\\\\S]*?</table>)','i');var m=html.match(re);return m?m[1]:'<div class=\"panel\">No data</div>';}" ;
+  const APP_JS = [
+    '\'use strict\';',
+    'var view=document.getElementById(\'view\');',
+    'var routes={',
+    '  \'/dashboard\': function(){ return window.renderDashboard && window.renderDashboard(); },',
+    '  \'/intro\': renderIntro,',
+    '  \'/summary\': renderSummary,',
+    '  \'/severity\': renderSeverity,',
+    '  \'/changes\': renderChanges,',
+    '  \'/diff\': renderDiff,',
+    '  \'/graph-base\': renderGraphBase,',
+    '  \'/graph-head\': renderGraphHead,',
+    '  \'/paths-base\': renderPathsBase,',
+    '  \'/paths-head\': renderPathsHead',
+    '};',
+    'function esc(s){return (s==null?\'\':String(s)).replace(/&/g,\'&amp;\').replace(/</g,\'&lt;\').replace(/>/g,\'&gt;\');}',
+    'function route(){',
+    '  var hash=location.hash||\'#/dashboard\';',
+    '  document.querySelectorAll(\'.nav-link\').forEach(function(a){',
+    '    a.classList.toggle(\'active\', a.getAttribute(\'href\')===hash);',
+    '  });',
+    '  var fn=(routes[hash.slice(1)]||renderIntro);',
+    '  Promise.resolve(fn()).catch(function(e){',
+    '    view.innerHTML=\'<div class="panel">Error: \'+esc(e)+\'</div>\';',
+    '  });',
+    '}',
+    'window.addEventListener(\'hashchange\',route);',
+    'window.addEventListener(\'DOMContentLoaded\',route);',
+    'async function loadJson(name){var r=await fetch(\'./\'+name);return r.json();}',
+    'function linkify(txt){',
+    '  return String(txt)',
+    '    .replace(/\\b(GHSA-[A-Za-z0-9-]{9,})\\b/g,function(m,id){',
+    '      return \'<a title="Open \'+id+\'" href="https://github.com/advisories/\'+id+\'" target="_blank" rel="noopener">\'+id+\'</a>\';',
+    '    })',
+    '    .replace(/\\b(CVE-\\d{4}-\\d{4,7})\\b/g,function(m,id){',
+    '      return \'<a title="Open \'+id+\'" href="https://nvd.nist.gov/vuln/detail/\'+id+\'" target="_blank" rel="noopener">\'+id+\'</a>\';',
+    '    });',
+    '}',
+    // ... (deja el resto de funciones tal cual las tenías, o también pásalas a este array)
+  ].join('\n');
 
   // Dashboard code is big; written as separate file
   const DASHBOARD_JS =
