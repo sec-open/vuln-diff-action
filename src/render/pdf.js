@@ -13,12 +13,102 @@
 
 const fs = require("fs");
 const path = require("path");
-const puppeteer = require("puppeteer");
+const { execSync } = require("child_process");
 const { PDFDocument } = require("pdf-lib");
 
+/* -------------------------- Puppeteer resolution -------------------------- */
+/**
+ * Try to require puppeteer first, then puppeteer-core as a fallback.
+ * We keep it dynamic to avoid bundling issues when one of them is not installed.
+ */
+function resolvePuppeteerModule() {
+  // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+  try { return require("puppeteer"); } catch (_) { /* ignore */ }
+  // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+  try { return require("puppeteer-core"); } catch (_) { /* ignore */ }
+  return null;
+}
+
+/**
+ * Find an executable on PATH using `which`. Returns null if not found.
+ */
+function which(bin) {
+  try {
+    const out = execSync(`which ${bin}`, { stdio: ["ignore", "pipe", "ignore"] })
+      .toString().trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a Chrome/Chromium executable path in GitHub runners or local envs.
+ * Priority:
+ *  1. PUPPETEER_EXECUTABLE_PATH env
+ *  2. puppeteer.executablePath() (if available and non-empty)
+ *  3. System Chrome/Chromium common names on PATH
+ *  4. Common hard-coded locations
+ */
+function resolveChromeExecutablePath(puppeteer) {
+  // 1) Explicit override
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+
+  // 2) Puppeteer's downloaded Chromium (when using `puppeteer` and download happened)
+  try {
+    if (puppeteer && typeof puppeteer.executablePath === "function") {
+      const xp = puppeteer.executablePath();
+      if (xp && fs.existsSync(xp)) return xp;
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3) System binaries commonly present
+  const candidates = [
+    "google-chrome-stable",
+    "google-chrome",
+    "chromium-browser",
+    "chromium",
+  ];
+  for (const name of candidates) {
+    const found = which(name);
+    if (found && fs.existsSync(found)) return found;
+  }
+
+  // 4) Hard-coded common paths
+  const hardcoded = [
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+  ];
+  for (const p of hardcoded) {
+    if (fs.existsSync(p)) return p;
+  }
+
+  return null;
+}
+
+/**
+ * Attempt an on-the-fly browser install via `npx puppeteer browsers install`.
+ * This keeps the consumer workflow unchanged.
+ * @param {"chrome"|"chromium"} product
+ */
+function tryInstallBrowser(product = "chrome") {
+  // IMPORTANT: Keep output quiet but visible in Action logs if needed.
+  const cmd = `npx --yes puppeteer browsers install ${product}`;
+  try {
+    execSync(cmd, { stdio: ["ignore", "pipe", "pipe"] });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /* --------------------------------- Theme --------------------------------- */
-// Set here the exact cover color you used in v1 if you want it fixed.
-// If you pass coverBg/coverFg to buildCoverHtml they will override these defaults.
 const COVER_BG = "#0b2239";
 const COVER_FG = "#ffffff";
 
@@ -37,7 +127,6 @@ function toArray(x) {
 }
 
 function escHtml(s) {
-  // Basic HTML-escape to avoid template breakage in PDF HTML bodies
   return String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -56,7 +145,6 @@ function titleLine(repository, baseLabel, headLabel) {
 
 function nowUK() {
   try {
-    // Keep the same style your v1 used (dd/mm/yyyy HH:MM:SS)
     return new Intl.DateTimeFormat("en-GB", {
       timeZone: "Europe/Madrid",
       year: "numeric",
@@ -66,12 +154,9 @@ function nowUK() {
       minute: "2-digit",
       second: "2-digit",
       hour12: false,
-    })
-      .format(new Date())
-      .replace(",", "");
+    }).format(new Date()).replace(",", "");
   } catch {
-    const d = new Date(),
-      p = (n) => String(n).padStart(2, "0");
+    const d = new Date(), p = (n) => String(n).padStart(2, "0");
     return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(
       d.getHours()
     )}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
@@ -95,20 +180,16 @@ p { margin: 0 0 10px 0; line-height: 1.45; }
 .center { text-align:center; }
 
 a, a:visited, a:active { color: #0366d6; text-decoration: none; }
-/* Avoid raw URL suffixes in PDF anchors */
 a[href]::after { content: none !important; }
 
-/* Sections */
 section { page-break-inside: avoid; margin-bottom: 14mm; }
 .section { page-break-before: always; }
 
-/* TOC */
 .toc { page-break-before: always; }
 .toc .title { font-size: 22px; margin-bottom: 10mm; }
 .toc ul { list-style: none; padding: 0; margin: 0; width: 70%; margin-left: auto; margin-right: auto; }
 .toc li { margin: 6px 0 10px 0; line-height: 1.8; font-size: 14px; }
 
-/* Tables */
 table { border-collapse: collapse; width: 100%; font-size: 12px; table-layout: fixed; }
 th, td { border: 1px solid #ddd; padding: 6px 8px; vertical-align: top; }
 th { background:#f6f8fa; text-align:left; }
@@ -116,14 +197,11 @@ th { background:#f6f8fa; text-align:left; }
 .nowrap { white-space: nowrap; }
 .break { word-break: break-word; overflow-wrap: anywhere; }
 
-/* Header/Footer placeholders (Puppeteer templates will inject content) */
 .header, .footer { font-size: 10px; color:#444; }
 
-/* Figures */
 .caption { font-size: 12px; color:#333; margin: 4px 0 10px 0; }
 .figure { margin: 6px 0 16px 0; }
 
-/* Mermaid (we output text blocks in landscape pages) */
 .mermaid-box {
   border:1px solid #ddd; padding:8px; margin:8px 0 12px 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
@@ -141,7 +219,6 @@ function buildCoverHtml({
   coverBg = COVER_BG,
   coverFg = COVER_FG,
 }) {
-  // The cover is a full-page section that matches your v1 aesthetic
   const title = titleLine(repository, baseLabel, headLabel);
   const logoHtml = titleLogoUrl
     ? `<div style="margin-top:18mm;"><img src="${escHtml(
@@ -156,9 +233,7 @@ function buildCoverHtml({
 <meta charset="utf-8">
 <style>
 ${BASE_CSS}
-body {
-  margin:0;
-}
+body { margin:0; }
 .cover {
   background:${coverBg};
   color:${coverFg};
@@ -197,7 +272,6 @@ function buildMainHtml({
   diffTableHtml,
   logo,
 }) {
-  // Header template (Puppeteer header/footer use separate small HTML fragments)
   const baseLabel = base.label;
   const headLabel = head.label;
 
@@ -215,6 +289,7 @@ function buildMainHtml({
 
   const footerTemplate = `
 <style>
+  <style>
   .ftr { font-size:10px; width:100%; padding:0 8mm; color:#555; }
   .ftr .line { display:flex; justify-content:space-between; width:100%; }
 </style>
@@ -287,7 +362,6 @@ function buildMainHtml({
   <p class="small muted">Minimum severity: <b>${escHtml(minSeverity)}</b></p>
 </section>`;
 
-  // Charts placeholder (keep it simple/clean like v1)
   const charts = `
 <section class="section">
   <h2>Severity distribution</h2>
@@ -305,7 +379,6 @@ function buildMainHtml({
   ${diffTableHtml}
 </section>`;
 
-  // Graphs (portrait page with placeholders; actual data in landscape appendix)
   const graphs = `
 <section class="section">
   <h2>Dependency graph base</h2>
@@ -416,7 +489,6 @@ function buildLandscapeHtml({
 
 /* ----------------------- PDF-only: Vulnerability table -------------------- */
 function buildDiffTableHtml(diff, baseLabel, headLabel) {
-  // v1-style table with Branches + Status
   const rows = [];
 
   const pushRows = (arr, status, branches) => {
@@ -432,9 +504,7 @@ function buildDiffTableHtml(diff, baseLabel, headLabel) {
         <tr>
           <td class="nowrap"><b>${sev}</b></td>
           <td class="break">${
-            href
-              ? `<a href="${href}" rel="noopener noreferrer">${id}</a>`
-              : id
+            href ? `<a href="${href}" rel="noopener noreferrer">${id}</a>` : id
           }</td>
           <td class="nowrap"><code>${pkgVer}</code></td>
           <td class="nowrap">${escHtml(branches)}</td>
@@ -467,7 +537,6 @@ function buildDiffTableHtml(diff, baseLabel, headLabel) {
 function pickHref(it) {
   const id = it?.id || "";
   const url = it?.url || "";
-  // Prefer official GHSA link for hovercards when viewed in GitHub previewers
   if (/^https:\/\/github\.com\/advisories\/GHSA-/.test(url)) return url;
   const ghsa = pickGhsa(it);
   if (ghsa) return `https://github.com/advisories/${ghsa}`;
@@ -494,7 +563,6 @@ function buildPathsTableHtml(
   matches,
   { maxPathsPerPkg = 3, maxDepth = 10 } = {}
 ) {
-  // Columns: Module, Depth0..DepthN (kept simple for PDF readability)
   const rows = [];
 
   for (const m of toArray(matches)) {
@@ -506,9 +574,7 @@ function buildPathsTableHtml(
       ...toArray(m?.matchDetails).flatMap((d) => toArray(d?.via)),
       ...toArray(m?.paths),
       ...toArray(m?.via),
-      ...toArray(art?.locations)
-        .map((loc) => loc?.path)
-        .filter(Boolean),
+      ...toArray(art?.locations).map((loc) => loc?.path).filter(Boolean),
     ];
 
     let added = 0;
@@ -521,7 +587,7 @@ function buildPathsTableHtml(
 
       if (segments.length === 0) continue;
       let start = 0;
-      if (/^pkg$/i.test(segments[0])) start = 1; // normalize if path starts with 'pkg'
+      if (/^pkg$/i.test(segments[0])) start = 1;
       const moduleName = segments[start] || pkgName;
       const depths = segments.slice(start + 1);
       rows.push([moduleName, ...depths]);
@@ -531,7 +597,6 @@ function buildPathsTableHtml(
     if (added === 0) rows.push([pkgName + (pkgVer ? ":" + pkgVer : "")]);
   }
 
-  // Compute max number of depth columns to align the table
   let maxCols = 1;
   for (const r of rows) maxCols = Math.max(maxCols, r.length);
 
@@ -561,7 +626,6 @@ function buildPathsTableHtml(
 
 /* ----------------------- PDF-only: Mermaid graph -------------------------- */
 function buildMermaidGraphForPdf(bom, matches, maxNodes = 150) {
-  // Build a light graph text (flowchart) suitable to be shown as text in PDF landscape.
   const components = toArray(bom?.components);
   const dependencies = toArray(bom?.dependencies);
 
@@ -606,43 +670,110 @@ function buildMermaidGraphForPdf(bom, matches, maxNodes = 150) {
   return lines.join("\n");
 
   function hash(s) {
-    // Cheap stable short id
     let h = 0;
     const str = String(s);
-    for (let i = 0; i < str.length; i++) {
-      h = (h * 33) ^ str.charCodeAt(i);
-    }
+    for (let i = 0; i < str.length; i++) h = (h * 33) ^ str.charCodeAt(i);
     return "n" + (h >>> 0).toString(16);
   }
 }
 
 /* ------------------------------ Puppeteer I/O ------------------------------ */
 /**
- * Render an HTML string to a PDF file using Puppeteer.
+ * Render an HTML string to a PDF file using Puppeteer/Chromium.
+ * Robustly resolves Chrome path; if missing, auto-installs via npx so the consumer workflow remains unchanged.
  * @param {string} html - Full HTML document string
  * @param {string} outPath - Path to output PDF
- * @param {object} opts - { displayHeaderFooter, headerTemplate, footerTemplate, landscape, margin }
+ * @param {object} opts - { displayHeaderFooter, headerTemplate, footerTemplate, landscape, margin, launchArgs }
  */
 async function htmlToPdf(html, outPath, opts = {}) {
-  // NOTE: We embed HTML directly; no reuse of HTML/Markdown renderers.
-  // Comments kept in English for clarity.
-
   const {
     displayHeaderFooter = false,
     headerTemplate = "",
     footerTemplate = "",
     landscape = false,
     margin = { top: "14mm", right: "12mm", bottom: "14mm", left: "12mm" },
+    launchArgs = ["--no-sandbox", "--disable-setuid-sandbox"],
   } = opts;
 
-  // Ensure output directory exists
   const outDir = path.dirname(outPath);
   fs.mkdirSync(outDir, { recursive: true });
 
-  // Launch headless Chromium. On GH runners Puppeteer downloads Chromium automatically.
+  // 1) Try to load puppeteer/puppeteer-core
+  let puppeteer = resolvePuppeteerModule();
+  if (!puppeteer) {
+    // Attempt to install puppeteer at runtime (keeps consumer unchanged)
+    try {
+      execSync("npm i -D puppeteer", { stdio: ["ignore", "pipe", "pipe"] });
+      // eslint-disable-next-line global-require
+      puppeteer = require("puppeteer");
+    } catch {
+      // Last resort try puppeteer-core
+      try {
+        execSync("npm i -D puppeteer-core", { stdio: ["ignore", "pipe", "pipe"] });
+        // eslint-disable-next-line global-require
+        puppeteer = require("puppeteer-core");
+      } catch (e) {
+        throw new Error(
+          "Unable to load 'puppeteer' or 'puppeteer-core' and runtime install failed."
+        );
+      }
+    }
+  }
+
+  // 2) Resolve an executable path; if not present, auto-install browser with npx
+  let executablePath = resolveChromeExecutablePath(puppeteer);
+  if (!executablePath) {
+    // Try to install Chrome silently via npx
+    const okChrome = tryInstallBrowser("chrome");
+    if (!okChrome) {
+      // Try chromium as a fallback
+      tryInstallBrowser("chromium");
+    }
+    // re-resolve after install
+    executablePath = resolveChromeExecutablePath(puppeteer);
+  }
+
+  if (!executablePath) {
+    // As a very last attempt, allow puppeteer to try default without executablePath
+    // (in case the package has auto-downloaded after the npx step).
+    try {
+      const browser = await puppeteer.launch({
+        headless: "new",
+        args: launchArgs,
+      });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: "networkidle0" });
+        await page.pdf({
+          path: outPath,
+          format: "A4",
+          landscape,
+          displayHeaderFooter,
+          headerTemplate,
+          footerTemplate,
+          margin,
+          printBackground: true,
+          preferCSSPageSize: true,
+        });
+        await browser.close();
+        return;
+      } catch (inner) {
+        try { await browser.close(); } catch (_) { /* ignore */ }
+        throw inner;
+      }
+    } catch (e) {
+      // give a clear error message
+      throw new Error(
+        "Could not resolve or install a Chrome/Chromium executable for Puppeteer automatically."
+      );
+    }
+  }
+
+  // 3) Normal path: launch with resolved executablePath
   const browser = await puppeteer.launch({
     headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    executablePath,
+    args: launchArgs,
   });
 
   try {
@@ -671,9 +802,7 @@ async function htmlToPdf(html, outPath, opts = {}) {
  * @param {string} outFile - output PDF path
  */
 async function mergePdfs(inFiles, outFile) {
-  // Read all PDFs
   const pdfDoc = await PDFDocument.create();
-
   for (const file of inFiles) {
     if (!fs.existsSync(file)) continue;
     const bytes = fs.readFileSync(file);
@@ -681,16 +810,8 @@ async function mergePdfs(inFiles, outFile) {
     const copied = await pdfDoc.copyPages(src, src.getPageIndices());
     for (const p of copied) pdfDoc.addPage(p);
   }
-
   const outBytes = await pdfDoc.save();
   fs.writeFileSync(outFile, outBytes);
-}
-
-/* --------------------------------- Helpers -------------------------------- */
-function formatErr(e) {
-  const msg =
-    e && (e.stack || e.message) ? String(e.stack || e.message) : String(e || "Unknown error");
-  return msg;
 }
 
 /* --------------------------------- Exports -------------------------------- */
