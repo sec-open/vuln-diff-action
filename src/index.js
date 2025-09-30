@@ -1,63 +1,50 @@
 // src/index.js
-// Orchestrator for the 3-phase pipeline: analyze → store → render (md/html/pdf). // Comments in English.
+// Orchestrator for the 3-phase pipeline: analyze → store → render (md / html / pdf).
 
 const core = require("@actions/core");
 const exec = require("@actions/exec");
 const artifact = require("@actions/artifact");
 const path = require("path");
 const fs = require("fs");
-const os = require("os");
 
 const { analyzeOneRef, makeDiff } = require("./analyze");
 const { persistAll } = require("./storage");
+
+// Markdown (Job Summary) — stays independent
 const { renderSummaryTableMarkdown, renderDiffTableMarkdown } = require("./render/markdown");
+
+// HTML interactive report — independent renderer
 const { writeHtmlBundle, markdownTableToHtml } = require("./render/html");
+
+// PDF-only renderers — fully independent; no reuse from Markdown/HTML
 const {
   buildCoverHtml,
   buildMainHtml,
   buildLandscapeHtml,
+  buildDiffTableHtml,
+  buildPathsTableHtml,
+  buildMermaidGraphForPdf,
   htmlToPdf,
   mergePdfs,
 } = require("./render/pdf");
-const {
-  buildMermaidGraphFromBOMImproved,
-  renderPathsMarkdownTable,
-  buildDependencyPathsTable,
-} = require("./report");
 
 const git = require("./git");
 
-// small helpers
-async function sh(cmd, opts = {}) {
-  return exec.exec("bash", ["-lc", cmd], opts);
-} // kept for non-git shell uses
-
-function shortSha(s) {
-  return (s || "").slice(0, 12);
-}
-
-function guessLabel(ref) {
-  const m = (ref || "").match(/^(?:refs\/remotes\/\w+\/|origin\/)?(.+)$/);
-  return m ? m[1] : ref || "";
-}
+async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); }
 
 function nowUK() {
   try {
     const f = new Intl.DateTimeFormat("en-GB", {
       timeZone: "Europe/London",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
       hour12: false,
     }).format(new Date());
     const m = f.match(/^(\d{2})\/(\d{2})\/(\d{4}),?\s+(\d{2}):(\d{2}):(\d{2})$/);
     return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : f;
   } catch {
-    const d = new Date(), p = (n) => String(n).padStart(2, "0");
-    return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    const d = new Date(), p = (n) => String(n).padStart(2,"0");
+    return `${p(d.getDate())}-${p(d.getMonth()+1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   }
 }
 
@@ -67,8 +54,7 @@ function listFilesRec(dir) {
     if (!fs.existsSync(d)) return;
     for (const e of fs.readdirSync(d)) {
       const p = path.join(d, e), st = fs.statSync(p);
-      if (st.isDirectory()) walk(p);
-      else out.push(p);
+      if (st.isDirectory()) walk(p); else out.push(p);
     }
   })(dir);
   return out;
@@ -85,7 +71,6 @@ async function run() {
     const reportHtml = (core.getInput("report_html") || "true") === "true";
     const reportPdf = (core.getInput("report_pdf") || "true") === "true";
     const uploadArtifact = (core.getInput("upload_artifact") || "true") === "true";
-    const artifactName = core.getInput("artifact_name") || "vulnerability-diff";
     const titleLogoUrl = core.getInput("title_logo_url") || "";
     const graphMaxNodes = parseInt(core.getInput("graph_max_nodes") || "150", 10);
     const repository = process.env.GITHUB_REPOSITORY || "";
@@ -117,12 +102,10 @@ async function run() {
     await git.addWorktree(baseDir, baseSha);
 
     let headScanRoot = workdir;
-    let createdHeadWorktree = false;
     if (currentSha !== headSha) {
       fs.mkdirSync(headDir, { recursive: true });
       await git.addWorktree(headDir, headSha);
       headScanRoot = headDir;
-      createdHeadWorktree = true;
     }
 
     const baseLabel = git.guessLabel(baseRefInput);
@@ -145,40 +128,29 @@ async function run() {
     // Phase 2 — Storage
     const stored = persistAll(workdir, baseObj, headObj, diffObj);
 
-    // --- SUMMARY (Job Summary) ---
+    // ---------------- Markdown Job Summary (independiente) -----------------
     if (writeSummary) {
-      const tableMd = renderSummaryTableMarkdown(diffObj, baseLabel, headLabel);
+      const md = renderSummaryTableMarkdown(diffObj, baseLabel, headLabel);
       const out = [];
       out.push("### Vulnerability Diff (Syft+Grype)");
       out.push(`- **Base**: \`${baseLabel}\` → \`${git.shortSha(baseSha)}\``);
       out.push(`- **Head**: \`${headLabel}\` → \`${git.shortSha(headSha)}\``);
       out.push(`- **Min severity**: \`${minSeverity}\``);
       out.push(`- **Counts**: NEW=${diffObj.news.length} · REMOVED=${diffObj.removed.length} · UNCHANGED=${diffObj.unchanged.length}\n`);
-      out.push(tableMd);
+      out.push(md);
       await core.summary.addRaw(out.join("\n")).write();
     }
 
-    // Phase 3 — Renderers
-    // HTML bundle (independent)
+    // ---------------- HTML interactive report (independiente) --------------
     if (reportHtml) {
       writeHtmlBundle(
         workdir,
-        {
-          repository,
-          baseLabel,
-          headLabel,
-          baseSha,
-          headSha,
-          generatedAt: nowUK(),
-          titleLogoUrl,
-        },
-        {
-          // The bundle fetches base.json/head.json/diff.json from /html
-        }
+        { repository, baseLabel, headLabel, baseSha, headSha, generatedAt: nowUK(), titleLogoUrl },
+        {}
       );
     }
 
-    // PDF (independent)
+    // ------------------------------ PDF (independiente) ---------------------
     if (reportPdf) {
       const baseJson = JSON.parse(fs.readFileSync(stored.basePath, "utf8"));
       const headJson = JSON.parse(fs.readFileSync(stored.headPath, "utf8"));
@@ -187,22 +159,14 @@ async function run() {
       const baseBom = JSON.parse(fs.readFileSync(baseObj.sbomPath, "utf8"));
       const headBom = JSON.parse(fs.readFileSync(headObj.sbomPath, "utf8"));
 
-      const mermaidBase = buildMermaidGraphFromBOMImproved(baseBom, baseGrype.matches || [], graphMaxNodes);
-      const mermaidHead = buildMermaidGraphFromBOMImproved(headBom, headGrype.matches || [], graphMaxNodes);
+      // Build everything with PDF-only helpers
+      const diffHtml = buildDiffTableHtml(diffObj, baseLabel, headLabel);
+      const pathsBaseHtml = buildPathsTableHtml(baseBom, baseGrype.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 });
+      const pathsHeadHtml = buildPathsTableHtml(headBom, headGrype.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 });
+      const mermaidBase = buildMermaidGraphForPdf(baseBom, baseGrype.matches || [], graphMaxNodes);
+      const mermaidHead = buildMermaidGraphForPdf(headBom, headGrype.matches || [], graphMaxNodes);
 
-      // dependency paths (strictly for PDF; not reusing html)
-      const pathsBaseObj = buildDependencyPathsTable(baseBom, baseGrype.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 });
-      const pathsHeadObj = buildDependencyPathsTable(headBom, headGrype.matches || [], { maxPathsPerPkg: 3, maxDepth: 10 });
-
-      const pathsBaseMd = renderPathsMarkdownTable(pathsBaseObj || { rows: [], depthCols: [] });
-      const pathsHeadMd = renderPathsMarkdownTable(pathsHeadObj || { rows: [], depthCols: [] });
-
-      const diffMd = renderDiffTableMarkdown(diffObj, baseLabel, headLabel);
-      const diffHtml = markdownTableToHtml(diffMd);
-      const pathsBaseHtml = markdownTableToHtml(pathsBaseMd);
-      const pathsHeadHtml = markdownTableToHtml(pathsHeadMd);
-
-      // cover
+      // Cover
       const coverHtml = buildCoverHtml({
         repository,
         baseLabel,
@@ -211,22 +175,18 @@ async function run() {
         generatedAt: nowUK(),
       });
 
-      // main
+      // Main
       const main = buildMainHtml({
         repository,
-        base: { label: baseLabel, sha: baseSha },
-        head: { label: headLabel, sha: headSha },
-        counts: {
-          new: diffObj.news.length,
-          removed: diffObj.removed.length,
-          unchanged: diffObj.unchanged.length,
-        },
+        base: { label: baseLabel, sha: baseSha }, // fill .message if you want to show it
+        head: { label: headLabel, sha: headSha }, // fill .message if you want to show it
+        counts: { base: {}, head: {} },           // fill if you want severity breakdown by branch
         minSeverity,
         diffTableHtml: diffHtml,
         logo: titleLogoUrl,
       });
 
-      // appendix (landscape)
+      // Appendix (landscape)
       const appendix = buildLandscapeHtml({
         baseLabel,
         headLabel,
@@ -236,6 +196,7 @@ async function run() {
         mermaidHead,
       });
 
+      // Render PDFs
       const coverPdf = path.join(workdir, "report-cover.pdf");
       const mainPdf = path.join(workdir, "report-main.pdf");
       const landscapePdf = path.join(workdir, "report-landscape.pdf");
@@ -258,14 +219,12 @@ async function run() {
       await mergePdfs([coverPdf, mainPdf, landscapePdf], mergedPdf);
     }
 
-    // Upload artifacts
+    // Upload artifacts (común)
     if (uploadArtifact) {
       try {
         const client = new artifact.DefaultArtifactClient();
         const files = [
-          stored.basePath,
-          stored.headPath,
-          stored.diffPath,
+          stored.basePath, stored.headPath, stored.diffPath,
           path.join(workdir, "sbom-base.json"),
           path.join(workdir, "sbom-head.json"),
         ];
@@ -276,12 +235,9 @@ async function run() {
         const htmlDir = path.join(workdir, "html");
         if (fs.existsSync(htmlDir)) files.push(...listFilesRec(htmlDir));
 
-        await client.uploadArtifact(
-          core.getInput("artifact_name") || "vulnerability-diff",
-          files,
-          workdir,
-          { continueOnError: true, retentionDays: 90 }
-        );
+        await client.uploadArtifact(core.getInput("artifact_name") || "vulnerability-diff", files, workdir, {
+          continueOnError: true, retentionDays: 90,
+        });
       } catch (e) {
         core.warning("Artifact upload failed: " + (e?.stack || String(e)));
       }
@@ -292,11 +248,9 @@ async function run() {
     core.setOutput("removed_count", String(diffObj.removed.length));
     core.setOutput("unchanged_count", String(diffObj.unchanged.length));
 
-    // Cleanup worktrees
+    // Cleanup
     await git.removeWorktree(baseDir);
-    if (fs.existsSync(headDir) && headDir !== workdir) {
-      await git.removeWorktree(headDir);
-    }
+    if (fs.existsSync(headDir) && headDir !== workdir) await git.removeWorktree(headDir);
   } catch (err) {
     core.setFailed(err?.message || String(err));
   }
