@@ -13,7 +13,7 @@
 
 const fs = require("fs");
 const { execFileSync } = require("child_process");
-const puppeteer = require("puppeteer"); // provided at runtime
+const puppeteer = require("puppeteer");
 
 /* --------------------------------- Utils --------------------------------- */
 
@@ -447,11 +447,32 @@ function buildMermaidGraphForPdf(bom, matches, maxNodes = 150) {
 
 /* ------------------------------ Puppeteer I/O ------------------------------ */
 
+// Lanza Chrome; si no está instalado en el runner, lo instala (o Chromium) y reintenta.
 async function htmlToPdf(html, outPath, opts = {}) {
-  const browser = await puppeteer.launch({
-    headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+  async function launch() {
+    return puppeteer.launch({
+      headless: "new",
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+  }
+
+  let browser;
+  try {
+    browser = await launch();
+  } catch (e) {
+    const msg = String((e && (e.message || e.stack)) || "");
+    if (/Could not find Chrome/i.test(msg)) {
+      try {
+        execFileSync("npx", ["-y", "puppeteer", "browsers", "install", "chrome"], { stdio: "inherit" });
+      } catch {
+        execFileSync("npx", ["-y", "puppeteer", "browsers", "install", "chromium"], { stdio: "inherit" });
+      }
+      browser = await launch();
+    } else {
+      throw e;
+    }
+  }
+
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
@@ -466,7 +487,7 @@ async function htmlToPdf(html, outPath, opts = {}) {
       landscape: !!opts.landscape,
     });
   } finally {
-    await browser.close();
+    try { await browser.close(); } catch {}
   }
 }
 
