@@ -31,22 +31,28 @@ const {
 const git = require("./git");
 
 /* --------------------------- Error handling hooks -------------------------- */
-/** Trunca stacks/lineas enormemente largas para que el job log no “reviente”. */
+/** Trunca el log, pero además vuelca el error completo a un fichero. */
+function dumpErrToFile(e) {
+  try {
+    const full = (e && (e.stack || e.message)) ? String(e.stack || e.message) : String(e || "Unknown error");
+    fs.writeFileSync(path.join(process.cwd(), "vuln-diff-error.log"), full, "utf8");
+  } catch {}
+}
 function formatErr(e) {
-  const MAX_LINE = 300;    // máximo por línea en el log
-  const MAX_LINES = 60;    // máximo de líneas en el stack mostrado
+  const MAX_LINE = 300;
+  const MAX_LINES = 60;
   const msg = (e && (e.stack || e.message)) ? String(e.stack || e.message) : String(e || "Unknown error");
   const lines = msg.split(/\r?\n/).slice(0, MAX_LINES).map(l => (l.length > MAX_LINE ? l.slice(0, MAX_LINE) + " …[truncated]" : l));
   return lines.join("\n");
 }
 
-// Captura errores incluso si suceden durante la carga del bundle o fuera de await.
 process.on("unhandledRejection", (e) => {
+  dumpErrToFile(e);
   try { core.setFailed(formatErr(e)); } catch {}
 });
 process.on("uncaughtException", (e) => {
+  dumpErrToFile(e);
   try { core.setFailed(formatErr(e)); } catch {}
-  // Asegura que el job termina; evita que Node siga imprimiendo un stack eterno
   process.exit(1);
 });
 
@@ -202,9 +208,9 @@ async function run() {
       // Main
       const main = buildMainHtml({
         repository,
-        base: { label: baseLabel, sha: baseSha }, // fill .message if you want to show it
-        head: { label: headLabel, sha: headSha }, // fill .message if you want to show it
-        counts: { base: {}, head: {} },           // fill if you want severity breakdown by branch
+        base: { label: baseLabel, sha: baseSha }, // optionally add .message
+        head: { label: headLabel, sha: headSha }, // optionally add .message
+        counts: { base: {}, head: {} },           // optionally fill
         minSeverity,
         diffTableHtml: diffHtml,
         logo: titleLogoUrl,
@@ -263,7 +269,9 @@ async function run() {
           continueOnError: true, retentionDays: 90,
         });
       } catch (e) {
-        core.warning("Artifact upload failed: " + (e?.stack || String(e)));
+        // además de warning, dejamos el error completo en el log file
+        dumpErrToFile(e);
+        core.warning("Artifact upload failed: " + (e?.message || String(e)));
       }
     }
 
@@ -276,6 +284,7 @@ async function run() {
     await git.removeWorktree(baseDir);
     if (fs.existsSync(headDir) && headDir !== workdir) await git.removeWorktree(headDir);
   } catch (err) {
+    dumpErrToFile(err);
     core.setFailed(formatErr(err));
   }
 }
