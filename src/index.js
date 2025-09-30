@@ -244,7 +244,6 @@ async function run() {
     }
 
     // Upload artifacts (común)
-    const uploadArtifact = (core.getInput("upload_artifact") || "true") === "true"; // re-read for safety
     if (uploadArtifact) {
       try {
         const client = new artifact.DefaultArtifactClient();
