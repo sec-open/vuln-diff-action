@@ -11,10 +11,10 @@ const { analyzeOneRef, makeDiff } = require("./analyze");
 const { persistAll } = require("./storage");
 
 // Markdown (Job Summary) — stays independent
-const { renderSummaryTableMarkdown, renderDiffTableMarkdown } = require("./render/markdown");
+const { renderSummaryTableMarkdown } = require("./render/markdown");
 
 // HTML interactive report — independent renderer
-const { writeHtmlBundle, markdownTableToHtml } = require("./render/html");
+const { writeHtmlBundle } = require("./render/html");
 
 // PDF-only renderers — fully independent; no reuse from Markdown/HTML
 const {
@@ -29,6 +29,28 @@ const {
 } = require("./render/pdf");
 
 const git = require("./git");
+
+/* --------------------------- Error handling hooks -------------------------- */
+/** Trunca stacks/lineas enormemente largas para que el job log no “reviente”. */
+function formatErr(e) {
+  const MAX_LINE = 300;    // máximo por línea en el log
+  const MAX_LINES = 60;    // máximo de líneas en el stack mostrado
+  const msg = (e && (e.stack || e.message)) ? String(e.stack || e.message) : String(e || "Unknown error");
+  const lines = msg.split(/\r?\n/).slice(0, MAX_LINES).map(l => (l.length > MAX_LINE ? l.slice(0, MAX_LINE) + " …[truncated]" : l));
+  return lines.join("\n");
+}
+
+// Captura errores incluso si suceden durante la carga del bundle o fuera de await.
+process.on("unhandledRejection", (e) => {
+  try { core.setFailed(formatErr(e)); } catch {}
+});
+process.on("uncaughtException", (e) => {
+  try { core.setFailed(formatErr(e)); } catch {}
+  // Asegura que el job termina; evita que Node siga imprimiendo un stack eterno
+  process.exit(1);
+});
+
+/* --------------------------------- Helpers -------------------------------- */
 
 async function sh(cmd, opts = {}) { return exec.exec("bash", ["-lc", cmd], opts); }
 
@@ -59,6 +81,8 @@ function listFilesRec(dir) {
   })(dir);
   return out;
 }
+
+/* ----------------------------------- Main ---------------------------------- */
 
 async function run() {
   try {
@@ -220,6 +244,7 @@ async function run() {
     }
 
     // Upload artifacts (común)
+    const uploadArtifact = (core.getInput("upload_artifact") || "true") === "true"; // re-read for safety
     if (uploadArtifact) {
       try {
         const client = new artifact.DefaultArtifactClient();
@@ -252,7 +277,7 @@ async function run() {
     await git.removeWorktree(baseDir);
     if (fs.existsSync(headDir) && headDir !== workdir) await git.removeWorktree(headDir);
   } catch (err) {
-    core.setFailed(err?.message || String(err));
+    core.setFailed(formatErr(err));
   }
 }
 
