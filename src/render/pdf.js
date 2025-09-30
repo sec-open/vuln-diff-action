@@ -1,5 +1,6 @@
 // src/render/pdf.js
 // PDF-only renderers. This module is SELF-CONTAINED and does not reuse HTML/Markdown renderers.
+//
 // Exports (PDF only):
 //   - buildCoverHtml({ repository, baseLabel, headLabel, titleLogoUrl, generatedAt })
 //   - buildMainHtml({ repository, base, head, counts, minSeverity, diffTableHtml, logo })
@@ -398,8 +399,9 @@ function buildMermaidGraphForPdf(bom, matches, maxNodes = 150) {
   function hash(s) {
     // cheap stable short id
     let h = 0;
-    for (let i = 0; i < String(s).length; i++) {
-      h = (h * 33) ^ String(s).charCodeAt(i);
+    const str = String(s);
+    for (let i = 0; i < str.length; i++) {
+      h = (h * 33) ^ str.charCodeAt(i);
     }
     return "n" + (h >>> 0).toString(16);
   }
@@ -441,13 +443,15 @@ function mergePdfs(inFiles, outFile) {
   }
 }
 
+/* --------------------------------- Exports -------------------------------- */
+
 module.exports = {
   buildCoverHtml,
   buildMainHtml,
   buildLandscapeHtml,
-  buildDiffTableHtml,      // PDF-only
-  buildPathsTableHtml,     // PDF-only
-  buildMermaidGraphForPdf, // PDF-only
+  buildDiffTableHtml,
+  buildPathsTableHtml,
+  buildMermaidGraphForPdf,
   htmlToPdf,
   mergePdfs,
 };
