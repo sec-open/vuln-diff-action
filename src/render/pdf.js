@@ -5,7 +5,7 @@
 //   - buildCoverHtml({ repository, baseLabel, headLabel, titleLogoUrl, generatedAt })
 //   - buildMainHtml({ repository, base, head, counts, minSeverity, diffTableHtml, logo })
 //   - buildLandscapeHtml({ baseLabel, headLabel, pathsBaseHtml, pathsHeadHtml, mermaidBase, mermaidHead })
-//   - buildDiffTableHtml(diff, baseLabel, headLabel)           // PDF-only diff table
+//   - buildDiffTableHtml(diff, baseLabel, headLabel)           // PDF-only diff table (Branches + Status como v1)
 //   - buildPathsTableHtml(bom, matches, opts)                   // PDF-only paths table
 //   - buildMermaidGraphForPdf(bom, matches, maxNodes)           // PDF-only Mermaid
 //   - htmlToPdf(html, outPath, opts)
@@ -14,6 +14,12 @@
 const fs = require("fs");
 const { execFileSync } = require("child_process");
 const puppeteer = require("puppeteer");
+
+/* --------------------------------- Theme --------------------------------- */
+
+// Ajusta aquí si quieres el color EXACTO de la portada de tu v2:
+const COVER_BG = "#0b2239";   // <- dime el HEX que usabas y lo dejo fijo aquí
+const COVER_FG = "#ffffff";
 
 /* --------------------------------- Utils --------------------------------- */
 
@@ -45,6 +51,20 @@ function titleLine(repository, baseLabel, headLabel) {
   return `Security Report — ${repository} — ${baseLabel} vs ${headLabel}`;
 }
 
+function nowUK() {
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/London",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hour12: false,
+    }).format(new Date()).replace(",", "");
+  } catch {
+    const d = new Date(), p = (n) => String(n).padStart(2,"0");
+    return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+}
+
 /* ---------------------------------- CSS ---------------------------------- */
 
 const BASE_CSS = `
@@ -59,20 +79,25 @@ const BASE_CSS = `
   .small { font-size: 12px; }
   .center { text-align:center; }
 
+  a, a:visited, a:active { color: #0366d6; text-decoration: none; }
+  /* Evitar que el PDF liste URLs crudas tras los enlaces */
+  a[href]::after { content: none !important; }
+
   /* Sections */
   section { page-break-inside: avoid; margin-bottom: 14mm; }
   .section { page-break-before: always; }
   .toc { page-break-before: always; }
   .toc .title { font-size: 22px; margin-bottom: 10mm; }
-  .toc ol { list-style: none; padding: 0; margin: 0; width: 70%; margin-left: auto; margin-right: auto; }
+  .toc ul { list-style: none; padding: 0; margin: 0; width: 70%; margin-left: auto; margin-right: auto; }
   .toc li { margin: 6px 0 10px 0; line-height: 1.8; font-size: 14px; }
 
   /* Tables */
-  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; table-layout: fixed; }
   th, td { border: 1px solid #ddd; padding: 6px 8px; vertical-align: top; }
   th { background:#f6f8fa; text-align:left; }
   .right { text-align:right; }
-  .landscape table { font-size: 11px; }
+  .nowrap { white-space: nowrap; }
+  .break { word-break: break-word; overflow-wrap: anywhere; }
 
   /* Header/Footer placeholders (Puppeteer templates inject content) */
   .header, .footer { font-size: 10px; color:#444; }
@@ -95,10 +120,16 @@ function buildCoverHtml({ repository, baseLabel, headLabel, titleLogoUrl, genera
       <meta charset="utf-8" />
       <style>${BASE_CSS}
         @page { margin: 0; }
-        .cover { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; padding: 0 10mm; }
-        .cover-title { font-size: 28px; margin: 0 0 8px 0; text-align:center; }
-        .cover-sub { font-size: 16px; color:#444; margin: 0 0 14px 0; }
-        .cover-logo { max-height: 80px; margin-top: 18px; }
+        body { margin: 0; }
+        .cover {
+          display:flex; flex-direction:column; align-items:center; justify-content:center;
+          height:100vh; padding: 0 12mm;
+          background: ${COVER_BG};
+          color: ${COVER_FG};
+        }
+        .cover-title { font-size: 30px; margin: 0 0 8px 0; text-align:center; }
+        .cover-sub { font-size: 16px; opacity: .9; margin: 0 0 14px 0; }
+        .cover-logo { max-height: 80px; margin-top: 18px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.2)); }
       </style>
     </head>
     <body>
@@ -125,50 +156,57 @@ function buildMainHtml({ repository, base, head, counts, minSeverity, diffTableH
   const footerTemplate = `
     <div class="footer" style="width:100%; padding:6px 10mm; display:flex; align-items:center; justify-content:space-between;">
       <div>${logo ? `<img src="${escHtml(logo)}" style="height:16px; vertical-align:middle;" />` : ""}</div>
-      <div class="muted"><span class="pageNumber"></span>/<span class="totalPages"></span> • ${new Date().toLocaleString("en-GB", { timeZone: "Europe/London", hour12:false }).replace(",", "")}</div>
+      <div class="muted"><span class="pageNumber"></span>/<span class="totalPages"></span> • ${escHtml(nowUK())}</div>
     </div>
   `;
 
   const toc = `
     <section class="toc center">
-      <div class="title">Table of contents</div>
-      <ol>
-        <li>1. Introduction</li>
-        <li>2. Summary</li>
-        <li>3. Severity distribution</li>
-        <li>4. Change overview</li>
-        <li>5. Vulnerability diff table</li>
-        <li>6. Dependency graph — BASE</li>
-        <li>7. Dependency graph — HEAD</li>
-        <li>8. Dependency path — BASE</li>
-        <li>9. Dependency path — HEAD</li>
-      </ol>
+      <div class="title">Table of Contents</div>
+      <ul>
+        <li>Introduction</li>
+        <li>Summary</li>
+        <li>Severity distribution</li>
+        <li>Vulnerability diff table</li>
+        <li>Dependency graph base</li>
+        <li>Dependency graph head</li>
+        <li>Dependency path base</li>
+        <li>Dependency path head</li>
+      </ul>
     </section>
   `;
 
-  const introSlot = `
+  const intro = `
     <section class="section">
-      <h2>1. Introduction</h2>
-      <div id="pdf-intro-slot"></div>
+      <h2>Introduction</h2>
+      <p>The goal of this report is to detect vulnerabilities that are introduced or fixed between two development branches.</p>
+      <p>This report compares security vulnerabilities between two Git references (base and head) using:</p>
+      <ul>
+        <li>Syft/ CycloneDX (SBOM generation)</li>
+        <li>Grype (vulnerability scanning)</li>
+        <li>Puppeteer (PDF export)</li>
+        <li>Chart.js (severity charts)</li>
+        <li>Mermaid (dependency graphs)</li>
+      </ul>
     </section>
   `;
 
   const summary = `
     <section class="section">
-      <h2>2. Summary</h2>
+      <h2>Summary</h2>
       <table>
         <thead><tr><th>Branch</th><th>Commit</th><th>Message</th><th class="right">Severity counts</th></tr></thead>
         <tbody>
           <tr>
-            <td>${escHtml(baseLabel)}</td>
+            <td class="nowrap">${escHtml(baseLabel)} (input: ${escHtml(baseLabel)})</td>
             <td><code>${escHtml((base.sha || "").slice(0,12))}</code></td>
-            <td>${escHtml(base.message || "")}</td>
+            <td class="break">${escHtml(base.message || "")}</td>
             <td class="right"><code>${formatSeverityCounts(counts.base || {})}</code></td>
           </tr>
           <tr>
-            <td>${escHtml(headLabel)}</td>
+            <td class="nowrap">${escHtml(head.sha ? head.sha : headLabel)} (input: ${escHtml(headLabel)})</td>
             <td><code>${escHtml((head.sha || "").slice(0,12))}</code></td>
-            <td>${escHtml(head.message || "")}</td>
+            <td class="break">${escHtml(head.message || "")}</td>
             <td class="right"><code>${formatSeverityCounts(counts.head || {})}</code></td>
           </tr>
         </tbody>
@@ -179,19 +217,34 @@ function buildMainHtml({ repository, base, head, counts, minSeverity, diffTableH
 
   const charts = `
     <section class="section">
-      <h2>3. Severity distribution</h2>
-      <div class="figure"><div id="pdf-severity-chart">[Chart.js figure]</div><div class="caption">Figure 1 — Severity distribution</div></div>
-    </section>
-    <section class="section">
-      <h2>4. Change overview</h2>
-      <div class="figure"><div id="pdf-change-overview">[Chart.js figure]</div><div class="caption">Figure 2 — Change overview</div></div>
+      <h2>Severity distribution</h2>
+      <div class="figure"><div id="pdf-severity-chart">[Chart.js figure]</div><div class="caption">BASE: ${escHtml(baseLabel)}  HEAD: ${escHtml(head.sha || headLabel)}</div></div>
     </section>
   `;
 
   const diffTable = `
     <section class="section">
-      <h2>5. Vulnerability diff table</h2>
+      <h2>Vulnerability diff table</h2>
       ${diffTableHtml}
+    </section>
+  `;
+
+  const graphs = `
+    <section class="section">
+      <h2>Dependency graph base</h2>
+      <div id="pdf-graph-base"></div>
+    </section>
+    <section class="section">
+      <h2>Dependency graph head</h2>
+      <div id="pdf-graph-head"></div>
+    </section>
+    <section class="section">
+      <h2>Dependency path base</h2>
+      <div id="pdf-paths-base"></div>
+    </section>
+    <section class="section">
+      <h2>Dependency path head</h2>
+      <div id="pdf-paths-head"></div>
     </section>
   `;
 
@@ -203,28 +256,11 @@ function buildMainHtml({ repository, base, head, counts, minSeverity, diffTableH
       </head>
       <body>
         ${toc}
-        ${introSlot}
+        ${intro}
         ${summary}
         ${charts}
         ${diffTable}
-        <section class="section">
-          <h2>6. Dependency graph — BASE</h2>
-          <div id="pdf-graph-base"></div>
-          <div class="caption">Figure 3 — Dependency graph (BASE)</div>
-        </section>
-        <section class="section">
-          <h2>7. Dependency graph — HEAD</h2>
-          <div id="pdf-graph-head"></div>
-          <div class="caption">Figure 4 — Dependency graph (HEAD)</div>
-        </section>
-        <section class="section">
-          <h2>8. Dependency path — BASE</h2>
-          <div id="pdf-paths-base"></div>
-        </section>
-        <section class="section">
-          <h2>9. Dependency path — HEAD</h2>
-          <div id="pdf-paths-head"></div>
-        </section>
+        ${graphs}
       </body>
     </html>
   `;
@@ -249,19 +285,19 @@ function buildLandscapeHtml({ baseLabel, headLabel, pathsBaseHtml, pathsHeadHtml
     </head>
     <body class="landscape">
       <section class="section">
-        <h2>6. Dependency graph — BASE: ${escHtml(baseLabel)}</h2>
+        <h2>Dependency graph — BASE: ${escHtml(baseLabel)}</h2>
         <div class="mermaid-box">${escHtml(mermaidBase || "[empty]")}</div>
       </section>
       <section class="section">
-        <h2>7. Dependency graph — HEAD: ${escHtml(headLabel)}</h2>
+        <h2>Dependency graph — HEAD: ${escHtml(headLabel)}</h2>
         <div class="mermaid-box">${escHtml(mermaidHead || "[empty]")}</div>
       </section>
       <section class="section">
-        <h2>8. Dependency path — BASE</h2>
+        <h2>Dependency path — BASE</h2>
         ${pathsBaseHtml}
       </section>
       <section class="section">
-        <h2>9. Dependency path — HEAD</h2>
+        <h2>Dependency path — HEAD</h2>
         ${pathsHeadHtml}
       </section>
     </body>
@@ -275,32 +311,38 @@ function buildLandscapeHtml({ baseLabel, headLabel, pathsBaseHtml, pathsHeadHtml
 function buildDiffTableHtml(diff, baseLabel, headLabel) {
   const rows = [];
 
-  const pushRows = (arr, branch) => {
+  // v1-style: Branches + Status
+  const pushRows = (arr, status, branches) => {
     for (const it of arr || []) {
       const sev = escHtml(it?.severity || "UNKNOWN");
       const id = escHtml(it?.id || "UNKNOWN");
       const href = pickHref(it);
       const pkg = escHtml(it?.package || "unknown");
       const ver = escHtml(it?.version || "-");
+      const pkgVer = `${pkg}${ver ? ":" + ver : ""}`;
       rows.push(`<tr>
-        <td><strong>${sev}</strong></td>
-        <td>${href ? `<a href="${href}">${id}</a>` : id}</td>
-        <td><code>${pkg}</code></td>
-        <td><code>${ver}</code></td>
-        <td>${escHtml(branch)}</td>
+        <td class="nowrap"><strong>${sev}</strong></td>
+        <td class="break">${href ? `<a href="${href}">${id}</a>` : id}</td>
+        <td class="break"><code>${pkgVer}</code></td>
+        <td class="nowrap">${escHtml(branches)}</td>
+        <td class="nowrap">${status}</td>
       </tr>`);
     }
   };
 
-  pushRows(diff?.news,      headLabel);
-  pushRows(diff?.removed,   baseLabel);
-  pushRows(diff?.unchanged, "BOTH");
+  pushRows(diff?.news,      "NEW",       headLabel);
+  pushRows(diff?.removed,   "REMOVED",   baseLabel);
+  pushRows(diff?.unchanged, "UNCHANGED", "BOTH");
 
   return `
     <table>
       <thead>
         <tr>
-          <th>Severity</th><th>Vulnerability</th><th>Package</th><th>Version</th><th>Branch</th>
+          <th class="nowrap">Severity</th>
+          <th>Vulnerability</th>
+          <th>Package</th>
+          <th class="nowrap">Branches</th>
+          <th class="nowrap">Status</th>
         </tr>
       </thead>
       <tbody>
@@ -341,7 +383,7 @@ function buildPathsTableHtml(bom, matches, { maxPathsPerPkg = 3, maxDepth = 10 }
   for (const m of toArray(matches)) {
     const art = m?.artifact || m?.match || m?.package || {};
     const pkgName = art?.name || art?.purl || "unknown";
-    const pkgVer = art?.version || ""; // reservado por si quieres añadirlo a la tabla
+    const pkgVer = art?.version || "";
 
     const candidates = [
       ...toArray(m?.matchDetails).flatMap(d => toArray(d?.via)),
@@ -366,9 +408,7 @@ function buildPathsTableHtml(bom, matches, { maxPathsPerPkg = 3, maxDepth = 10 }
       rows.push([moduleName, ...depths]);
       added++;
     }
-    if (added === 0) {
-      rows.push([pkgName]);
-    }
+    if (added === 0) rows.push([pkgName + (pkgVer ? ":" + pkgVer : "")]);
   }
 
   // Compute max number of depth columns to align the table
@@ -382,7 +422,7 @@ function buildPathsTableHtml(bom, matches, { maxPathsPerPkg = 3, maxDepth = 10 }
   const tbody = `<tbody>${rows.map(r => {
     const cells = [];
     for (let i = 0; i < maxCols; i++) {
-      cells.push(`<td>${escHtml(short(r[i] || "", 80))}</td>`);
+      cells.push(`<td class="break">${escHtml(short(r[i] || "", 80))}</td>`);
     }
     return `<tr>${cells.join("")}</tr>`;
   }).join("\n")}</tbody>`;
