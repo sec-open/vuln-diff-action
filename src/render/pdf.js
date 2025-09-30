@@ -232,6 +232,44 @@ function buildMainHtml({ repository, base, head, counts, minSeverity, diffTableH
   return { header: headerTemplate, footer: footerTemplate, body };
 }
 
+/* ----------------------- PDF-only: Landscape appendix --------------------- */
+
+function buildLandscapeHtml({ baseLabel, headLabel, pathsBaseHtml, pathsHeadHtml, mermaidBase, mermaidHead }) {
+  const header = `<div class="header" style="width:100%; padding:6px 10mm;">Dependency graphs &amp; paths</div>`;
+  const footer = `<div class="footer" style="width:100%; padding:6px 10mm;"><span class="pageNumber"></span>/<span class="totalPages"></span></div>`;
+
+  const body = `
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <style>${BASE_CSS}
+        @page { size: A4 landscape; }
+        .mermaid-box { border: 1px solid #ddd; padding: 8px; margin: 8px 0 12px 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; white-space: pre; font-size: 11px; overflow: auto; }
+      </style>
+    </head>
+    <body class="landscape">
+      <section class="section">
+        <h2>6. Dependency graph — BASE: ${escHtml(baseLabel)}</h2>
+        <div class="mermaid-box">${escHtml(mermaidBase || "[empty]")}</div>
+      </section>
+      <section class="section">
+        <h2>7. Dependency graph — HEAD: ${escHtml(headLabel)}</h2>
+        <div class="mermaid-box">${escHtml(mermaidHead || "[empty]")}</div>
+      </section>
+      <section class="section">
+        <h2>8. Dependency path — BASE</h2>
+        ${pathsBaseHtml}
+      </section>
+      <section class="section">
+        <h2>9. Dependency path — HEAD</h2>
+        ${pathsHeadHtml}
+      </section>
+    </body>
+  </html>`;
+
+  return { header, footer, body };
+}
+
 /* ----------------------- PDF-only: Vulnerability table -------------------- */
 
 function buildDiffTableHtml(diff, baseLabel, headLabel) {
@@ -303,7 +341,7 @@ function buildPathsTableHtml(bom, matches, { maxPathsPerPkg = 3, maxDepth = 10 }
   for (const m of toArray(matches)) {
     const art = m?.artifact || m?.match || m?.package || {};
     const pkgName = art?.name || art?.purl || "unknown";
-    const pkgVer = art?.version || "";
+    const pkgVer = art?.version || ""; // reservado por si quieres añadirlo a la tabla
 
     const candidates = [
       ...toArray(m?.matchDetails).flatMap(d => toArray(d?.via)),
@@ -387,7 +425,7 @@ function buildMermaidGraphForPdf(bom, matches, maxNodes = 150) {
   const lines = [];
   lines.push("flowchart LR");
   for (const id of nodes) {
-    const label = short(compIndex.get(id) || id, 36).replace(/"/g, "'");
+    const label = short(compIndex.get(id) || id, 36).replace(/\"/g, "'");
     lines.push(`  ${hash(id)}["${label}"]`);
   }
   for (const [a, b] of edges) {
