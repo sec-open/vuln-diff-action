@@ -4,7 +4,7 @@
   "description": "Compare vulnerabilities between two refs (Syft+Grype) and render Markdown/HTML/PDF independently",
   "main": "dist/index.js",
   "scripts": {
-    "build": "npx -y @vercel/ncc build src/index.js -o dist -m --source-map",
+    "build": "npx -y @vercel/ncc build src/index.js -o dist -m",
     "lint": "echo 'no lint configured'",
     "test": "node -e \"console.log('ok')\""
   },
