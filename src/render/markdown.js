@@ -1,6 +1,6 @@
 // src/render/markdown.js
 // Phase 3 — Markdown-only components (job summary, PR text, Slack text helpers)
-
+//
 // --- inline helpers (markdown) ---
 function bold(s) { return `**${s}**`; }
 function code(s) { return `\`${s}\``; }
@@ -10,7 +10,7 @@ function mdLinkWithTitle(text, href, title) {
   const safeText = String(text || "");
   const safeHref = String(href || "#");
   if (title && title.trim()) {
-    const safeTitle = String(title).replace(/"/g, "&quot;");
+    const safeTitle = String(title).replace(/"/g, "");
     return `[${safeText}](${safeHref} "${safeTitle}")`;
   }
   return `[${safeText}](${safeHref})`;
@@ -41,9 +41,7 @@ function hrefForId(id) {
 function vulnLinkCell(x) {
   const ghsa = pickGhsaAlias(x);
   const id = ghsa || x?.id || "UNKNOWN";
-  const href = x?.url && /^https:\/\/github\.com\/advisories\/GHSA-/.test(x.url)
-    ? x.url
-    : hrefForId(id);
+  const href = x?.url && /^https:\/\/github\.com\/advisories\/GHSA-/.test(x.url) ? x.url : hrefForId(id);
 
   // Tooltip opcional (no necesario para hovercard, pero útil en otros visores)
   const pkg = x?.package || "";
@@ -83,7 +81,7 @@ function buildDiffRows(diff, baseLabel, headLabel) {
 
   const pushRows = (arr, branchLabel) => {
     for (const x of arr || []) {
-      const vulnCell = vulnLinkCell(x);                 // <- GHSA first → hovercard
+      const vulnCell = vulnLinkCell(x); // <- GHSA first → hovercard
       const pkg = x?.package ? code(x.package) : "`unknown`";
       const ver = x?.version ? code(x.version) : "`-`";
       rows.push(`| ${bold(x?.severity || "UNKNOWN")} | ${vulnCell} | ${pkg} | ${ver} | ${branchLabel} |`);
@@ -91,10 +89,9 @@ function buildDiffRows(diff, baseLabel, headLabel) {
   };
 
   // Orden: new (head), removed (base), unchanged (BOTH)
-  pushRows(diff?.news,      headLabel);
-  pushRows(diff?.removed,   baseLabel);
+  pushRows(diff?.news, headLabel);
+  pushRows(diff?.removed, baseLabel);
   pushRows(diff?.unchanged, "BOTH");
-
   return rows;
 }
 
@@ -118,7 +115,6 @@ function renderDiffTableMarkdown(diff, baseLabel, headLabel) {
 module.exports = {
   // Summary
   renderSummaryTableMarkdown,
-
   // Otros (compatibilidad)
   renderDiffTableMarkdown,
   linkifyIdsMarkdown,
