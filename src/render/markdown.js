@@ -1,22 +1,23 @@
 // src/render/markdown.js
 // Phase 3 — Markdown-only components (job summary, PR text, Slack text helpers)
 //
-// --- inline helpers (markdown) ---
-function bold(s) { return `**${s}**`; }
-function code(s) { return `\`${s}\``; }
+// IMPORTANT:
+// - Do NOT wrap vulnerability IDs in backticks. GitHub hovercards only appear
+//   on regular links like https://github.com/advisories/GHSA-xxxx.
+// - Avoid `title` attributes on links: browsers show their own tooltip which
+//   obscures GitHub's hovercard experience.
 
-// Markdown link with optional title (title no es necesario para el hovercard)
-function mdLinkWithTitle(text, href, title) {
+function bold(s) { return `**${String(s || "")}**`; }
+function code(s) { return `\`${String(s || "")}\``; }
+
+// Plain Markdown link WITHOUT `title` to avoid browser tooltips.
+function mdLink(text, href) {
   const safeText = String(text || "");
   const safeHref = String(href || "#");
-  if (title && title.trim()) {
-    const safeTitle = String(title).replace(/"/g, "");
-    return `[${safeText}](${safeHref} "${safeTitle}")`;
-  }
   return `[${safeText}](${safeHref})`;
 }
 
-// Busca un alias GHSA en x.aliases (array de strings) o devuelve null
+// Prefer a GHSA alias for richer GitHub hovercards. If x.id is already GHSA, use it.
 function pickGhsaAlias(x) {
   const id = x?.id || "";
   if (/^GHSA-[A-Za-z0-9-]+$/.test(id)) return id;
@@ -27,7 +28,7 @@ function pickGhsaAlias(x) {
   return null;
 }
 
-// URL canónica para ID GHSA/CVE
+// Canonical URL for a vulnerability ID.
 function hrefForId(id) {
   if (!id) return "#";
   if (/^GHSA-[A-Za-z0-9-]+$/.test(id)) return `https://github.com/advisories/${id}`;
@@ -35,33 +36,16 @@ function hrefForId(id) {
   return "#";
 }
 
-// Construye la celda "Vulnerability" maximizando el hovercard de GitHub:
-// - Si hay GHSA (id o alias), usar GHSA como texto y como URL → hovercard rico.
-// - Si no, usar CVE→NVD (sin hovercard GitHub).
+// Build the "Vulnerability" cell prioritizing GHSA links for GitHub hovercards.
 function vulnLinkCell(x) {
   const ghsa = pickGhsaAlias(x);
   const id = ghsa || x?.id || "UNKNOWN";
   const href = x?.url && /^https:\/\/github\.com\/advisories\/GHSA-/.test(x.url) ? x.url : hrefForId(id);
-
-  // Tooltip opcional (no necesario para hovercard, pero útil en otros visores)
-  const pkg = x?.package || "";
-  const ver = x?.version || "";
-  const summary = x?.summary || x?.title || x?.description || "";
-  let title = [
-    id,
-    x?.severity ? `Severity: ${x.severity}` : null,
-    pkg ? `Package: ${pkg}${ver ? "@" + ver : ""}` : null,
-    summary ? `— ${summary}` : null,
-  ].filter(Boolean).join(" • ");
-  if (title.length > 160) title = title.slice(0, 157) + "…";
-
-  // IMPORTANT: no usar backticks aquí, para que GitHub reconozca el patrón y pinte hovercard
-  return mdLinkWithTitle(id, href, title);
+  // No `title` attr -> no browser tooltip; if the context supports hovercards, GitHub will show it.
+  return mdLink(id, href);
 }
 
-/**
- * Linkify en texto libre (se mantiene para otros renders, no usado en la tabla del summary).
- */
+// Linkify IDs in free text (kept for compatibility with other markdown blocks).
 function linkifyIdsMarkdown(s) {
   if (!s) return s;
   let out = String(s);
@@ -70,10 +54,7 @@ function linkifyIdsMarkdown(s) {
   return out;
 }
 
-/**
- * Construye filas para la tabla diff (Job Summary).
- * El SUMMARY debe usar únicamente `renderSummaryTableMarkdown`.
- */
+// Internal: build rows for the diff table (used by both summary and generic render).
 function buildDiffRows(diff, baseLabel, headLabel) {
   const rows = [];
   rows.push("| Severity | Vulnerability | Package | Version | Branch |");
@@ -81,41 +62,32 @@ function buildDiffRows(diff, baseLabel, headLabel) {
 
   const pushRows = (arr, branchLabel) => {
     for (const x of arr || []) {
-      const vulnCell = vulnLinkCell(x); // <- GHSA first → hovercard
+      const vulnCell = vulnLinkCell(x); // GHSA-first -> GitHub hovercard (if context supports it)
       const pkg = x?.package ? code(x.package) : "`unknown`";
       const ver = x?.version ? code(x.version) : "`-`";
       rows.push(`| ${bold(x?.severity || "UNKNOWN")} | ${vulnCell} | ${pkg} | ${ver} | ${branchLabel} |`);
     }
   };
 
-  // Orden: new (head), removed (base), unchanged (BOTH)
+  // Order: new (head), removed (base), unchanged (BOTH)
   pushRows(diff?.news, headLabel);
   pushRows(diff?.removed, baseLabel);
   pushRows(diff?.unchanged, "BOTH");
   return rows;
 }
 
-/**
- * SUMMARY TABLE (Job summary): único punto de entrada para el resumen del job.
- * No reutilizar en otros renders (PDF/HTML tienen su propio flujo).
- */
+// Entry point for the Job Summary table (Actions step summary).
 function renderSummaryTableMarkdown(diff, baseLabel, headLabel) {
-  const rows = buildDiffRows(diff, baseLabel, headLabel);
-  return rows.join("\n");
+  return buildDiffRows(diff, baseLabel, headLabel).join("\n");
 }
 
-/**
- * Tabla genérica (compatibilidad con otras partes del pipeline).
- */
+// Generic Markdown table (used wherever a full diff table is needed).
 function renderDiffTableMarkdown(diff, baseLabel, headLabel) {
-  const rows = buildDiffRows(diff, baseLabel, headLabel);
-  return rows.join("\n");
+  return buildDiffRows(diff, baseLabel, headLabel).join("\n");
 }
 
 module.exports = {
-  // Summary
   renderSummaryTableMarkdown,
-  // Otros (compatibilidad)
   renderDiffTableMarkdown,
   linkifyIdsMarkdown,
   bold,
