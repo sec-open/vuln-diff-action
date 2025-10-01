@@ -1,16 +1,16 @@
 // src/render/markdown.js
 // Phase 3 — Markdown-only components (job summary, PR text, Slack text helpers)
 //
-// IMPORTANT:
+// IMPORTANT
 // - Do NOT wrap vulnerability IDs in backticks. GitHub hovercards only appear
 //   on regular links like https://github.com/advisories/GHSA-xxxx.
-// - Avoid `title` attributes on links: browsers show their own tooltip which
-//   obscures GitHub's hovercard experience.
+// - Do NOT add a `title` attribute to links; browsers show their own tooltip
+//   that obscures GitHub’s hovercard experience in supported contexts.
 
 function bold(s) { return `**${String(s || "")}**`; }
 function code(s) { return `\`${String(s || "")}\``; }
 
-// Plain Markdown link WITHOUT `title` to avoid browser tooltips.
+// Plain Markdown link WITHOUT a `title` attribute.
 function mdLink(text, href) {
   const safeText = String(text || "");
   const safeHref = String(href || "#");
@@ -41,7 +41,7 @@ function vulnLinkCell(x) {
   const ghsa = pickGhsaAlias(x);
   const id = ghsa || x?.id || "UNKNOWN";
   const href = x?.url && /^https:\/\/github\.com\/advisories\/GHSA-/.test(x.url) ? x.url : hrefForId(id);
-  // No `title` attr -> no browser tooltip; if the context supports hovercards, GitHub will show it.
+  // No `title` attribute -> no browser tooltip; if the context supports hovercards, GitHub will show it.
   return mdLink(id, href);
 }
 
