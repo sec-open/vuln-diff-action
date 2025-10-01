@@ -1,36 +1,31 @@
 // src/render/pdf.js
-// Minimal PDF renderer focused ONLY on the COVER page.
-// This module is SELF-CONTAINED and does not reuse HTML/Markdown renderers.
+// Minimal PDF renderer focused ONLY on the COVER page, but exporting harmless stubs
+// for legacy calls (e.g., buildDiffTableHtml) so we don't break index.js.
 //
 // Exports:
 // - buildCoverHtml({ repository, baseLabel, headLabel, titleLogoUrl, generatedAt, coverBg, coverFg })
 // - htmlToPdf(html, outPath, opts)
-//
-// Notes:
-// - The cover is strictly one A4 page (no cut/crop). We enforce @page A4 + zero margins
-//   and size the .cover container to exactly 210mm x 297mm.
-// - The logo is constrained with object-fit: contain; max-width/max-height to avoid overflow/cut.
-// - Robust Chrome/Chromium resolution is kept to avoid changing consumer workflows.
+// - buildDiffTableHtml(diff)                  // stub: empty table
+// - buildMainHtml()                           // stub: empty, single blank node (no extra page content)
+// - buildLandscapeHtml()                      // stub: empty
+// - buildPathsTableHtml()                     // stub: empty thead/tbody
+// - buildMermaidGraphForPdf()                 // stub: empty string
+// - mergePdfs()                               // passthrough no-op merge if needed later
 
 const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
+const { PDFDocument } = require("pdf-lib");
 
 /* -------------------------- Puppeteer resolution -------------------------- */
-/**
- * Try to require puppeteer first, then puppeteer-core as a fallback.
- */
+/** Try to require puppeteer first, then puppeteer-core. */
 function resolvePuppeteerModule() {
-  // eslint-disable-next-line global-require, import/no-extraneous-dependencies
   try { return require("puppeteer"); } catch (_) { /* ignore */ }
-  // eslint-disable-next-line global-require, import/no-extraneous-dependencies
   try { return require("puppeteer-core"); } catch (_) { /* ignore */ }
   return null;
 }
 
-/**
- * Find an executable on PATH using `which`. Returns null if not found.
- */
+/** which(1) helper. */
 function which(bin) {
   try {
     const out = execSync(`which ${bin}`, { stdio: ["ignore", "pipe", "ignore"] })
@@ -41,18 +36,10 @@ function which(bin) {
   }
 }
 
-/**
- * Resolve a Chrome/Chromium executable path in GitHub runners or local envs.
- * Priority:
- *  1. PUPPETEER_EXECUTABLE_PATH env
- *  2. puppeteer.executablePath() (if available and non-empty)
- *  3. System Chrome/Chromium names on PATH
- *  4. Common hard-coded locations
- */
+/** Resolve Chrome/Chromium executable path. */
 function resolveChromeExecutablePath(puppeteer) {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH;
+
   try {
     if (puppeteer && typeof puppeteer.executablePath === "function") {
       const xp = puppeteer.executablePath();
@@ -60,12 +47,7 @@ function resolveChromeExecutablePath(puppeteer) {
     }
   } catch { /* ignore */ }
 
-  const candidates = [
-    "google-chrome-stable",
-    "google-chrome",
-    "chromium-browser",
-    "chromium",
-  ];
+  const candidates = ["google-chrome-stable", "google-chrome", "chromium-browser", "chromium"];
   for (const name of candidates) {
     const found = which(name);
     if (found && fs.existsSync(found)) return found;
@@ -82,10 +64,7 @@ function resolveChromeExecutablePath(puppeteer) {
   return null;
 }
 
-/**
- * Attempt an on-the-fly browser install via `npx puppeteer browsers install`.
- * Keeps the consumer workflow unchanged.
- */
+/** Install browser at runtime via npx so consumer workflows don't change. */
 function tryInstallBrowser(product = "chrome") {
   const cmd = `npx --yes puppeteer browsers install ${product}`;
   try {
@@ -97,7 +76,6 @@ function tryInstallBrowser(product = "chrome") {
 }
 
 /* --------------------------------- Theme --------------------------------- */
-// Default colors (can be overridden through buildCoverHtml parameters).
 const COVER_BG = "#0b2239";
 const COVER_FG = "#ffffff";
 
@@ -114,7 +92,7 @@ function titleLine(repository, baseLabel, headLabel) {
   return `Security Report — ${repository} — ${baseLabel} vs ${headLabel}`;
 }
 
-function nowUK() {
+function nowEU() {
   try {
     return new Intl.DateTimeFormat("en-GB", {
       timeZone: "Europe/Madrid",
@@ -135,10 +113,7 @@ function nowUK() {
 }
 
 /* ---------------------------------- CSS ---------------------------------- */
-// IMPORTANT: We force a single page A4 cover.
-// - @page size: A4 and margin: 0 so the content occupies the full page.
-// - .cover exact size: 210mm x 297mm (A4 portrait), preventing extra pages.
-// - All content is flex-centered; logo uses object-fit: contain to avoid clipping.
+// Force a single-page A4 cover with zero PDF margins. The container is exactly A4.
 const COVER_CSS = `
 @page { size: A4; margin: 0; }
 html, body { margin: 0; padding: 0; }
@@ -153,16 +128,16 @@ html, body { margin: 0; padding: 0; }
   justify-content: center;
   text-align: center;
   box-sizing: border-box;
-  padding: 18mm 12mm; /* gentle inner padding so text/logo won't touch edges */
+  padding: 18mm 12mm;
 }
 .cover .repo {
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
   font-size: 18px;
   opacity: .9;
   margin-bottom: 4mm;
 }
 .cover h1 {
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
   font-size: 26px;
   line-height: 1.25;
   margin: 0 0 6mm 0;
@@ -180,11 +155,11 @@ html, body { margin: 0; padding: 0; }
 }
 .cover .logo-wrap img {
   display: block;
-  max-width: 140mm;   /* keep generous width but below page width */
-  max-height: 40mm;   /* critical: avoid vertical overflow/cut */
+  max-width: 140mm;   /* generous width below page width */
+  max-height: 40mm;   /* critical to avoid vertical overflow/cut */
   width: auto;
   height: auto;
-  object-fit: contain; /* never crop */
+  object-fit: contain; /* never crop the logo */
 }
 `;
 
@@ -199,29 +174,23 @@ function buildCoverHtml({
   coverFg = COVER_FG,
 }) {
   const title = titleLine(repository, baseLabel, headLabel);
-  const hasLogo = !!titleLogoUrl;
-
-  const css = COVER_CSS
-    .replace("VAR_BG", escHtml(coverBg))
-    .replace("VAR_FG", escHtml(coverFg));
+  const css = COVER_CSS.replace("VAR_BG", escHtml(coverBg)).replace("VAR_FG", escHtml(coverFg));
 
   return `
 <!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<style>
-${css}
-</style>
+<style>${css}</style>
 <title>${escHtml(title)}</title>
 </head>
 <body>
   <section class="cover">
     <div class="repo">${escHtml(repository)}</div>
     <h1>${escHtml(title)}</h1>
-    <div class="date">${escHtml(generatedAt || nowUK())}</div>
+    <div class="date">${escHtml(generatedAt || nowEU())}</div>
     ${
-      hasLogo
+      titleLogoUrl
         ? `<div class="logo-wrap"><img src="${escHtml(titleLogoUrl)}" alt="logo"></div>`
         : ""
     }
@@ -234,43 +203,31 @@ ${css}
 /* ------------------------------ Puppeteer I/O ------------------------------ */
 /**
  * Render an HTML string to a PDF file using Puppeteer/Chromium.
- * - Forces zero PDF margins and preferCSSPageSize so the A4 cover fits exactly one page.
- * - Robustly resolves Chrome path; if missing, auto-installs via npx so the consumer workflow remains unchanged.
- *
- * @param {string} html - Full HTML document string
- * @param {string} outPath - Path to output PDF
- * @param {object} opts - { launchArgs }
+ * Forces zero margins & preferCSSPageSize so the A4 cover fits exactly one page.
  */
 async function htmlToPdf(html, outPath, opts = {}) {
-  const {
-    launchArgs = ["--no-sandbox", "--disable-setuid-sandbox"],
-  } = opts;
+  const { launchArgs = ["--no-sandbox", "--disable-setuid-sandbox"] } = opts;
 
   const outDir = path.dirname(outPath);
   fs.mkdirSync(outDir, { recursive: true });
 
-  // 1) Try to load puppeteer/puppeteer-core
+  // Load puppeteer (try install at runtime if missing)
   let puppeteer = resolvePuppeteerModule();
   if (!puppeteer) {
-    // Attempt runtime install (keeps consumer unchanged)
     try {
       execSync("npm i -D puppeteer", { stdio: ["ignore", "pipe", "pipe"] });
-      // eslint-disable-next-line global-require
       puppeteer = require("puppeteer");
     } catch {
       try {
         execSync("npm i -D puppeteer-core", { stdio: ["ignore", "pipe", "pipe"] });
-        // eslint-disable-next-line global-require
         puppeteer = require("puppeteer-core");
       } catch {
-        throw new Error(
-          "Unable to load 'puppeteer' or 'puppeteer-core' and runtime install failed."
-        );
+        throw new Error("Unable to load puppeteer/puppeteer-core and runtime install failed.");
       }
     }
   }
 
-  // 2) Resolve Chrome/Chromium executable; if missing, try auto-install
+  // Resolve browser path; auto-install if not found.
   let executablePath = resolveChromeExecutablePath(puppeteer);
   if (!executablePath) {
     const okChrome = tryInstallBrowser("chrome");
@@ -278,16 +235,16 @@ async function htmlToPdf(html, outPath, opts = {}) {
     executablePath = resolveChromeExecutablePath(puppeteer);
   }
 
-  // 3) Launch
+  // Launch
   let browser;
   try {
     browser = await puppeteer.launch({
       headless: "new",
-      executablePath: executablePath || undefined, // allow puppeteer default if still null
+      executablePath: executablePath || undefined,
       args: launchArgs,
     });
-  } catch (e) {
-    // One last attempt without executablePath; useful if the previous step downloaded a default
+  } catch {
+    // Last attempt without explicit executable
     browser = await puppeteer.launch({
       headless: "new",
       args: launchArgs,
@@ -298,7 +255,6 @@ async function htmlToPdf(html, outPath, opts = {}) {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
 
-    // Force exact one-page cover: A4, zero margins, printBackground, preferCSSPageSize
     await page.pdf({
       path: outPath,
       format: "A4",
@@ -306,15 +262,91 @@ async function htmlToPdf(html, outPath, opts = {}) {
       displayHeaderFooter: false,
       margin: { top: "0", right: "0", bottom: "0", left: "0" },
       printBackground: true,
-      preferCSSPageSize: true, // use our @page size/margins
+      preferCSSPageSize: true,
     });
   } finally {
     await browser.close();
   }
 }
 
+/* ------------------------------- Safe stubs ------------------------------- */
+// NOTE: These stubs exist ONLY to avoid breaking index.js while we rebuild the PDF piece by piece.
+// They return minimal/empty HTML so they DO NOT add meaningful pages to the final PDF.
+
+function buildDiffTableHtml(/* diff */) {
+  // Minimal empty table to satisfy callers.
+  return `<table><thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Branches</th><th>Status</th></tr></thead><tbody></tbody></table>`;
+}
+
+function buildMainHtml() {
+  // Empty document (no header/footer), CSS hides everything; one blank page at most if used.
+  const body = `
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@page { size: A4; margin: 0; }
+html, body { margin:0; padding:0; }
+body { display: none; } /* hide everything (defensive) */
+</style>
+</head>
+<body></body>
+</html>`.trim();
+
+  return { header: "", footer: "", body };
+}
+
+function buildLandscapeHtml() {
+  // Same idea: return an "invisible" document.
+  const body = `
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@page { size: A4 landscape; margin: 0; }
+html, body { margin:0; padding:0; }
+body { display: none; }
+</style>
+</head>
+<body></body>
+</html>`.trim();
+
+  return { header: "", footer: "", body };
+}
+
+function buildPathsTableHtml() {
+  return `<thead><tr><th>Module</th></tr></thead><tbody></tbody>`;
+}
+
+function buildMermaidGraphForPdf() {
+  return "";
+}
+
+/** No-op merge to keep API compatible; if called, it just concatenates if files exist. */
+async function mergePdfs(inFiles, outFile) {
+  const pdfDoc = await PDFDocument.create();
+  for (const file of inFiles || []) {
+    if (!fs.existsSync(file)) continue;
+    const bytes = fs.readFileSync(file);
+    const src = await PDFDocument.load(bytes);
+    const copied = await pdfDoc.copyPages(src, src.getPageIndices());
+    for (const p of copied) pdfDoc.addPage(p);
+  }
+  const outBytes = await pdfDoc.save();
+  fs.writeFileSync(outFile, outBytes);
+}
+
 /* --------------------------------- Exports -------------------------------- */
 module.exports = {
   buildCoverHtml,
   htmlToPdf,
+  // temporary safe stubs to avoid breaking callers:
+  buildDiffTableHtml,
+  buildMainHtml,
+  buildLandscapeHtml,
+  buildPathsTableHtml,
+  buildMermaidGraphForPdf,
+  mergePdfs,
 };
