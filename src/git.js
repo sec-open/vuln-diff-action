@@ -1,6 +1,7 @@
+// path: src/git.js
 /**
  * Git helpers: resolve refs to SHAs, get commit metadata, short SHA.
- * Uses `git` CLI available in Actions runners.
+ * More tolerant resolveRef: tries multiple candidate ref spellings.
  */
 
 const { execFile } = require("child_process");
@@ -12,10 +13,46 @@ async function git(args, opts = {}) {
   return stdout.trim();
 }
 
+async function fetchAll() {
+  // Bring all branches and tags from origin
+  try {
+    await git(["fetch", "--tags", "--force", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"]);
+  } catch {
+    // Fallback: best-effort
+    await git(["fetch", "--all", "--tags", "--prune", "--force"]);
+  }
+}
+
+/**
+ * Try to resolve a ref to a full SHA:
+ * - raw ref (as-is)
+ * - origin/<ref>
+ * - refs/heads/<ref>
+ * - refs/tags/<ref>
+ * - remotes/origin/<ref>
+ */
 async function resolveRef(ref) {
-  // Returns full SHA or throws.
-  const sha = await git(["rev-parse", ref]);
-  return sha;
+  const candidates = dedup([
+    ref,
+    `origin/${ref}`,
+    `refs/heads/${ref}`,
+    `refs/tags/${ref}`,
+    `remotes/origin/${ref}`,
+  ]);
+
+  const errors = [];
+  for (const c of candidates) {
+    try {
+      const sha = await git(["rev-parse", c]);
+      if (sha) return sha;
+    } catch (e) {
+      errors.push(`${c}: ${e?.stderr || e?.message || "unknown error"}`);
+    }
+  }
+  const hint = `Could not resolve ref "${ref}". Make sure checkout uses fetch-depth: 0 or pass a full SHA. Tried: ${candidates.join(", ")}`;
+  const err = new Error(hint);
+  err.details = errors;
+  throw err;
 }
 
 function shortSha(sha, len = 7) {
@@ -23,7 +60,6 @@ function shortSha(sha, len = 7) {
 }
 
 async function commitInfo(sha) {
-  // Subject and ISO date
   const fmt = "%H%x1f%an%x1f%ae%x1f%ad%x1f%s";
   const out = await git(["show", "-s", `--format=${fmt}`, "--date=iso-strict", sha]);
   const [full, author, email, date, subject] = out.split("\x1f");
@@ -37,14 +73,14 @@ async function commitInfo(sha) {
   };
 }
 
-async function fetchAll() {
-  await git(["fetch", "--all", "--tags", "--prune", "--force"]);
+function dedup(arr) {
+  return [...new Set(arr.filter(Boolean))];
 }
 
 module.exports = {
   git,
+  fetchAll,
   resolveRef,
   shortSha,
   commitInfo,
-  fetchAll,
 };
