@@ -1,86 +1,82 @@
 // path: src/git.js
 /**
- * Git helpers: resolve refs to SHAs, get commit metadata, short SHA.
- * More tolerant resolveRef: tries multiple candidate ref spellings.
+ * Git helpers
+ * - fetchAll(): ensure remote refs are available
+ * - resolveRef(ref): resolve to full SHA
+ * - commitInfo(sha): basic metadata (subject, author, date, short)
+ * - prepareCheckout(refOrSha, destDir): create an isolated tree for that ref
+ *    * try git worktree (fast, preserves metadata)
+ *    * fallback to git archive (portable)
+ * All comments in English (project guideline).
  */
 
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileP = promisify(execFile);
+const fs = require("fs/promises");
+const path = require("path");
 
-async function git(args, opts = {}) {
-  const { stdout } = await execFileP("git", args, { ...opts });
-  return stdout.trim();
+async function sh(cmd, opts = {}) {
+  return execFileP("bash", ["-lc", cmd], { maxBuffer: 64 * 1024 * 1024, ...opts });
 }
 
 async function fetchAll() {
-  // Bring all branches and tags from origin
   try {
-    await git(["fetch", "--tags", "--force", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"]);
-  } catch {
-    // Fallback: best-effort
-    await git(["fetch", "--all", "--tags", "--prune", "--force"]);
+    await sh("git fetch --all --prune --tags --force");
+  } catch (e) {
+    // best-effort: ignore if shallow; most runners already have remote
+    // rethrow only if message indicates repo missing
+    if (/not a git repository/i.test(String(e?.message || ""))) throw e;
   }
 }
 
-/**
- * Try to resolve a ref to a full SHA:
- * - raw ref (as-is)
- * - origin/<ref>
- * - refs/heads/<ref>
- * - refs/tags/<ref>
- * - remotes/origin/<ref>
- */
 async function resolveRef(ref) {
-  const candidates = dedup([
-    ref,
-    `origin/${ref}`,
-    `refs/heads/${ref}`,
-    `refs/tags/${ref}`,
-    `remotes/origin/${ref}`,
-  ]);
-
-  const errors = [];
-  for (const c of candidates) {
-    try {
-      const sha = await git(["rev-parse", c]);
-      if (sha) return sha;
-    } catch (e) {
-      errors.push(`${c}: ${e?.stderr || e?.message || "unknown error"}`);
-    }
-  }
-  const hint = `Could not resolve ref "${ref}". Make sure checkout uses fetch-depth: 0 or pass a full SHA. Tried: ${candidates.join(", ")}`;
-  const err = new Error(hint);
-  err.details = errors;
-  throw err;
+  const { stdout } = await sh(`git rev-parse ${ref}`);
+  return stdout.trim();
 }
 
-function shortSha(sha, len = 7) {
-  return String(sha || "").substring(0, len);
+function shortSha(sha) {
+  return String(sha || "").slice(0, 7);
 }
 
 async function commitInfo(sha) {
-  const fmt = "%H%x1f%an%x1f%ae%x1f%ad%x1f%s";
-  const out = await git(["show", "-s", `--format=${fmt}`, "--date=iso-strict", sha]);
-  const [full, author, email, date, subject] = out.split("\x1f");
+  const fmt = [
+    "%H", // full sha
+    "%h", // short
+    "%s", // subject
+    "%an", // author
+    "%ad", // author date (default format)
+    "%cI", // committer date ISO
+  ].join("%x1f");
+  const { stdout } = await sh(`git show -s --format='${fmt}' ${sha}`);
+  const [full, short, subject, author, date, committerIso] = stdout.trim().split("\x1f");
   return {
-    sha: full,
-    sha_short: shortSha(full),
-    author,
-    author_email: email,
-    date,
-    subject,
+    sha: full, sha_short: short, subject, author, date, committer_iso: committerIso,
   };
 }
 
-function dedup(arr) {
-  return [...new Set(arr.filter(Boolean))];
+/**
+ * Create an isolated checkout of the given ref (branch/tag/sha) into destDir.
+ * Prefers 'git worktree'. If unavailable, falls back to 'git archive'.
+ */
+async function prepareCheckout(refOrSha, destDir) {
+  await fs.mkdir(destDir, { recursive: true });
+
+  // Try worktree first (fast & accurate)
+  try {
+    await sh(`git worktree add --detach '${destDir}' '${refOrSha}'`);
+    return { path: destDir, method: "worktree" };
+  } catch (e) {
+    // Fallback: archive
+    await sh(`git archive --format=tar '${refOrSha}' | tar -x -C '${destDir}'`);
+    return { path: destDir, method: "archive" };
+  }
 }
 
 module.exports = {
-  git,
   fetchAll,
   resolveRef,
-  shortSha,
   commitInfo,
+  shortSha,
+  prepareCheckout,
 };

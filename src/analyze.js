@@ -1,18 +1,31 @@
+// path: src/analyze.js
 /**
- * Analyze two Git refs: generate SBOM, scan with Grype, normalize, summarize,
- * and emit base.json, head.json, diff.json (schema v2.0.0).
+ * Analyze two Git refs in isolated checkouts:
+ *  - Create a temp tree for BASE and HEAD (worktree or archive).
+ *  - SBOM per tree (CycloneDX Maven if pom.xml; otherwise Syft).
+ *  - Grype on each SBOM; normalize; filter by min severity.
+ *  - Summarize and compute diff (NEW/REMOVED/UNCHANGED).
+ *  - Persist base.json, head.json, diff.json.
  */
 
 const path = require("path");
 const fs = require("fs/promises");
-const { fetchAll, resolveRef, commitInfo } = require("./git");
+const { fetchAll, resolveRef, commitInfo, shortSha, prepareCheckout } = require("./git");
 const { generateSbom } = require("./sbom");
 const { runGrypeOnSbomWith } = require("./grype");
-const { normalizeFinding, summarizeBySeverity, computeDiff, shortSha } = require("./report");
+const { normalizeFinding, summarizeBySeverity, computeDiff } = require("./report");
 const { normalizeSeverity } = require("./severity");
 const { ensureAndLocateScannerTools } = require("./tools");
 
-async function ensureDir(dir) { await fs.mkdir(dir, { recursive: true }); }
+async function ensureDir(p) { await fs.mkdir(p, { recursive: true }); }
+
+function filterByMinSeverity(items, minSeverity = "LOW") {
+  const order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
+  const idx = order.indexOf(normalizeSeverity(minSeverity));
+  const allowed = new Set(order.slice(0, idx + 1));
+  if (normalizeSeverity(minSeverity) === "UNKNOWN") allowed.add("UNKNOWN");
+  return items.filter(it => allowed.has(normalizeSeverity(it.severity)));
+}
 
 async function getToolVersions() {
   const { execFile } = require("child_process");
@@ -31,23 +44,40 @@ async function getToolVersions() {
   return {
     syft: await ver("syft", ["version"]),
     grype: await ver("grype", ["version"]),
-    cyclonedx_maven: await ver("mvn", ["-q", "help:evaluate", "-Dexpression=project.version"]),
-    node: process.version.replace(/^v/,""),
+    cyclonedx_maven: await ver("mvn", ["-q", "--version"]),
+    node: process.version.replace(/^v/, ""),
   };
 }
 
-function filterByMinSeverity(items, minSeverity = "LOW") {
-  const order = ["CRITICAL","HIGH","MEDIUM","LOW","UNKNOWN"];
-  const idx = order.indexOf(normalizeSeverity(minSeverity));
-  const allowed = new Set(order.slice(0, idx + 1));
-  if (normalizeSeverity(minSeverity) === "UNKNOWN") allowed.add("UNKNOWN");
-  return items.filter(it => allowed.has(normalizeSeverity(it.severity)));
+async function analyzeOneRef({ sha, refLabel, checkoutParent, bins, minSeverity }) {
+  // Prepare isolated checkout folder for this ref
+  const refDir = path.join(checkoutParent, shortSha(sha));
+  await prepareCheckout(sha, refDir);
+
+  // Per-ref output dir (avoid overwriting)
+  const perRefOut = path.join(checkoutParent, "out", shortSha(sha));
+  await ensureDir(perRefOut);
+
+  // SBOM (prefer CycloneDX Maven if pom.xml exists in this checkout)
+  const sbom = await generateSbom(refDir, perRefOut, bins);
+
+  // Grype over SBOM
+  const grypeJson = await runGrypeOnSbomWith(bins.grypePath, sbom.path);
+
+  // Normalize & filter
+  const itemsAll = Array.isArray(grypeJson.matches) ? grypeJson.matches.map(normalizeFinding) : [];
+  const items = filterByMinSeverity(itemsAll, minSeverity);
+
+  // Summary
+  const summary = summarizeBySeverity(items);
+
+  return { refDir, sbom, items, summary };
 }
 
 async function analyzeRefs(opts) {
   const {
     cwd = process.cwd(),
-    pathRoot = ".",
+    pathRoot = ".",           // kept for future use (when scanning non-root dirs)
     baseRef,
     headRef,
     minSeverity = "LOW",
@@ -58,38 +88,38 @@ async function analyzeRefs(opts) {
 
   if (!baseRef || !headRef) throw new Error("Missing baseRef/headRef");
 
-  // Resolve refs
+  await ensureDir(outDir);
   await fetchAll();
+
   const baseSha = await resolveRef(baseRef);
   const headSha = await resolveRef(headRef);
 
   const baseInfo = await commitInfo(baseSha);
   const headInfo = await commitInfo(headSha);
 
-  // Ensure scanners installed and get absolute paths
+  // Ensure Syft/Grype are installed and get absolute paths
   const bins = await ensureAndLocateScannerTools();
-
   const tools = await getToolVersions();
 
-  await ensureDir(outDir);
+  // Parent temp area for checkouts
+  const checksRoot = path.join(outDir, "refs");
+  await ensureDir(checksRoot);
 
-  // SBOM + Grype for each ref (scan the workspace pathRoot)
-  const sbomBase = await generateSbom(path.resolve(cwd, pathRoot), outDir, bins);
-  const grypeBase = await runGrypeOnSbomWith(bins.grypePath, sbomBase.path);
-
-  const sbomHead = await generateSbom(path.resolve(cwd, pathRoot), outDir, bins);
-  const grypeHead = await runGrypeOnSbomWith(bins.grypePath, sbomHead.path);
-
-  // Normalize
-  const baseItemsAll = Array.isArray(grypeBase.matches) ? grypeBase.matches.map(normalizeFinding) : [];
-  const headItemsAll = Array.isArray(grypeHead.matches) ? grypeHead.matches.map(normalizeFinding) : [];
-
-  const baseItems = filterByMinSeverity(baseItemsAll, minSeverity);
-  const headItems = filterByMinSeverity(headItemsAll, minSeverity);
-
-  // Summaries
-  const baseSummary = summarizeBySeverity(baseItems);
-  const headSummary = summarizeBySeverity(headItems);
+  // Analyze BASE and HEAD from their own checkout dirs
+  const baseRes = await analyzeOneRef({
+    sha: baseSha,
+    refLabel: "BASE",
+    checkoutParent: checksRoot,
+    bins,
+    minSeverity,
+  });
+  const headRes = await analyzeOneRef({
+    sha: headSha,
+    refLabel: "HEAD",
+    checkoutParent: checksRoot,
+    bins,
+    minSeverity,
+  });
 
   const now = new Date().toISOString();
 
@@ -108,13 +138,12 @@ async function analyzeRefs(opts) {
       authored_at: baseInfo.date,
     },
     sbom: {
-      path: sbomBase.path,
+      path: baseRes.sbom.path,
       format: "cyclonedx-json",
-      component_count: grypeBase?.descriptor?.relationships?.length || undefined,
-      tool: sbomBase.tool,
+      tool: baseRes.sbom.tool,
     },
-    summary: baseSummary,
-    vulnerabilities: baseItems,
+    summary: baseRes.summary,
+    vulnerabilities: baseRes.items,
   };
 
   const headJson = {
@@ -132,26 +161,25 @@ async function analyzeRefs(opts) {
       authored_at: headInfo.date,
     },
     sbom: {
-      path: sbomHead.path,
+      path: headRes.sbom.path,
       format: "cyclonedx-json",
-      component_count: grypeHead?.descriptor?.relationships?.length || undefined,
-      tool: sbomHead.tool,
+      tool: headRes.sbom.tool,
     },
-    summary: headSummary,
-    vulnerabilities: headItems,
+    summary: headRes.summary,
+    vulnerabilities: headRes.items,
   };
 
-  // Diff
-  const diff = computeDiff(baseItems, headItems);
+  // Diff (NEW / REMOVED / UNCHANGED) by match_key
+  const diff = computeDiff(baseRes.items, headRes.items);
 
   // Aggregate severity x state
-  const sevLevels = ["CRITICAL","HIGH","MEDIUM","LOW","UNKNOWN"];
+  const sevLevels = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
   const by_sev_state = Object.fromEntries(sevLevels.map(s => [s, { NEW: 0, REMOVED: 0, UNCHANGED: 0 }]));
   for (const it of diff.new) by_sev_state[normalizeSeverity(it.severity)].NEW++;
   for (const it of diff.removed) by_sev_state[normalizeSeverity(it.severity)].REMOVED++;
 
-  const baseMap = new Map(baseItems.map(i => [i.match_key, i]));
-  for (const it of headItems) {
+  const baseMap = new Map(baseRes.items.map(i => [i.match_key, i]));
+  for (const it of headRes.items) {
     if (baseMap.has(it.match_key)) by_sev_state[normalizeSeverity(it.severity)].UNCHANGED++;
   }
 
@@ -180,7 +208,7 @@ async function analyzeRefs(opts) {
     },
   };
 
-  // Persist
+  // Persist outputs
   const basePath = path.join(outDir, "base.json");
   const headPath = path.join(outDir, "head.json");
   const diffPath = path.join(outDir, "diff.json");
