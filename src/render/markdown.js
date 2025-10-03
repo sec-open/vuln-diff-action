@@ -1,12 +1,18 @@
+// path: src/render/markdown.js
 /**
- * Markdown renderers:
+ * Markdown renderers (no recomputation):
  * - Summary (Job Summary): plain Markdown/HTML, uses title tooltips (no hovercards)
  * - PR comment: allows GitHub hovercards on vulnerability IDs
  *
- * Notes
- * - Package column is single "<name>:<version>"
- * - Severity order: CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN
- * - Status order: NEW, REMOVED, UNCHANGED
+ * Data contract:
+ * - Uses diffJson.items (each item has: id, severity, package{name,version}, state, branches, ids{ghsa,cve}, cvss_max, fix, url)
+ * - Uses baseJson.summary.by_severity / headJson.summary.by_severity for counts
+ * - Uses diffJson.summary.totals and by_severity_and_state for totals/matrix
+ *
+ * Column notes:
+ * - Package column is "<name>:<version>"
+ * - Branches column shows "BASE" | "HEAD" | "BOTH" from diffJson.items[].branches
+ * - Status column shows item.state ("NEW" | "REMOVED" | "UNCHANGED")
  */
 
 function severityRank(s) {
@@ -28,12 +34,11 @@ function fmtPkg(name, version) {
   const v = (version && String(version).trim()) ? String(version).trim() : "-";
   return `${n}:${v}`;
 }
-function advisoryHref(vuln) {
-  // Prefer GHSA, then CVE, finally fallback URL if any
-  const ids = vuln?.ids || {};
+function advisoryHref(v) {
+  const ids = v?.ids || {};
   if (ids.ghsa) return `https://github.com/advisories/${ids.ghsa}`;
   if (ids.cve)  return `https://nvd.nist.gov/vuln/detail/${ids.cve}`;
-  return vuln?.url || "#";
+  return v?.url || "#";
 }
 function vulnTitle(v) {
   const parts = [];
@@ -94,39 +99,25 @@ function totalsCards(diffSummary) {
   ].join("\n");
 }
 
-/**
- * Build diff rows including NEW, REMOVED and UNCHANGED.
- * For UNCHANGED we compute the intersection by match_key using base/head JSONs.
- */
-function diffRows(diffJson, baseJson, headJson) {
-  const rows = [];
-
-  // NEW (from diff)
-  for (const v of diffJson?.changes?.new || []) rows.push({ ...v, __status: "NEW", __branches: "HEAD" });
-
-  // REMOVED (from diff)
-  for (const v of diffJson?.changes?.removed || []) rows.push({ ...v, __status: "REMOVED", __branches: "BASE" });
-
-  // UNCHANGED (intersection by match_key between base and head)
-  try {
-    const baseMap = new Map((baseJson?.vulnerabilities || []).map(i => [i.match_key, i]));
-    for (const h of (headJson?.vulnerabilities || [])) {
-      if (baseMap.has(h.match_key)) {
-        // prefer head's record for display; mark BOTH branches
-        rows.push({ ...h, __status: "UNCHANGED", __branches: "BOTH" });
-      }
-    }
-  } catch {
-    // ignore intersection errors silently
+/** Get sorted rows directly from diffJson.items (fallback builds from changes if needed). */
+function getDiffRows(diffJson) {
+  let rows = [];
+  if (Array.isArray(diffJson?.items)) {
+    rows = [...diffJson.items];
+  } else {
+    // Fallback for older builds
+    const n = (diffJson?.changes?.new || []).map(v => ({ ...v, state: "NEW", branches: "HEAD" }));
+    const r = (diffJson?.changes?.removed || []).map(v => ({ ...v, state: "REMOVED", branches: "BASE" }));
+    const u = (diffJson?.changes?.unchanged || []).map(v => ({ ...v, state: "UNCHANGED", branches: "BOTH" }));
+    rows = [...n, ...r, ...u];
   }
 
-  // Sort by severity, then status, then id
   rows.sort((a, b) => {
     const s = severityRank(a.severity) - severityRank(b.severity);
     if (s !== 0) return s;
-    const st = statusRank(a.__status) - statusRank(b.__status);
+    const st = statusRank(a.state) - statusRank(b.state);
     if (st !== 0) return st;
-    return String(a.id).localeCompare(String(b.id));
+    return String(a.id || "").localeCompare(String(b.id || ""));
   });
   return rows;
 }
@@ -157,22 +148,23 @@ function renderSummaryTableMarkdown(diffJson, baseJson, headJson, actionMeta, ba
   lines.push(`**${headLabel.toUpperCase()} severity counts**`);
   lines.push(sevRowTable(headJson?.summary));
 
-  // Diff table with title tooltips (includes UNCHANGED)
+  // Diff table with title tooltips (uses diff.items)
   lines.push("");
   lines.push("<table>");
   lines.push("<thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Branches</th><th>Status</th></tr></thead>");
   lines.push("<tbody>");
 
-  const rows = diffRows(diffJson, baseJson, headJson);
+  const rows = getDiffRows(diffJson);
   for (const r of rows) {
     const href = advisoryHref(r);
     const title = escapeHtml(vulnTitle(r));
     const pkg = escapeHtml(fmtPkg(r?.package?.name, r?.package?.version));
     const sev = escapeHtml(r.severity || "UNKNOWN");
     const id = escapeHtml(r.id || "");
-    const branches = escapeHtml(r.__branches || "");
+    const branches = escapeHtml(r.branches || "");
+    const status = escapeHtml(r.state || "");
     lines.push(
-      `<tr><td>${sev}</td><td><a href="${href}" title="${title}" target="_blank" rel="noopener noreferrer">${id}</a></td><td><code>${pkg}</code></td><td>${branches}</td><td>${r.__status}</td></tr>`
+      `<tr><td>${sev}</td><td><a href="${href}" title="${title}" target="_blank" rel="noopener noreferrer">${id}</a></td><td><code>${pkg}</code></td><td>${branches}</td><td>${status}</td></tr>`
     );
   }
 
@@ -196,13 +188,14 @@ function renderPrTableMarkdown(diffJson, baseJson, headJson, baseLabel = "BASE",
   lines.push("<thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Branches</th><th>Status</th></tr></thead>");
   lines.push("<tbody>");
 
-  const rows = diffRows(diffJson, baseJson, headJson);
+  const rows = getDiffRows(diffJson);
   for (const r of rows) {
     const href = advisoryHref(r);
     const pkg = escapeHtml(fmtPkg(r?.package?.name, r?.package?.version));
     const sev = escapeHtml(r.severity || "UNKNOWN");
     const id = escapeHtml(r.id || "");
-    const branches = escapeHtml(r.__branches || "");
+    const branches = escapeHtml(r.branches || "");
+    const status = escapeHtml(r.state || "");
 
     // GitHub advisory hovercard, if GHSA id exists
     let anchor = `<a href="${href}" target="_blank" rel="noopener noreferrer">${id}</a>`;
@@ -216,7 +209,7 @@ function renderPrTableMarkdown(diffJson, baseJson, headJson, baseLabel = "BASE",
     }
 
     lines.push(
-      `<tr><td>${sev}</td><td>${anchor}</td><td><code>${pkg}</code></td><td>${branches}</td><td>${r.__status}</td></tr>`
+      `<tr><td>${sev}</td><td>${anchor}</td><td><code>${pkg}</code></td><td>${branches}</td><td>${status}</td></tr>`
     );
   }
 
