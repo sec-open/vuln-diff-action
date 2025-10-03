@@ -16,24 +16,29 @@ const path = require("path");
 const os = require("os");
 
 async function sh(cmd) {
+  // Bigger buffer for versions or curl output
   return execFileP("bash", ["-lc", cmd], { maxBuffer: 10 * 1024 * 1024 });
 }
 
 async function commandExists(cmd) {
   try { await sh(`command -v ${cmd}`); return true; } catch { return false; }
 }
-async function versionOf(cmd) {
+
+/**
+ * Return first line of "<cmd> -version" or "<cmd> version" (works with absolute paths too).
+ */
+async function versionOf(cmdPathOrName) {
   try {
-    const { stdout, stderr } = await execFileP(cmd, ["-version"]);
-    return (stdout || stderr || "").split(/\r?\n/)[0];
-  } catch {
-    try {
-      const { stdout, stderr } = await execFileP(cmd, ["version"]);
-      return (stdout || stderr || "").split(/\r?\n/)[0];
-    } catch {
-      return undefined;
-    }
-  }
+    const { stdout, stderr } = await execFileP(cmdPathOrName, ["-version"]);
+    const s = (stdout || stderr || "").trim();
+    if (s) return s.split(/\r?\n/)[0];
+  } catch {}
+  try {
+    const { stdout, stderr } = await execFileP(cmdPathOrName, ["version"]);
+    const s = (stdout || stderr || "").trim();
+    if (s) return s.split(/\r?\n/)[0];
+  } catch {}
+  return undefined;
 }
 
 /* ---------------- Syft / Grype ---------------- */
@@ -50,16 +55,16 @@ function candidateDirs() {
 }
 
 async function whichInDirs(binName) {
-  const dirs = candidateDirs();
-  for (const d of dirs) {
+  // 1) Look in common directories
+  for (const d of candidateDirs()) {
     const p = path.join(d, binName);
     try { await fs.access(p); return p; } catch {}
   }
-  // As a last resort, try 'command -v'
+  // 2) Fallback to `command -v` and ONLY use stdout if non-empty
   try {
-    const out = await sh(`command -v ${binName} || true`);
-    const p = out.stdout?.toString().trim() || out.toString().trim();
-    if (p) return p;
+    const { stdout } = await sh(`command -v ${binName} >/dev/null 2>&1 && command -v ${binName} || echo ""`);
+    const candidate = String(stdout || "").trim();
+    if (candidate) return candidate;
   } catch {}
   return null;
 }
@@ -96,23 +101,24 @@ async function ensureAndLocateScannerTools() {
     console.log("[tools] Syft not found in PATH. Installing…");
     await installSyft(targetBinDir);
     syftPath = await whichInDirs("syft");
-  } else {
-    console.log("[tools] Syft found:", await versionOf(syftPath));
   }
-
   if (!grypePath) {
     console.log("[tools] Grype not found in PATH. Installing…");
     await installGrype(targetBinDir);
     grypePath = await whichInDirs("grype");
-  } else {
-    console.log("[tools] Grype found:", await versionOf(grypePath));
   }
 
   if (!syftPath) throw new Error("Syft installation failed (binary not found).");
   if (!grypePath) throw new Error("Grype installation failed (binary not found).");
 
-  // Ensure current process can find them too (for any shell-based calls)
+  // Ensure current process PATH contains their directories (for any shell-based calls)
   process.env.PATH = `${path.dirname(syftPath)}:${path.dirname(grypePath)}:${process.env.PATH}`;
+
+  // Log versions and absolute paths (useful for troubleshooting)
+  console.log("[tools] Syft path:", syftPath);
+  console.log("[tools] Syft version:", (await versionOf(syftPath)) || "<unknown>");
+  console.log("[tools] Grype path:", grypePath);
+  console.log("[tools] Grype version:", (await versionOf(grypePath)) || "<unknown>");
 
   return { syftPath, grypePath };
 }
@@ -126,8 +132,8 @@ async function ensureJavaMavenIfNeeded({ hasMavenProject }) {
   const javaExists = await commandExists("java");
 
   if (mvnExists && javaExists) {
-    console.log("[tools] Maven found:", await versionOf("mvn"));
-    console.log("[tools] Java found:", await versionOf("java"));
+    console.log("[tools] Maven found:", (await versionOf("mvn")) || "<unknown>");
+    console.log("[tools] Java found:", (await versionOf("java")) || "<unknown>");
     return;
   }
 
@@ -141,13 +147,12 @@ async function ensureJavaMavenIfNeeded({ hasMavenProject }) {
   const postAptMvn = await commandExists("mvn");
   const postAptJava = await commandExists("java");
   if (postAptMvn && postAptJava) {
-    console.log("[tools] Maven/Java installed via apt-get.");
-    console.log("[tools] Maven:", await versionOf("mvn"));
-    console.log("[tools] Java:", await versionOf("java"));
+    console.log("[tools] Maven installed via apt-get:", (await versionOf("mvn")) || "<unknown>");
+    console.log("[tools] Java installed via apt-get:", (await versionOf("java")) || "<unknown>");
     return;
   }
 
-  // 2) Fallback: Maven tarball (JDK aviso)
+  // 2) Fallback: Maven tarball (JDK warning)
   const toolsDir = path.resolve(process.cwd(), ".vulndiff", "tools");
   const binDir = path.join(toolsDir, "bin");
   await fs.mkdir(binDir, { recursive: true });
@@ -165,7 +170,7 @@ async function ensureJavaMavenIfNeeded({ hasMavenProject }) {
     await sh(`tar -xzf "${tar}" -C "${toolsDir}/maven" --strip-components=1`);
     await sh(`ln -sf "${toolsDir}/maven/bin/mvn" "${binDir}/mvn"`);
     process.env.PATH = `${binDir}:${process.env.PATH}`;
-    console.log("[tools] Maven installed from archive:", await versionOf("mvn"));
+    console.log("[tools] Maven installed from archive:", (await versionOf("mvn")) || "<unknown>");
   } catch (e) {
     console.warn("[tools] Maven archive install failed:", e?.message || e);
   }
