@@ -50,7 +50,7 @@ function branchLine(label, info) {
   const ref = info?.git?.ref || "";
   const sha = info?.git?.sha_short || "";
   const msg = info?.git?.commit_subject || "";
-  return `- **${label}**: \`${escapeHtml(ref)}\` @ \`${escapeHtml(sha)}\` — ${escapeHtml(msg)}`;
+  return `- **${label.toUpperCase()}**: \`${escapeHtml(ref)}\` @ \`${escapeHtml(sha)}\` — ${escapeHtml(msg)}`;
 }
 
 function toolsLine(tools, actionMeta) {
@@ -63,23 +63,20 @@ function toolsLine(tools, actionMeta) {
   return `- ${t.join(" · ")}`;
 }
 function inlineVersion(line) {
-  // show first line only, without ANSI noise
   return String(line || "").split(/\r?\n/)[0];
 }
 
-function sevTable(summary) {
+/** Horizontal severity table (two rows, five columns). */
+function sevRowTable(summary) {
   const s = summary?.by_severity || {};
+  const headers = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
+  const counts  = headers.map(h => fmtInt(s[h] || 0));
+
   return [
     "",
     "<table>",
-    "<thead><tr><th>Severity</th><th>Count</th></tr></thead>",
-    "<tbody>",
-    `<tr><td>CRITICAL</td><td>${fmtInt(s.CRITICAL || 0)}</td></tr>`,
-    `<tr><td>HIGH</td><td>${fmtInt(s.HIGH || 0)}</td></tr>`,
-    `<tr><td>MEDIUM</td><td>${fmtInt(s.MEDIUM || 0)}</td></tr>`,
-    `<tr><td>LOW</td><td>${fmtInt(s.LOW || 0)}</td></tr>`,
-    `<tr><td>UNKNOWN</td><td>${fmtInt(s.UNKNOWN || 0)}</td></tr>`,
-    "</tbody>",
+    `<thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>`,
+    `<tbody><tr>${counts.map(c => `<td>${c}</td>`).join("")}</tr></tbody>`,
     "</table>",
     ""
   ].join("\n");
@@ -97,11 +94,33 @@ function totalsCards(diffSummary) {
   ].join("\n");
 }
 
-function diffRows(diffJson) {
+/**
+ * Build diff rows including NEW, REMOVED and UNCHANGED.
+ * For UNCHANGED we compute the intersection by match_key using base/head JSONs.
+ */
+function diffRows(diffJson, baseJson, headJson) {
   const rows = [];
-  for (const v of diffJson?.changes?.new || []) rows.push({ ...v, __status: "NEW", __branch: "HEAD" });
-  for (const v of diffJson?.changes?.removed || []) rows.push({ ...v, __status: "REMOVED", __branch: "BASE" });
 
+  // NEW (from diff)
+  for (const v of diffJson?.changes?.new || []) rows.push({ ...v, __status: "NEW", __branches: "HEAD" });
+
+  // REMOVED (from diff)
+  for (const v of diffJson?.changes?.removed || []) rows.push({ ...v, __status: "REMOVED", __branches: "BASE" });
+
+  // UNCHANGED (intersection by match_key between base and head)
+  try {
+    const baseMap = new Map((baseJson?.vulnerabilities || []).map(i => [i.match_key, i]));
+    for (const h of (headJson?.vulnerabilities || [])) {
+      if (baseMap.has(h.match_key)) {
+        // prefer head's record for display; mark BOTH branches
+        rows.push({ ...h, __status: "UNCHANGED", __branches: "BOTH" });
+      }
+    }
+  } catch {
+    // ignore intersection errors silently
+  }
+
+  // Sort by severity, then status, then id
   rows.sort((a, b) => {
     const s = severityRank(a.severity) - severityRank(b.severity);
     if (s !== 0) return s;
@@ -132,27 +151,28 @@ function renderSummaryTableMarkdown(diffJson, baseJson, headJson, actionMeta, ba
   // Totals cards (NEW/REMOVED/UNCHANGED)
   lines.push(totalsCards(diffJson?.summary));
 
-  // Branch severity tables
-  lines.push(`**${baseLabel} severity counts**`);
-  lines.push(sevTable(baseJson?.summary));
-  lines.push(`**${headLabel} severity counts**`);
-  lines.push(sevTable(headJson?.summary));
+  // Branch severity tables (HORIZONTAL)
+  lines.push(`**${baseLabel.toUpperCase()} severity counts**`);
+  lines.push(sevRowTable(baseJson?.summary));
+  lines.push(`**${headLabel.toUpperCase()} severity counts**`);
+  lines.push(sevRowTable(headJson?.summary));
 
-  // Diff table with title tooltips (no hovercards here)
+  // Diff table with title tooltips (includes UNCHANGED)
   lines.push("");
   lines.push("<table>");
-  lines.push("<thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Branch</th><th>Status</th></tr></thead>");
+  lines.push("<thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Branches</th><th>Status</th></tr></thead>");
   lines.push("<tbody>");
 
-  const rows = diffRows(diffJson);
+  const rows = diffRows(diffJson, baseJson, headJson);
   for (const r of rows) {
     const href = advisoryHref(r);
     const title = escapeHtml(vulnTitle(r));
     const pkg = escapeHtml(fmtPkg(r?.package?.name, r?.package?.version));
     const sev = escapeHtml(r.severity || "UNKNOWN");
     const id = escapeHtml(r.id || "");
+    const branches = escapeHtml(r.__branches || "");
     lines.push(
-      `<tr><td>${sev}</td><td><a href="${href}" title="${title}" target="_blank" rel="noopener noreferrer">${id}</a></td><td><code>${pkg}</code></td><td>${r.__branch}</td><td>${r.__status}</td></tr>`
+      `<tr><td>${sev}</td><td><a href="${href}" title="${title}" target="_blank" rel="noopener noreferrer">${id}</a></td><td><code>${pkg}</code></td><td>${branches}</td><td>${r.__status}</td></tr>`
     );
   }
 
@@ -167,21 +187,22 @@ function renderSummaryTableMarkdown(diffJson, baseJson, headJson, actionMeta, ba
 
 /* ---------------- PR comment (hovercards) ---------------- */
 
-function renderPrTableMarkdown(diffJson, baseLabel = "BASE", headLabel = "HEAD") {
+function renderPrTableMarkdown(diffJson, baseJson, headJson, baseLabel = "BASE", headLabel = "HEAD") {
   const lines = [];
   lines.push(`### Vulnerability diff (${baseLabel} vs ${headLabel})`);
   lines.push("");
 
   lines.push("<table>");
-  lines.push("<thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Branch</th><th>Status</th></tr></thead>");
+  lines.push("<thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Branches</th><th>Status</th></tr></thead>");
   lines.push("<tbody>");
 
-  const rows = diffRows(diffJson);
+  const rows = diffRows(diffJson, baseJson, headJson);
   for (const r of rows) {
     const href = advisoryHref(r);
     const pkg = escapeHtml(fmtPkg(r?.package?.name, r?.package?.version));
     const sev = escapeHtml(r.severity || "UNKNOWN");
     const id = escapeHtml(r.id || "");
+    const branches = escapeHtml(r.__branches || "");
 
     // GitHub advisory hovercard, if GHSA id exists
     let anchor = `<a href="${href}" target="_blank" rel="noopener noreferrer">${id}</a>`;
@@ -195,7 +216,7 @@ function renderPrTableMarkdown(diffJson, baseLabel = "BASE", headLabel = "HEAD")
     }
 
     lines.push(
-      `<tr><td>${sev}</td><td>${anchor}</td><td><code>${pkg}</code></td><td>${r.__branch}</td><td>${r.__status}</td></tr>`
+      `<tr><td>${sev}</td><td>${anchor}</td><td><code>${pkg}</code></td><td>${branches}</td><td>${r.__status}</td></tr>`
     );
   }
 

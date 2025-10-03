@@ -57,15 +57,17 @@ async function run() {
     // ---------------- Markdown (Summary + PR comment) ----------------
     core.startGroup("Rendering Markdown");
     if (writeSummary) {
-      // Job Summary (with tooltips in HTML anchors)
-      const summaryMd = renderSummaryTableMarkdown(diffJson, baseJson, headJson, actionMeta, "BASE", "HEAD");
+      const summaryMd = renderSummaryTableMarkdown(
+        diffJson, baseJson, headJson, actionMeta, "BASE", "HEAD"
+      );
       await core.summary.addRaw(summaryMd, true).write();
 
-      // PR comment (hovercards) with marker upsert
       const ctx = github.context;
       if (token && ctx.payload?.pull_request) {
         const prNumber = ctx.payload.pull_request.number;
-        const prMdTable = renderPrTableMarkdown(diffJson, "BASE", "HEAD");
+        const prMdTable = renderPrTableMarkdown(
+          diffJson, baseJson, headJson, "BASE", "HEAD"
+        );
         const body = `${prMarker}\n${prMdTable}`;
         const octo = github.getOctokit(token);
         await upsertPrComment(octo, ctx.repo, prNumber, prMarker, body);
