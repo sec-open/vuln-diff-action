@@ -1,17 +1,83 @@
-// path: src/render/pdf.js
 /**
  * PDF renderer (Puppeteer)
+ * - Ensures a Chrome/Chromium binary is available (downloads if missing)
+ *   using @puppeteer/browsers, then launches Puppeteer with that path.
  * - Exports renderPdfReport(opts) used by index.js
- * - Also exports buildCoverHtml/buildMainHtml/buildLandscapeHtml for modular sections
- * - Minimal, self-contained CSS here to avoid duplications elsewhere
- *
- * NOTE: This is a pragmatic implementation to unblock "renderPdfReport is not a function".
- * You can iterate the section builders to match the full spec.
+ * - Keeps section builders: buildCoverHtml, buildMainHtml, buildLandscapeHtml
+ * Comments in English per project guideline.
  */
 
 const fs = require("fs/promises");
+const fssync = require("fs");
 const path = require("path");
+const os = require("os");
 const puppeteer = require("puppeteer");
+const {
+  detectBrowserPlatform,
+  resolveBuildId,
+  computeExecutablePath,
+  install: installBrowser,
+} = require("@puppeteer/browsers");
+
+/* ---------------- Ensure Chrome present & get executablePath ---------------- */
+
+async function ensureChromeExecutable() {
+  const platform = detectBrowserPlatform();
+  if (!platform) {
+    throw new Error("Unsupported platform for Puppeteer.");
+  }
+
+  // Prefer Puppeteer's configured cache dir; fallback to ~/.cache/puppeteer
+  const pptrCfg = puppeteer.configuration?.();
+  const cacheDir =
+    process.env.PUPPETEER_CACHE_DIR ||
+    (pptrCfg && pptrCfg.cache && pptrCfg.cache.directory) ||
+    path.join(os.homedir(), ".cache", "puppeteer");
+
+  // Resolve a stable Chrome build id for this platform
+  const buildId = await resolveBuildId("chrome", platform, "stable");
+
+  const execPath = computeExecutablePath({
+    browser: "chrome",
+    cacheDir,
+    platform,
+    buildId,
+  });
+
+  // If the executable does not exist, download & install it
+  const exists = await fileExists(execPath);
+  if (!exists) {
+    await installBrowser({
+      browser: "chrome",
+      cacheDir,
+      platform,
+      buildId,
+      downloadProgressCallback(bytes, total) {
+        if (total) {
+          const pct = ((bytes / total) * 100).toFixed(1);
+          console.log(`[puppeteer] Downloading Chrome ${buildId}… ${pct}%`);
+        }
+      },
+    });
+  }
+
+  // Sanity check
+  if (!(await fileExists(execPath))) {
+    throw new Error(`Chrome executable not found after install: ${execPath}`);
+  }
+  return execPath;
+}
+
+async function fileExists(p) {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* ---------------- Public entrypoint ---------------- */
 
 /**
  * Entrypoint called by src/index.js
@@ -43,7 +109,7 @@ async function renderPdfReport(opts) {
   const pdfDir = path.join(outDir, "pdf");
   await fs.mkdir(pdfDir, { recursive: true });
 
-  // Build HTML
+  // Build HTML (simple scaffolding; sections can be expanded per Chapter 8)
   const cover = await buildCoverHtml({ titleLogoUrl, baseLabel, headLabel, baseJson, headJson });
   const main = await buildMainHtml({ baseJson, headJson, diffJson });
   const landscape = await buildLandscapeHtml({ diffJson, graphMaxNodes });
@@ -65,12 +131,17 @@ ${landscape}
   const htmlPath = path.join(pdfDir, "report.html");
   await fs.writeFile(htmlPath, html, "utf8");
 
-  // Print to PDF
+  // Ensure Chrome is present and launch Puppeteer with explicit executablePath
+  const executablePath = await ensureChromeExecutable();
+
   const browser = await puppeteer.launch({
+    executablePath,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
+
   try {
     const page = await browser.newPage();
+    // Use file content directly to avoid file:// CSP oddities
     await page.setContent(html, { waitUntil: ["domcontentloaded"] });
     await page.emulateMediaType("screen");
 
@@ -89,7 +160,7 @@ ${landscape}
   }
 }
 
-/* ---------------- Section builders (simple initial version) ---------------- */
+/* ---------------- Section builders (initial incremental version) ---------------- */
 
 function esc(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -165,7 +236,6 @@ async function buildMainHtml({ baseJson, headJson, diffJson }) {
 }
 
 async function buildLandscapeHtml({ diffJson, graphMaxNodes = 150 }) {
-  // Placeholder for landscape pages (e.g., graphs). We keep a simple section with a note.
   const note = `Graphs up to ${Number.isFinite(graphMaxNodes) ? graphMaxNodes : 150} nodes (placeholder).`;
   return `
 <section class="landscape">
@@ -220,7 +290,6 @@ function basicCss() {
 
 module.exports = {
   renderPdfReport,
-  // also expose the section builders (useful for incremental development)
   buildCoverHtml,
   buildMainHtml,
   buildLandscapeHtml,
