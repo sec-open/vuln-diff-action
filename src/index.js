@@ -1,16 +1,17 @@
+// path: src/index.js
 /**
  * Action entrypoint:
  * - Analyze refs, render Markdown/HTML/PDF
  * - Upsert PR comment using a stable marker (configurable)
  * - Upload artifact (PDF + HTML bundle) via @actions/artifact
- * All comments in English per project guideline.
+ * Comments in English per project guideline.
  */
 
 const path = require("path");
 const fs = require("fs/promises");
 const core = require("@actions/core");
 const github = require("@actions/github");
-const artifact = require("@actions/artifact");
+const artifactMod = require("@actions/artifact");
 
 const { analyzeRefs } = require("./analyze");
 const { renderPrTableMarkdown, renderSummaryTableMarkdown } = require("./render/markdown");
@@ -23,20 +24,18 @@ async function run() {
     const baseRef = core.getInput("base_ref", { required: true });
     const headRef = core.getInput("head_ref", { required: true });
 
-    const writeSummary = core.getBooleanInput("write_summary");   // defaults handled by action.yml
-    const reportHtml   = core.getBooleanInput("report_html");
-    const reportPdf    = core.getBooleanInput("report_pdf");
+    const writeSummary   = core.getBooleanInput("write_summary");
+    const reportHtml     = core.getBooleanInput("report_html");
+    const reportPdf      = core.getBooleanInput("report_pdf");
     const uploadArtifact = core.getBooleanInput("upload_artifact");
 
-    const artifactName = core.getInput("artifact_name") || "vulnerability-diff";
-    const minSeverity  = core.getInput("min_severity") || "LOW";
-    const repoPath     = core.getInput("path") || ".";
+    const artifactName  = core.getInput("artifact_name") || "vulnerability-diff";
+    const minSeverity   = core.getInput("min_severity") || "LOW";
+    const repoPath      = core.getInput("path") || ".";
     const graphMaxNodes = Number(core.getInput("graph_max_nodes") || 150);
-    const titleLogoUrl = core.getInput("title_logo_url") || "";
-    const token        = core.getInput("github_token") || "";
-    const prMarker     = core.getInput("pr_comment_marker") || "<!-- vuln-diff-action:comment -->";
-    // slack_webhook_url available if you later wire Slack notifications
-    // const slackWebhookUrl = core.getInput("slack_webhook_url");
+    const titleLogoUrl  = core.getInput("title_logo_url") || "";
+    const token         = core.getInput("github_token") || "";
+    const prMarker      = core.getInput("pr_comment_marker") || "<!-- vuln-diff-action:comment -->";
 
     const actionMeta = {
       name: "sec-open/vuln-diff-action",
@@ -125,9 +124,10 @@ async function run() {
     // ---------------- Upload artifact (PDF + HTML bundle) ----------------
     core.startGroup("Uploading artifact");
     if (uploadArtifact) {
-      const client = artifact.create();
-      const files = [];
+      // Robust client creation across @actions/artifact versions
+      const client = createArtifactClientCompat(artifactMod);
 
+      const files = [];
       if (pdfPathOutput) files.push(pdfPathOutput);
 
       if (htmlOutDir) {
@@ -163,8 +163,28 @@ async function run() {
 }
 
 /**
+ * Create an artifact client that works with both v1/v2 style exports.
+ */
+function createArtifactClientCompat(mod) {
+  // v2 commonly exposes create()
+  if (mod && typeof mod.create === "function") {
+    return mod.create();
+  }
+  // Some builds expose DefaultArtifactClient class
+  if (mod && typeof mod.DefaultArtifactClient === "function") {
+    return new mod.DefaultArtifactClient();
+  }
+  // Defensive: try default export shape
+  if (mod && mod.default) {
+    const d = mod.default;
+    if (typeof d.create === "function") return d.create();
+    if (typeof d.DefaultArtifactClient === "function") return new d.DefaultArtifactClient();
+  }
+  throw new Error("@actions/artifact: incompatible module export; cannot create client");
+}
+
+/**
  * Find an existing PR comment containing the marker, update it; otherwise create it.
- * This keeps a single rolling comment per PR.
  */
 async function upsertPrComment(octo, repo, prNumber, marker, body) {
   const { owner, repo: r } = repo;
