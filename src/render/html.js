@@ -1,8 +1,9 @@
+// path: src/render/html.js
 /**
  * HTML bundle renderer
  * - Copies the static bundle (index.html, assets/*) to outputDir
  * - Writes data/*.json alongside it
- * - Does not rely on 'dist/html-bundle' (ncc does not include non-JS by default)
+ * - Robustly resolves where 'html-bundle' lives at runtime.
  */
 
 const fs = require("fs/promises");
@@ -10,47 +11,75 @@ const fssync = require("fs");
 const path = require("path");
 
 /**
- * Resolve the source directory where 'html-bundle' lives.
- * We try multiple candidates so the action works both from source and from a packaged dist:
- *  1) $GITHUB_ACTION_PATH/html-bundle
- *  2) <action-root>/html-bundle  (two levels up from dist: __dirname/../..)
- *  3) process.cwd()/html-bundle
+ * Find 'html-bundle' by checking multiple candidates and walking upwards
+ * from __dirname (dist). We require the directory to exist and to contain index.html.
  */
 async function resolveBundleDir() {
-  const candidates = [
-    process.env.GITHUB_ACTION_PATH && path.join(process.env.GITHUB_ACTION_PATH, "html-bundle"),
-    path.resolve(__dirname, "..", "..", "html-bundle"),
-    path.resolve(process.cwd(), "html-bundle"),
-  ].filter(Boolean);
+  const candidates = [];
 
-  for (const dir of candidates) {
+  // 1) Candidates from environment (may or may not include the version subdir)
+  if (process.env.GITHUB_ACTION_PATH) {
+    candidates.push(path.join(process.env.GITHUB_ACTION_PATH, "html-bundle"));
+  }
+
+  // 2) Relative to current compiled file:
+  //    .../dist        -> ../html-bundle
+  //    .../dist        -> ./html-bundle (if someone copied it inside dist)
+  //    .../dist        -> ../../html-bundle (defensive)
+  candidates.push(
+    path.resolve(__dirname, "..", "html-bundle"),
+    path.resolve(__dirname, "html-bundle"),
+    path.resolve(__dirname, "..", "..", "html-bundle")
+  );
+
+  // 3) Walk up from __dirname and look for a sibling 'html-bundle'
+  let dir = path.resolve(__dirname);
+  for (let i = 0; i < 5; i++) {
+    const probe = path.join(dir, "html-bundle");
+    candidates.push(probe);
+    dir = path.dirname(dir);
+  }
+
+  // 4) Last-resort: cwd/html-bundle (useful in local runs)
+  candidates.push(path.resolve(process.cwd(), "html-bundle"));
+
+  // Deduplicate
+  const seen = new Set();
+  const unique = candidates.filter(p => {
+    if (!p) return false;
+    const k = path.resolve(p);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+
+  for (const dirPath of unique) {
     try {
-      const stat = await fs.stat(dir);
-      if (stat.isDirectory() && fssync.existsSync(path.join(dir, "index.html"))) {
-        return dir;
+      const stat = await fs.stat(dirPath);
+      if (!stat.isDirectory()) continue;
+      const indexHtml = path.join(dirPath, "index.html");
+      if (fssync.existsSync(indexHtml)) {
+        return dirPath;
       }
     } catch {
       // ignore and continue
     }
   }
 
-  const tried = candidates.join(", ");
   throw new Error(
-    `HTML bundle not found. Looked for: ${tried}. ` +
-    `Ensure the 'html-bundle/' directory is included in your repository/tag next to action.yml.`
+    `HTML bundle not found. Looked for: ${unique.join(", ")}. ` +
+    `Ensure 'html-bundle/' is committed next to action.yml in the tag/release.`
   );
 }
 
 /**
- * Recursively copy a directory (Node 16+: fs.cp; Node 20 is guaranteed on Actions).
+ * Recursively copy a directory (Node 20: fs.cp available).
  */
 async function copyDir(src, dst) {
   await fs.mkdir(dst, { recursive: true });
-  // Node 20+ supports fs.cp; keep a fallback just in case.
   if (fs.cp) {
     await fs.cp(src, dst, { recursive: true, force: true, errorOnExist: false });
   } else {
-    // simple fallback
     const entries = await fs.readdir(src, { withFileTypes: true });
     for (const e of entries) {
       const s = path.join(src, e.name);
@@ -64,51 +93,30 @@ async function copyDir(src, dst) {
   }
 }
 
-/**
- * Write JSON helper (pretty-printed).
- */
 async function writeJson(filePath, obj) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(obj, null, 2), "utf8");
+  await fs.writeFile(filePath, JSON.stringify(obj ?? {}, null, 2), "utf8");
 }
 
 /**
- * Render the deployable HTML bundle.
- * @param {Object} opts
- * @param {string} opts.outputDir           Destination directory for the bundle
- * @param {Object} opts.baseJson
- * @param {Object} opts.headJson
- * @param {Object} opts.diffJson
- * @param {Object} [opts.meta]              Extra metadata to embed as data/meta.json
+ * Copy bundle and write data/*.json
  */
 async function renderHtmlBundle(opts) {
-  const {
-    outputDir,
-    baseJson,
-    headJson,
-    diffJson,
-    meta = {},
-  } = opts || {};
-
+  const { outputDir, baseJson, headJson, diffJson, meta = {} } = opts || {};
   if (!outputDir) throw new Error("renderHtmlBundle: 'outputDir' is required");
 
-  // 1) Locate the source html-bundle directory
   const bundleSrc = await resolveBundleDir();
-
-  // 2) Copy the entire bundle to outputDir
   await copyDir(bundleSrc, outputDir);
 
-  // 3) Write data/*.json next to the copied index.html
   const dataDir = path.join(outputDir, "data");
-  await writeJson(path.join(dataDir, "base.json"), baseJson || {});
-  await writeJson(path.join(dataDir, "head.json"), headJson || {});
-  await writeJson(path.join(dataDir, "diff.json"), diffJson || {});
+  await writeJson(path.join(dataDir, "base.json"), baseJson);
+  await writeJson(path.join(dataDir, "head.json"), headJson);
+  await writeJson(path.join(dataDir, "diff.json"), diffJson);
   await writeJson(path.join(dataDir, "meta.json"), {
     generatedAt: new Date().toISOString(),
     ...meta,
   });
 
-  // 4) Sanity log
   const indexPath = path.join(outputDir, "index.html");
   if (!fssync.existsSync(indexPath)) {
     throw new Error(`renderHtmlBundle: 'index.html' not found at ${indexPath}. Check your html-bundle source.`);
