@@ -21,15 +21,20 @@ const { renderPdfReport } = require("./render/pdf");
 async function run() {
   try {
     core.startGroup("Analyze branches");
-    const baseRef = core.getInput("base_ref", { required: true });
+   const baseRef = core.getInput("base_ref", { required: true });
     const headRef = core.getInput("head_ref", { required: true });
+    const artifactNameInput = core.getInput("artifact_name") || "";
+
+    // Artifact name: si el usuario no fija uno, usamos "<prefix><base>-vs-<head>"
+    const sanitize = (s) => String(s || "").replace(/\//g, "-");
+    const defaultArtifactName = `vulnerability-diff-${sanitize(baseRef)}-vs-${sanitize(headRef)}`;
+    const finalArtifactName = artifactNameInput || defaultArtifactName;
 
     const writeSummary   = core.getBooleanInput("write_summary");
     const reportHtml     = core.getBooleanInput("report_html");
     const reportPdf      = core.getBooleanInput("report_pdf");
     const uploadArtifact = core.getBooleanInput("upload_artifact");
 
-    const artifactName  = core.getInput("artifact_name") || "vulnerability-diff";
     const minSeverity   = core.getInput("min_severity") || "LOW";
     const repoPath      = core.getInput("path") || ".";
     const graphMaxNodes = Number(core.getInput("graph_max_nodes") || 150);
@@ -145,11 +150,11 @@ async function run() {
       }
 
       if (files.length) {
-        await client.uploadArtifact(artifactName, files, process.cwd(), {
+        await client.uploadArtifact(finalArtifactName, files, process.cwd(), {
           continueOnError: true,
           compressionLevel: 6
         });
-        core.info(`Artifact uploaded: ${artifactName} (${files.length} files)`);
+        core.info(`Artifact uploaded: ${finalArtifactName} (${files.length} files)`);
       } else {
         core.info("No files to upload as artifact.");
       }

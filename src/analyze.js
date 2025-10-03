@@ -1,222 +1,228 @@
-// path: src/analyze.js
+// path: src/render/markdown.js
 /**
- * Analyze two Git refs in isolated checkouts:
- *  - Create a temp tree for BASE and HEAD (worktree or archive).
- *  - SBOM per tree (CycloneDX Maven if pom.xml; otherwise Syft).
- *  - Grype on each SBOM; normalize; filter by min severity.
- *  - Summarize and compute diff (NEW/REMOVED/UNCHANGED).
- *  - Persist base.json, head.json, diff.json.
+ * Markdown renderers (no recomputation):
+ * - Summary (Job Summary): plain Markdown/HTML, uses title tooltips (no hovercards)
+ * - PR comment: allows GitHub hovercards on vulnerability IDs
+ *
+ * Data contract:
+ * - Uses diffJson.items (each item has: id, severity, package{name,version}, state, branches, ids{ghsa,cve}, cvss_max, fix, url)
+ * - Uses baseJson.summary.by_severity / headJson.summary.by_severity for counts
+ * - Uses diffJson.summary.totals and by_severity_and_state for totals/matrix
+ *
+ * Column notes:
+ * - Package column is "<name>:<version>"
+ * - Branches column shows "BASE" | "HEAD" | "BOTH" from diffJson.items[].branches
+ * - Status column shows item.state ("NEW" | "REMOVED" | "UNCHANGED")
  */
 
-const path = require("path");
-const fs = require("fs/promises");
-const { fetchAll, resolveRef, commitInfo, shortSha, prepareCheckout } = require("./git");
-const { generateSbom } = require("./sbom");
-const { runGrypeOnSbomWith } = require("./grype");
-const { normalizeFinding, summarizeBySeverity, computeDiff } = require("./report");
-const { normalizeSeverity } = require("./severity");
-const { ensureAndLocateScannerTools } = require("./tools");
-
-async function ensureDir(p) { await fs.mkdir(p, { recursive: true }); }
-
-function filterByMinSeverity(items, minSeverity = "LOW") {
-  const order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
-  const idx = order.indexOf(normalizeSeverity(minSeverity));
-  const allowed = new Set(order.slice(0, idx + 1));
-  if (normalizeSeverity(minSeverity) === "UNKNOWN") allowed.add("UNKNOWN");
-  return items.filter(it => allowed.has(normalizeSeverity(it.severity)));
+function severityRank(s) {
+  const map = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, UNKNOWN: 4 };
+  return map[String(s || "UNKNOWN").toUpperCase()] ?? 9;
+}
+function statusRank(s) {
+  const map = { NEW: 0, REMOVED: 1, UNCHANGED: 2 };
+  return map[String(s || "UNCHANGED").toUpperCase()] ?? 9;
+}
+function fmtInt(n) {
+  return new Intl.NumberFormat("en-US").format(n || 0);
+}
+function escapeHtml(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function fmtPkg(name, version) {
+  const n = name || "unknown";
+  const v = (version && String(version).trim()) ? String(version).trim() : "-";
+  return `${n}:${v}`;
+}
+function advisoryHref(v) {
+  const ids = v?.ids || {};
+  if (ids.ghsa) return `https://github.com/advisories/${ids.ghsa}`;
+  if (ids.cve)  return `https://nvd.nist.gov/vuln/detail/${ids.cve}`;
+  return v?.url || "#";
+}
+function vulnTitle(v) {
+  const parts = [];
+  if (v?.id) parts.push(v.id);
+  if (v?.severity) parts.push(`Severity: ${v.severity}`);
+  const p = v?.package;
+  if (p?.name) parts.push(`Package: ${fmtPkg(p.name, p.version)}`);
+  if (v?.cvss_max?.score != null) parts.push(`CVSS: ${v.cvss_max.score}`);
+  if (v?.fix?.state) parts.push(`Fix: ${v.fix.state}`);
+  return parts.join(" · ");
 }
 
-async function getToolVersions() {
-  const { execFile } = require("child_process");
-  const { promisify } = require("util");
-  const execFileP = promisify(execFile);
+function branchLine(label, info) {
+  const ref = info?.git?.ref || "";
+  const sha = info?.git?.sha_short || "";
+  const msg = info?.git?.commit_subject || "";
+  return `- **${label.toUpperCase()}**: \`${escapeHtml(ref)}\` @ \`${escapeHtml(sha)}\` — ${escapeHtml(msg)}`;
+}
 
-  async function ver(cmd, args) {
-    try {
-      const { stdout, stderr } = await execFileP(cmd, args);
-      return (stdout || stderr || "").trim().split(/\r?\n/)[0];
-    } catch {
-      return undefined;
+function toolsLine(tools, actionMeta) {
+  const t = [];
+  if (tools?.syft) t.push(`Syft Application: ${inlineVersion(tools.syft)}`);
+  if (tools?.grype) t.push(`Grype Application: ${inlineVersion(tools.grype)}`);
+  if (tools?.cyclonedx_maven) t.push(`CycloneDX Maven`);
+  if (tools?.node) t.push(`Node ${tools.node}`);
+  if (actionMeta) t.push(`Action: ${actionMeta.name} (\`${(actionMeta.commit || "").slice(0,7)}\`)`);
+  return `- ${t.join(" · ")}`;
+}
+function inlineVersion(line) {
+  return String(line || "").split(/\r?\n/)[0];
+}
+
+/** Horizontal severity table (two rows, five columns). */
+function sevRowTable(summary) {
+  const s = summary?.by_severity || {};
+  const headers = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
+  const counts  = headers.map(h => fmtInt(s[h] || 0));
+
+  return [
+    "",
+    "<table>",
+    `<thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>`,
+    `<tbody><tr>${counts.map(c => `<td>${c}</td>`).join("")}</tr></tbody>`,
+    "</table>",
+    ""
+  ].join("\n");
+}
+
+function totalsCards(diffSummary) {
+  const t = diffSummary?.totals || {};
+  return [
+    "",
+    "<table>",
+    "<thead><tr><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>",
+    `<tbody><tr><td>${fmtInt(t.NEW||0)}</td><td>${fmtInt(t.REMOVED||0)}</td><td>${fmtInt(t.UNCHANGED||0)}</td></tr></tbody>`,
+    "</table>",
+    ""
+  ].join("\n");
+}
+
+/** Get sorted rows directly from diffJson.items (fallback builds from changes if needed). */
+function getDiffRows(diffJson) {
+  let rows = [];
+  if (Array.isArray(diffJson?.items)) {
+    rows = [...diffJson.items];
+  } else {
+    // Fallback for older builds
+    const n = (diffJson?.changes?.new || []).map(v => ({ ...v, state: "NEW", branches: "HEAD" }));
+    const r = (diffJson?.changes?.removed || []).map(v => ({ ...v, state: "REMOVED", branches: "BASE" }));
+    const u = (diffJson?.changes?.unchanged || []).map(v => ({ ...v, state: "UNCHANGED", branches: "BOTH" }));
+    rows = [...n, ...r, ...u];
+  }
+
+  rows.sort((a, b) => {
+    const s = severityRank(a.severity) - severityRank(b.severity);
+    if (s !== 0) return s;
+    const st = statusRank(a.state) - statusRank(b.state);
+    if (st !== 0) return st;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+  return rows;
+}
+
+/* ---------------- Summary (Job Summary) ---------------- */
+
+function renderSummaryTableMarkdown(diffJson, baseJson, headJson, actionMeta, baseLabel = "BASE", headLabel = "HEAD") {
+  const lines = [];
+
+  lines.push(`### compare-branches summary`);
+  lines.push("");
+  lines.push("**Summary**");
+  lines.push("");
+  lines.push(branchLine(baseLabel, baseJson));
+  lines.push(branchLine(headLabel, headJson));
+  lines.push("");
+  lines.push("**Tools**");
+  lines.push("");
+  lines.push(toolsLine(diffJson?.tools || baseJson?.tools || headJson?.tools || {}, actionMeta));
+  lines.push("");
+
+  // Totals cards (NEW/REMOVED/UNCHANGED)
+  lines.push(totalsCards(diffJson?.summary));
+
+  // Branch severity tables (HORIZONTAL)
+  lines.push(`**${baseLabel.toUpperCase()} severity counts**`);
+  lines.push(sevRowTable(baseJson?.summary));
+  lines.push(`**${headLabel.toUpperCase()} severity counts**`);
+  lines.push(sevRowTable(headJson?.summary));
+
+  // Diff table with title tooltips (uses diff.items)
+  lines.push("");
+  lines.push("<table>");
+  lines.push("<thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Branches</th><th>Status</th></tr></thead>");
+  lines.push("<tbody>");
+
+  const rows = getDiffRows(diffJson);
+  for (const r of rows) {
+    const href = advisoryHref(r);
+    const title = escapeHtml(vulnTitle(r));
+    const pkg = escapeHtml(fmtPkg(r?.package?.name, r?.package?.version));
+    const sev = escapeHtml(r.severity || "UNKNOWN");
+    const id = escapeHtml(r.id || "");
+    const branches = escapeHtml(r.branches || "");
+    const status = escapeHtml(r.state || "");
+    lines.push(
+      `<tr><td>${sev}</td><td><a href="${href}" title="${title}" target="_blank" rel="noopener noreferrer">${id}</a></td><td><code>${pkg}</code></td><td>${branches}</td><td>${status}</td></tr>`
+    );
+  }
+
+  lines.push("</tbody>");
+  lines.push("</table>");
+  lines.push("");
+  lines.push(`_Unchanged_: **${fmtInt(diffJson?.summary?.totals?.UNCHANGED || 0)}**`);
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+/* ---------------- PR comment (hovercards) ---------------- */
+
+function renderPrTableMarkdown(diffJson, baseJson, headJson, baseLabel = "BASE", headLabel = "HEAD") {
+  const lines = [];
+  lines.push(`### Vulnerability diff (${baseLabel} vs ${headLabel})`);
+  lines.push("");
+
+  lines.push("<table>");
+  lines.push("<thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Branches</th><th>Status</th></tr></thead>");
+  lines.push("<tbody>");
+
+  const rows = getDiffRows(diffJson);
+  for (const r of rows) {
+    const href = advisoryHref(r);
+    const pkg = escapeHtml(fmtPkg(r?.package?.name, r?.package?.version));
+    const sev = escapeHtml(r.severity || "UNKNOWN");
+    const id = escapeHtml(r.id || "");
+    const branches = escapeHtml(r.branches || "");
+    const status = escapeHtml(r.state || "");
+
+    // GitHub advisory hovercard, if GHSA id exists
+    let anchor = `<a href="${href}" target="_blank" rel="noopener noreferrer">${id}</a>`;
+    if (r?.ids?.ghsa) {
+      const ghsa = r.ids.ghsa;
+      anchor =
+        `<a href="https://github.com/advisories/${ghsa}" ` +
+        `data-hovercard-type="advisory" ` +
+        `data-hovercard-url="/advisories/${ghsa}/hovercard" ` +
+        `target="_blank" rel="noopener noreferrer">${id}</a>`;
     }
+
+    lines.push(
+      `<tr><td>${sev}</td><td>${anchor}</td><td><code>${pkg}</code></td><td>${branches}</td><td>${status}</td></tr>`
+    );
   }
 
-  return {
-    syft: await ver("syft", ["version"]),
-    grype: await ver("grype", ["version"]),
-    cyclonedx_maven: await ver("mvn", ["-q", "--version"]),
-    node: process.version.replace(/^v/, ""),
-  };
+  lines.push("</tbody>");
+  lines.push("</table>");
+  lines.push("");
+  lines.push(`_Unchanged_: **${fmtInt(diffJson?.summary?.totals?.UNCHANGED || 0)}**`);
+  lines.push("");
+
+  return lines.join("\n");
 }
 
-async function analyzeOneRef({ sha, refLabel, checkoutParent, bins, minSeverity }) {
-  // Prepare isolated checkout folder for this ref
-  const refDir = path.join(checkoutParent, shortSha(sha));
-  await prepareCheckout(sha, refDir);
-
-  // Per-ref output dir (avoid overwriting)
-  const perRefOut = path.join(checkoutParent, "out", shortSha(sha));
-  await ensureDir(perRefOut);
-
-  // SBOM (prefer CycloneDX Maven if pom.xml exists in this checkout)
-  const sbom = await generateSbom(refDir, perRefOut, bins);
-
-  // Grype over SBOM
-  const grypeJson = await runGrypeOnSbomWith(bins.grypePath, sbom.path);
-
-  // Normalize & filter
-  const itemsAll = Array.isArray(grypeJson.matches) ? grypeJson.matches.map(normalizeFinding) : [];
-  const items = filterByMinSeverity(itemsAll, minSeverity);
-
-  // Summary
-  const summary = summarizeBySeverity(items);
-
-  return { refDir, sbom, items, summary };
-}
-
-async function analyzeRefs(opts) {
-  const {
-    cwd = process.cwd(),
-    pathRoot = ".",           // kept for future use (when scanning non-root dirs)
-    baseRef,
-    headRef,
-    minSeverity = "LOW",
-    outDir = path.join(process.cwd(), "vuln-diff-output"),
-    actionMeta = { name: "sec-open/vuln-diff-action", version: "", commit: "", ref: "" },
-    repo = "",
-  } = opts;
-
-  if (!baseRef || !headRef) throw new Error("Missing baseRef/headRef");
-
-  await ensureDir(outDir);
-  await fetchAll();
-
-  const baseSha = await resolveRef(baseRef);
-  const headSha = await resolveRef(headRef);
-
-  const baseInfo = await commitInfo(baseSha);
-  const headInfo = await commitInfo(headSha);
-
-  // Ensure Syft/Grype are installed and get absolute paths
-  const bins = await ensureAndLocateScannerTools();
-  const tools = await getToolVersions();
-
-  // Parent temp area for checkouts
-  const checksRoot = path.join(outDir, "refs");
-  await ensureDir(checksRoot);
-
-  // Analyze BASE and HEAD from their own checkout dirs
-  const baseRes = await analyzeOneRef({
-    sha: baseSha,
-    refLabel: "BASE",
-    checkoutParent: checksRoot,
-    bins,
-    minSeverity,
-  });
-  const headRes = await analyzeOneRef({
-    sha: headSha,
-    refLabel: "HEAD",
-    checkoutParent: checksRoot,
-    bins,
-    minSeverity,
-  });
-
-  const now = new Date().toISOString();
-
-  const baseJson = {
-    schema_version: "2.0.0",
-    generated_at: now,
-    parameters: { min_severity: normalizeSeverity(minSeverity) },
-    tools,
-    git: {
-      repo,
-      ref: baseRef,
-      sha: baseInfo.sha,
-      sha_short: baseInfo.sha_short,
-      commit_subject: baseInfo.subject,
-      author: baseInfo.author,
-      authored_at: baseInfo.date,
-    },
-    sbom: {
-      path: baseRes.sbom.path,
-      format: "cyclonedx-json",
-      tool: baseRes.sbom.tool,
-    },
-    summary: baseRes.summary,
-    vulnerabilities: baseRes.items,
-  };
-
-  const headJson = {
-    schema_version: "2.0.0",
-    generated_at: now,
-    parameters: { min_severity: normalizeSeverity(minSeverity) },
-    tools,
-    git: {
-      repo,
-      ref: headRef,
-      sha: headInfo.sha,
-      sha_short: headInfo.sha_short,
-      commit_subject: headInfo.subject,
-      author: headInfo.author,
-      authored_at: headInfo.date,
-    },
-    sbom: {
-      path: headRes.sbom.path,
-      format: "cyclonedx-json",
-      tool: headRes.sbom.tool,
-    },
-    summary: headRes.summary,
-    vulnerabilities: headRes.items,
-  };
-
-  // Diff (NEW / REMOVED / UNCHANGED) by match_key
-  const diff = computeDiff(baseRes.items, headRes.items);
-
-  // Aggregate severity x state
-  const sevLevels = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
-  const by_sev_state = Object.fromEntries(sevLevels.map(s => [s, { NEW: 0, REMOVED: 0, UNCHANGED: 0 }]));
-  for (const it of diff.new) by_sev_state[normalizeSeverity(it.severity)].NEW++;
-  for (const it of diff.removed) by_sev_state[normalizeSeverity(it.severity)].REMOVED++;
-
-  const baseMap = new Map(baseRes.items.map(i => [i.match_key, i]));
-  for (const it of headRes.items) {
-    if (baseMap.has(it.match_key)) by_sev_state[normalizeSeverity(it.severity)].UNCHANGED++;
-  }
-
-  const diffJson = {
-    schema_version: "2.0.0",
-    generated_at: now,
-    parameters: { min_severity: normalizeSeverity(minSeverity) },
-    base: { ref: baseRef, sha: baseInfo.sha, short_sha: shortSha(baseInfo.sha) },
-    head: { ref: headRef, sha: headInfo.sha, short_sha: shortSha(headInfo.sha) },
-    tools,
-    action: actionMeta,
-    repo,
-    summary: {
-      totals: {
-        NEW: diff.new.length,
-        REMOVED: diff.removed.length,
-        UNCHANGED: diff.unchanged_count,
-      },
-      by_severity_and_state: by_sev_state,
-    },
-    changes: {
-      new: diff.new,
-      removed: diff.removed,
-      unchanged: undefined,
-      unchanged_count: diff.unchanged_count,
-    },
-  };
-
-  // Persist outputs
-  const basePath = path.join(outDir, "base.json");
-  const headPath = path.join(outDir, "head.json");
-  const diffPath = path.join(outDir, "diff.json");
-  await fs.writeFile(basePath, JSON.stringify(baseJson, null, 2));
-  await fs.writeFile(headPath, JSON.stringify(headJson, null, 2));
-  await fs.writeFile(diffPath, JSON.stringify(diffJson, null, 2));
-
-  return { basePath, headPath, diffPath, baseJson, headJson, diffJson };
-}
-
-module.exports = { analyzeRefs };
+module.exports = {
+  renderSummaryTableMarkdown,
+  renderPrTableMarkdown,
+};
