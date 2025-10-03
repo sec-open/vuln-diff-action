@@ -1,35 +1,42 @@
 /**
- * Action entrypoint: parse inputs, run analysis, render outputs (Markdown/HTML/PDF),
- * and set outputs/artifacts as configured.
+ * Action entrypoint:
+ * - Analyze refs, render Markdown/HTML/PDF
+ * - Upsert PR comment using a stable marker (configurable)
+ * - Upload artifact (PDF + HTML bundle) via @actions/artifact
+ * All comments in English per project guideline.
  */
 
 const path = require("path");
 const fs = require("fs/promises");
 const core = require("@actions/core");
 const github = require("@actions/github");
+const artifact = require("@actions/artifact");
 
 const { analyzeRefs } = require("./analyze");
 const { renderPrTableMarkdown, renderSummaryTableMarkdown } = require("./render/markdown");
 const { renderHtmlBundle } = require("./render/html");
-// pdf renderer would require a puppeteer wrapper (out of scope in stub)
-const pdfRenderer = require("./render/pdf");
+const { renderPdfReport } = require("./render/pdf");
 
 async function run() {
   try {
     core.startGroup("Analyze branches");
     const baseRef = core.getInput("base_ref", { required: true });
     const headRef = core.getInput("head_ref", { required: true });
-    const writeSummary = core.getBooleanInput("write_summary") || true;
-    const reportHtml = core.getBooleanInput("report_html") || true;
-    const reportPdf = core.getBooleanInput("report_pdf") || true;
-    const uploadArtifact = core.getBooleanInput("upload_artifact") || true;
-    const artifactName = core.getInput("artifact_name") || "vuln-diff-report";
-    const minSeverity = core.getInput("min_severity") || "LOW";
-    const repoPath = core.getInput("path") || ".";
+
+    const writeSummary = core.getBooleanInput("write_summary");   // defaults handled by action.yml
+    const reportHtml   = core.getBooleanInput("report_html");
+    const reportPdf    = core.getBooleanInput("report_pdf");
+    const uploadArtifact = core.getBooleanInput("upload_artifact");
+
+    const artifactName = core.getInput("artifact_name") || "vulnerability-diff";
+    const minSeverity  = core.getInput("min_severity") || "LOW";
+    const repoPath     = core.getInput("path") || ".";
     const graphMaxNodes = Number(core.getInput("graph_max_nodes") || 150);
     const titleLogoUrl = core.getInput("title_logo_url") || "";
-    const token = core.getInput("github_token");
-    const slackWebhookUrl = core.getInput("slack_webhook_url");
+    const token        = core.getInput("github_token") || "";
+    const prMarker     = core.getInput("pr_comment_marker") || "<!-- vuln-diff-action:comment -->";
+    // slack_webhook_url available if you later wire Slack notifications
+    // const slackWebhookUrl = core.getInput("slack_webhook_url");
 
     const actionMeta = {
       name: "sec-open/vuln-diff-action",
@@ -47,141 +54,128 @@ async function run() {
     });
     core.endGroup();
 
-    // --- Markdown renderers ---
-    core.startGroup("Rendering Summary");
+    // ---------------- Markdown (Summary + PR comment) ----------------
+    core.startGroup("Rendering Markdown");
     if (writeSummary) {
+      // Job Summary (with tooltips in HTML anchors)
       const summaryMd = renderSummaryTableMarkdown(diffJson, baseJson, headJson, actionMeta, "BASE", "HEAD");
       await core.summary.addRaw(summaryMd, true).write();
 
-      // PR comment (if token and event is pull_request)
+      // PR comment (hovercards) with marker upsert
       const ctx = github.context;
       if (token && ctx.payload?.pull_request) {
-        const octo = github.getOctokit(token);
         const prNumber = ctx.payload.pull_request.number;
-        const prMd = renderPrTableMarkdown(diffJson, "BASE", "HEAD");
-        await octo.rest.issues.createComment({
-          owner: ctx.repo.owner,
-          repo: ctx.repo.repo,
-          issue_number: prNumber,
-          body: prMd,
-        });
+        const prMdTable = renderPrTableMarkdown(diffJson, "BASE", "HEAD");
+        const body = `${prMarker}\n${prMdTable}`;
+        const octo = github.getOctokit(token);
+        await upsertPrComment(octo, ctx.repo, prNumber, prMarker, body);
       } else {
         core.info("INFO_PR_COMMENT_SKIPPED: No token or not a PR event.");
       }
     }
     core.endGroup();
 
-    // --- HTML bundle ---
+    // ---------------- HTML bundle ----------------
     core.startGroup("Rendering HTML");
+    let htmlOutDir = "";
     if (reportHtml) {
-      const htmlOut = path.join(outDir, "html");
+      htmlOutDir = path.join(outDir, "html-bundle");
       await renderHtmlBundle({
-        outputDir: htmlOut,
+        outputDir: htmlOutDir,
         baseJson,
         headJson,
         diffJson,
-        meta: { generatedAt: new Date().toISOString(), repo: process.env.GITHUB_REPOSITORY, base: { ref: baseRef }, head: { ref: headRef } },
+        meta: {
+          generatedAt: new Date().toISOString(),
+          repo: process.env.GITHUB_REPOSITORY,
+          base: { ref: baseRef },
+          head: { ref: headRef }
+        },
       });
-      core.setOutput("report_html_path", htmlOut);
+      core.setOutput("report_html_path", htmlOutDir);
     }
     core.endGroup();
 
-    // --- PDF ---
+    // ---------------- PDF (Puppeteer) ----------------
     core.startGroup("Rendering PDF");
+    let pdfPathOutput = "";
     if (reportPdf) {
-      // Stub: just assemble HTML and write to file; Puppeteer integration to be added.
-      const cover = await pdfRenderer.buildCoverHtml({ titleLogoUrl, baseLabel: baseRef, headLabel: headRef, baseJson, headJson });
-      const main = await pdfRenderer.buildMainHtml({ baseJson, headJson, diffJson, params: { min_severity: minSeverity }});
-      const landscape = await pdfRenderer.buildLandscapeHtml({ diffJson, graphMaxNodes });
-      const html = `<!doctype html><meta charset="utf-8"><style>${basicCss()}</style>${cover}${main}${landscape}`;
-      const pdfHtmlPath = path.join(outDir, "report.html");
-      await fs.writeFile(pdfHtmlPath, html, "utf8");
-      // In a future step, call Puppeteer to export PDF at outDir/report.pdf
-      core.setOutput("report_pdf_path", pdfHtmlPath.replace(/\.html$/, ".pdf"));
+      const { pdfPath } = await renderPdfReport({
+        outDir,
+        baseJson,
+        headJson,
+        diffJson,
+        titleLogoUrl,
+        baseLabel: baseRef,
+        headLabel: headRef,
+        graphMaxNodes
+      });
+      pdfPathOutput = pdfPath;
+      core.setOutput("report_pdf_path", pdfPathOutput);
     }
     core.endGroup();
 
-    // Outputs for JSON (optional)
+    // Emit JSON paths for downstream steps
     core.setOutput("base_json_path", path.join(outDir, "base.json"));
     core.setOutput("head_json_path", path.join(outDir, "head.json"));
     core.setOutput("diff_json_path", path.join(outDir, "diff.json"));
-    // --- Upload artifact (PDF + HTML bundle) ---
-    const artifact = require("@actions/artifact");
+
+    // ---------------- Upload artifact (PDF + HTML bundle) ----------------
+    core.startGroup("Uploading artifact");
     if (uploadArtifact) {
-      try {
-        const client = artifact.create();
+      const client = artifact.create();
+      const files = [];
 
-        // Collect files to upload
-        const files = [];
-        // PDF (si se generó)
-        const pdfPathOutput = core.getOutput("report_pdf_path");
-        if (pdfPathOutput) {
-          files.push(pdfPathOutput);
-        }
+      if (pdfPathOutput) files.push(pdfPathOutput);
 
-        // HTML bundle (directorio completo). La lib requiere pasar archivos; recolectamos recursivamente.
-        if (htmlOutDir) {
-          const gather = async (dir) => {
-            const out = [];
-            const walk = async (d) => {
-              const entries = await fs.readdir(d, { withFileTypes: true });
-              for (const ent of entries) {
-                const full = path.join(d, ent.name);
-                if (ent.isDirectory()) await walk(full);
-                else if (ent.isFile()) out.push(full);
-              }
-            };
-            await walk(dir);
-            return out;
-          };
-          const htmlFiles = await gather(htmlOutDir);
-          files.push(...htmlFiles);
-        }
+      if (htmlOutDir) {
+        const walk = async (dir, acc) => {
+          const entries = await fs.readdir(dir, { withFileTypes: true });
+          for (const ent of entries) {
+            const full = path.join(dir, ent.name);
+            if (ent.isDirectory()) await walk(full, acc);
+            else if (ent.isFile()) acc.push(full);
+          }
+        };
+        const htmlFiles = [];
+        await walk(htmlOutDir, htmlFiles);
+        files.push(...htmlFiles);
+      }
 
-        if (files.length === 0) {
-          core.warning("No files to upload as artifact.");
-        } else {
-          // Choose a common root directory so files keep relative paths in the artifact.
-          // Use the workspace or the outDir as root.
-          const rootDirectory = process.cwd();
-          const resp = await client.uploadArtifact(artifactName, files, rootDirectory, {
-            continueOnError: true,
-            compressionLevel: 6
-          });
-          core.info(`Artifact uploaded: ${resp?.artifactName || artifactName}`);
-        }
-      } catch (e) {
-        core.warning(`Artifact upload failed: ${e?.message || e}`);
+      if (files.length) {
+        await client.uploadArtifact(artifactName, files, process.cwd(), {
+          continueOnError: true,
+          compressionLevel: 6
+        });
+        core.info(`Artifact uploaded: ${artifactName} (${files.length} files)`);
+      } else {
+        core.info("No files to upload as artifact.");
       }
     }
+    core.endGroup();
 
   } catch (err) {
-    core.setFailed(err instanceof Error ? err.message : String(err));
+    const msg = err instanceof Error ? err.stack || err.message : String(err);
+    core.setFailed(msg);
   }
 }
 
-function basicCss() {
-  return `
-  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#111; }
-  .cover { display:flex; flex-direction:column; align-items:center; justify-content:center; height:90vh; gap:8px; }
-  .logo { margin-bottom:16px; }
-  .report { padding:24px; }
-  .toc { text-align:center; margin:24px 0; }
-  .toc ol { display:inline-block; text-align:left; }
-  .cards { display:flex; gap:12px; margin:12px 0; }
-  .card { border:1px solid #ddd; padding:12px; border-radius:8px; min-width:120px; text-align:center; }
-  .row { display:flex; gap:12px; flex-wrap:wrap; }
-  table.table { width:100%; border-collapse: collapse; }
-  table.table th, table.table td { border:1px solid #ddd; padding:6px 8px; }
-  table.kv { border-collapse: collapse; }
-  table.kv th, table.kv td { border:1px solid #ddd; padding:4px 6px; }
-  .chart-placeholder, .table-placeholder, .mermaid { border:1px dashed #bbb; padding:16px; min-height:140px; }
-  @page { size: A4; margin: 16mm; }
-  `;
+/**
+ * Find an existing PR comment containing the marker, update it; otherwise create it.
+ * This keeps a single rolling comment per PR.
+ */
+async function upsertPrComment(octo, repo, prNumber, marker, body) {
+  const { owner, repo: r } = repo;
+  const list = await octo.paginate(octo.rest.issues.listComments, {
+    owner, repo: r, issue_number: prNumber, per_page: 100
+  });
+  const found = list.find(c => typeof c.body === "string" && c.body.includes(marker));
+  if (found) {
+    await octo.rest.issues.updateComment({ owner, repo: r, comment_id: found.id, body });
+  } else {
+    await octo.rest.issues.createComment({ owner, repo: r, issue_number: prNumber, body });
+  }
 }
 
-if (require.main === module) {
-  run();
-}
-
-module.exports = { run };
+if (require.main === module) run();
+module.exports = { run, upsertPrComment };

@@ -28,12 +28,16 @@ inputs:
     description: "Post PR comment with hovercards (requires github_token)"
     required: false
     default: "true"
+  pr_comment_marker:
+    description: "Marker to identify/update the PR comment in place"
+    required: false
+    default: "<!-- vuln-diff-action:comment -->"
   report_html:
     description: "Generate deployable HTML bundle"
     required: false
     default: "true"
   report_pdf:
-    description: "Generate PDF report (requires Puppeteer, if integrated)"
+    description: "Generate PDF report (uses bundled Puppeteer Chromium)"
     required: false
     default: "true"
   upload_artifact:

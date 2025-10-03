@@ -1,8 +1,7 @@
 /**
- * SBOM generation: prefer CycloneDX Maven when a Maven reactor is detected,
- * otherwise fallback to Syft scanning a path.
- *
- * Outputs a path to a CycloneDX JSON SBOM file.
+ * SBOM generation: prefer CycloneDX Maven when a Maven reactor is detected
+ * AND mvn/java are available (we will try to auto-install them).
+ * Otherwise fallback to Syft scanning a path.
  */
 
 const { execFile } = require("child_process");
@@ -10,17 +9,10 @@ const { promisify } = require("util");
 const execFileP = promisify(execFile);
 const path = require("path");
 const fs = require("fs/promises");
+const { ensureJavaMavenIfNeeded, commandExists } = require("./tools");
 
-async function fileExists(p) {
-  try { await fs.access(p); return true; } catch { return false; }
-}
-
-async function hasMavenProject(rootDir) {
-  // Simple heuristic: any pom.xml in root or submodule triggers Maven path.
-  const pom = path.join(rootDir, "pom.xml");
-  return fileExists(pom);
-}
-
+async function fileExists(p) { try { await fs.access(p); return true; } catch { return false; } }
+async function hasMavenProject(rootDir) { return fileExists(path.join(rootDir, "pom.xml")); }
 async function run(cmd, args, opts = {}) {
   const { stdout, stderr } = await execFileP(cmd, args, { ...opts });
   return { stdout, stderr };
@@ -31,12 +23,8 @@ async function run(cmd, args, opts = {}) {
  * @returns {Promise<string>} path to generated sbom file
  */
 async function genSbomCycloneDx(rootDir, outDir) {
-  // Ensure outDir
   await fs.mkdir(outDir, { recursive: true });
-  // Use cyclonedx-maven-plugin if available
-  // Generate at target/sbom-cyclonedx.json then copy into outDir
   await run("mvn", ["-q", "-DskipTests", "org.cyclonedx:cyclonedx-maven-plugin:2.7.10:makeAggregateBom"], { cwd: rootDir });
-  // Default output by plugin:
   const candidate = path.join(rootDir, "target", "bom.json");
   const dst = path.join(outDir, "sbom-cyclonedx.json");
   await fs.copyFile(candidate, dst);
@@ -55,17 +43,22 @@ async function genSbomSyft(rootDir, outDir) {
 
 /**
  * Decide which SBOM path to use and return { path, tool }.
+ * Will attempt to auto-install Maven/Java if a Maven project is detected.
  */
 async function generateSbom(rootDir, outDir) {
-  if (await hasMavenProject(rootDir)) {
+  const mavenDetected = await hasMavenProject(rootDir);
+  if (mavenDetected) {
+    await ensureJavaMavenIfNeeded({ hasMavenProject: true });
+  }
+  const mvnAvailable = await commandExists("mvn");
+
+  if (mavenDetected && mvnAvailable) {
     const p = await genSbomCycloneDx(rootDir, outDir);
     return { path: p, tool: "cyclonedx_maven" };
-  } else {
-    const p = await genSbomSyft(rootDir, outDir);
-    return { path: p, tool: "syft" };
   }
+  // Fallback to Syft
+  const p = await genSbomSyft(rootDir, outDir);
+  return { path: p, tool: "syft" };
 }
 
-module.exports = {
-  generateSbom,
-};
+module.exports = { generateSbom };
