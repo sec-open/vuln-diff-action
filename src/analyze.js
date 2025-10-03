@@ -229,9 +229,6 @@ async function analyzeRefs(opts) {
     }
   }
 
-  // Totales y matriz severidad × estado
-  const sevLevels = ["CRITICAL","HIGH","MEDIUM","LOW","UNKNOWN"];
-  const by_sev_state = Object.fromEntries(sevLevels.map(s => [s, { NEW: 0, REMOVED: 0, UNCHANGED: 0 }]));
   for (const it of newOnHead)        by_sev_state[normalizeSeverity(it.severity)].NEW++;
   for (const it of removedFromBase)  by_sev_state[normalizeSeverity(it.severity)].REMOVED++;
   for (const it of unchanged)        by_sev_state[normalizeSeverity(it.severity)].UNCHANGED++;
