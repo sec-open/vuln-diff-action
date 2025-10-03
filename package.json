@@ -23,7 +23,8 @@
     "@actions/github": "^6.0.0",
     "@actions/artifact": "^2.3.2",
     "puppeteer": "^22.7.1",
-    "@puppeteer/browsers": "^2.2.3"
+    "@puppeteer/browsers": "^2.2.3",
+    "pdf-lib": "^1.17.1"
   },
   "devDependencies": {
     "@vercel/ncc": "^0.38.1",
