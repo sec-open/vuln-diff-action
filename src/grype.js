@@ -1,25 +1,17 @@
-const core = require("@actions/core");
-const exec = require("@actions/exec");
+/**
+ * Run Grype against a CycloneDX SBOM and return parsed JSON findings.
+ */
 
-async function ensureGrype() {
-  await exec.exec("bash", ["-lc", "command -v grype >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin"]);
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+const execFileP = promisify(execFile);
+
+async function runGrypeOnSbom(sbomPath) {
+  // grype sbom:/path/to.json -o json
+  const { stdout } = await execFileP("grype", [`sbom:${sbomPath}`, "-o", "json"]);
+  return JSON.parse(stdout);
 }
 
-async function scanSbom(sbomPath) {
-  await ensureGrype();
-  let out = "";
-  const opts = {
-    listeners: {
-      stdout: (data) => (out += data.toString())
-    }
-  };
-  await exec.exec("bash", ["-lc", `grype sbom:${sbomPath} -o json || true`], opts);
-  try {
-    return JSON.parse(out);
-  } catch (e) {
-    core.warning("Failed to parse grype JSON. Returning empty.");
-    return { matches: [] };
-  }
-}
-
-module.exports = { scanSbom };
+module.exports = {
+  runGrypeOnSbom,
+};

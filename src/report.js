@@ -1,206 +1,131 @@
-// src/report.js
-// Markdown report (summary) + dependency paths helpers
-// Adjusted paths table: remove Depth0, add Module (no version), Package remains name:version.
-// Comments in English.
+/**
+ * Common helpers for building normalized JSON objects (schema v2.0.0).
+ */
 
-const ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
+const { normalizeSeverity, severityRank } = require("./severity");
 
-function shortSha(sha) { return (sha || "").substring(0, 12); }
-
-function groupBySeverity(matches) {
-  const map = new Map(ORDER.map(s => [s, new Set()]));
-  for (const m of matches || []) {
-    const sev = (m?.vulnerability?.severity || "UNKNOWN").toUpperCase();
-    const a = m?.artifact || {};
-    const key = `${a.name || "unknown"}:${a.version || "unknown"}`;
-    if (!map.has(sev)) map.set(sev, new Set());
-    map.get(sev).add(key);
-  }
-  return map;
+function pickPreferredUrl(ids = {}, urls = []) {
+  // Prefer GHSA → GitHub Advisory; else CVE → NVD; else first url.
+  if (ids.ghsa) return `https://github.com/advisories/${ids.ghsa}`;
+  if (ids.cve) return `https://nvd.nist.gov/vuln/detail/${ids.cve}`;
+  return urls && urls.length ? urls[0] : "";
 }
 
-// Graph builder
-function buildGraphFromBOM(bomJson) {
-  const dependencies = bomJson?.dependencies || [];
-  const components = bomJson?.components || [];
-  const refToLabel = new Map();
-  const nameVer = (c) => `${c?.name || "unknown"}:${c?.version || "unknown"}`;
-
-  for (const c of components) {
-    const label = nameVer(c);
-    if (c["bom-ref"]) refToLabel.set(c["bom-ref"], label);
-    if (c.purl) refToLabel.set(c.purl, label);
-  }
-
-  const adj = new Map();
-  const parents = new Map();
-  const ensure = (map, key) => { if (!map.has(key)) map.set(key, new Set()); return map.get(key); };
-
-  for (const d of dependencies) {
-    const parentLabel = refToLabel.get(d.ref) || d.ref || "unknown";
-    ensure(adj, parentLabel); ensure(parents, parentLabel);
-    for (const ch of (d.dependsOn || [])) {
-      const childLabel = refToLabel.get(ch) || ch || "unknown";
-      ensure(adj, childLabel); ensure(parents, childLabel);
-      adj.get(parentLabel).add(childLabel);
-      parents.get(childLabel).add(parentLabel);
-    }
-  }
-
-  // Ensure nodes for orphans
-  for (const [p, cs] of adj) { ensure(parents, p); for (const c of cs) ensure(adj, c); }
-
-  // Roots
-  const roots = [];
-  for (const [node, ps] of parents.entries()) if (!ps || ps.size === 0) roots.push(node);
-
-  return { adj, parents, roots };
+function shortSha(sha) {
+  return String(sha || "").slice(0, 7);
 }
 
-function findPathsToTarget(target, parents, maxPaths = 5, maxDepth = 10) {
-  const res = [];
-  const stack = [[target]];
-  const seen = new Set();
-
-  while (stack.length && res.length < maxPaths) {
-    const path = stack.pop();
-    const node = path[path.length - 1];
-    const ps = parents.get(node) || new Set();
-    if (ps.size === 0 || path.length >= maxDepth) {
-      res.push([...path].reverse()); // root ... target
-      continue;
-    }
-    for (const p of ps) {
-      const key = `${p}|${path.join(">")}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      stack.push([...path, p]);
-      if (res.length >= maxPaths) break;
-    }
+function cvssMax(scores = []) {
+  // scores: [{ source, score, vector, severity }]
+  let max = null;
+  for (const s of scores) {
+    if (!s || typeof s.score !== "number") continue;
+    if (!max || s.score > max.score) max = s;
   }
-  return res;
+  return max ? { score: max.score, severity: normalizeSeverity(max.severity || "") } : null;
 }
 
-function stripVersion(label) {
-  // "commons-datastore:7.0.0-SNAPSHOT" -> "commons-datastore"
-  return String(label || "").split(":")[0];
+function matchKey(id, pkg) {
+  const name = pkg?.name || "unknown";
+  const ver = (pkg?.version && String(pkg.version).trim()) || "-";
+  return `${id}::${name}::${ver}`;
 }
 
 /**
- * Build dependency paths table rows with new schema:
- * Columns: Severity, Module, Package, Depth0..DepthN
- * - Module: first element of the path (root), without version
- * - Package: vulnerable package name:version (target)
- * - Depth columns: remaining path elements after the module and before the package, reindexed starting at Depth0
+ * Normalize a single Grype match into our schema item.
  */
-function buildDependencyPathsTable(bomJson, grypeMatches, options = {}) {
-  const { parents } = buildGraphFromBOM(bomJson);
-  const maxPathsPerPkg = options.maxPathsPerPkg ?? 3;
-  const maxDepth = options.maxDepth ?? 10;
-
-  const rows = []; // [Severity, Module, Package, Depth0..]
-  for (const m of (grypeMatches || [])) {
-    const sev = (m?.vulnerability?.severity || "UNKNOWN").toUpperCase();
-    const pkg = `${m?.artifact?.name || "unknown"}:${m?.artifact?.version || "unknown"}`;
-
-    const paths = findPathsToTarget(pkg, parents, maxPathsPerPkg, maxDepth);
-    if (paths.length === 0) {
-      // No path: module unknown -> leave empty; still record row
-      rows.push([sev, "", pkg]);
-      continue;
-    }
-    for (const p of paths) {
-      // p: [root, ..., target]
-      const moduleLabel = stripVersion(p[0] || "");
-      const inner = p.slice(1, -1); // skip root, skip target
-      const depths = inner.map(stripVersion);
-      rows.push([sev, moduleLabel, pkg, ...depths]);
-    }
-  }
-
-  // Sort rows by severity (CRITICAL..LOW..UNKNOWN)
-  const sevIdx = s => ORDER.indexOf(s);
-  rows.sort((a, b) => sevIdx(a[0]) - sevIdx(b[0]));
-
-  // Determine max depth columns
-  let maxLen = 0;
-  for (const r of rows) if (r.length > maxLen) maxLen = r.length;
-  const depthCols = Array.from({ length: Math.max(0, maxLen - 3) }, (_, i) => `Depth${i}`);
-
-  return { rows, depthCols };
+function normalizeFinding(raw) {
+  // Adapt to Grype JSON shape (v0.80+)
+  // We expect fields like: vulnerability.id, artifact.name/version, related, fix, cvss, severity...
+  const v = raw?.vulnerability || {};
+  const a = raw?.artifact || raw?.package || {};
+  const ids = {
+    ghsa: (v.id || "").startsWith("GHSA-") ? v.id : (Array.isArray(v.aliases) ? v.aliases.find(x => x.startsWith("GHSA-")) : undefined),
+    cve: (v.id || "").startsWith("CVE-") ? v.id : (Array.isArray(v.aliases) ? v.aliases.find(x => x.startsWith("CVE-")) : undefined),
+  };
+  const id = v.id || ids.ghsa || ids.cve || "UNKNOWN-ID";
+  const aliases = Array.isArray(v.aliases) ? v.aliases : [];
+  const severity = normalizeSeverity(v.severity);
+  const cvss = Array.isArray(v.cvss) ? v.cvss.map(c => ({
+    source: c.source,
+    score: typeof c.metrics?.baseScore === "number" ? c.metrics.baseScore : c.baseScore || c.score,
+    vector: c.vector || c.vectorString,
+    severity: normalizeSeverity(c.severity || v.severity),
+  })) : [];
+  const pkg = {
+    name: a.name || a.pkgName || a.package || "unknown",
+    version: a.version || a.pkgVersion || a.versionConstraint || "-",
+    type: a.type || a.pkgType || a.language || undefined,
+    purl: a.purl || undefined,
+  };
+  const item = {
+    id,
+    aliases,
+    url: pickPreferredUrl(ids, v.dataSource ? [v.dataSource] : []),
+    severity,
+    cvss,
+    cvss_max: cvssMax(cvss),
+    description: v.description || "",
+    data_source: v.dataSource || "",
+    fix: v.fix ? {
+      available: v.fix.state === "fixed" || (Array.isArray(v.fix.versions) && v.fix.versions.length > 0),
+      fixed_in: Array.isArray(v.fix.versions) ? v.fix.versions : [],
+    } : undefined,
+    package: pkg,
+    locations: Array.isArray(raw.matchDetails) ? raw.matchDetails.map(d => d.searchedBy?.location || d.matcher || "").filter(Boolean) : [],
+    match_key: matchKey(id, pkg),
+    related: Array.isArray(v.relatedVulnerabilities) ? v.relatedVulnerabilities : [],
+  };
+  return item;
 }
 
-function renderPathsMarkdownTable(paths) {
-  const { rows, depthCols } = paths;
-  const headers = ["Severity", "Module", "Package", ...depthCols];
-  const sep = headers.map(() => "---");
-
-  const lines = [];
-  lines.push(`| ${headers.join(" | ")} |`);
-  lines.push(`| ${sep.join(" | ")} |`);
-
-  for (const r of rows) {
-    const sev = r[0];
-    const mod = r[1];
-    const pkg = r[2];
-    const cells = r.slice(3);
-    const padded = [...cells, ...Array(Math.max(0, depthCols.length - cells.length)).fill("")].slice(0, depthCols.length);
-    lines.push(`| **${sev}** | \`${mod}\` | \`${pkg}\` | ${padded.map(x => (x ? `\`${x}\`` : "")).join(" | ")} |`);
-  }
-  return lines.join("\n");
+/**
+ * Summaries by severity for an array of normalized items.
+ */
+function summarizeBySeverity(items) {
+  const sum = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
+  for (const it of items) sum[normalizeSeverity(it.severity)]++;
+  const total = items.length;
+  return { total, by_severity: sum };
 }
 
-function buildMermaidGraphFromBOMImproved(bomJson, grypeMatches, graphMax = 150) {
-  const { adj, parents } = buildGraphFromBOM(bomJson);
-  const vulnerable = new Set((grypeMatches || []).map(m => `${m?.artifact?.name || "unknown"}:${m?.artifact?.version || "unknown"}`));
+/**
+ * Compute diff between two arrays of normalized items (by match_key).
+ * Returns { new:[], removed:[], unchanged_count:number }
+ */
+function computeDiff(baseItems, headItems) {
+  const baseMap = new Map(baseItems.map(it => [it.match_key, it]));
+  const headMap = new Map(headItems.map(it => [it.match_key, it]));
+  const NEW = [];
+  const REMOVED = [];
+  let UNCHANGED = 0;
 
-  const keep = new Set(); const queue = [];
-  for (const v of vulnerable) { if (!keep.has(v)) { keep.add(v); queue.push(v); } }
-  while (queue.length && keep.size < graphMax) {
-    const cur = queue.shift();
-    for (const p of (parents.get(cur) || [])) {
-      if (!keep.has(p)) { keep.add(p); queue.push(p); if (keep.size >= graphMax) break; }
-    }
+  for (const [k, hv] of headMap.entries()) {
+    if (!baseMap.has(k)) NEW.push(hv);
+    else UNCHANGED++;
+  }
+  for (const [k, bv] of baseMap.entries()) {
+    if (!headMap.has(k)) REMOVED.push(bv);
   }
 
-  let idx = 0; const idMap = new Map(); const idFor = (l)=>{ if(!idMap.has(l)) idMap.set(l,`n${idx++}`); return idMap.get(l); };
-  const lines = []; lines.push("graph LR");
-  for (const [parent, children] of adj) {
-    if (!keep.has(parent)) continue;
-    const pid = idFor(parent);
-    lines.push(`${pid}["${parent}"]`);
-    for (const ch of children) {
-      if (!keep.has(ch)) continue;
-      const cid = idFor(ch);
-      lines.push(`${pid} --> ${cid}`);
-    }
-  }
-  for (const v of vulnerable) { if (keep.has(v)) { const vid = idFor(v); lines.push(`style ${vid} fill:#ffe0e0,stroke:#d33,stroke-width:2px`); } }
-  return lines.join("\n");
-}
+  // Deterministic ordering: severity desc (critical first), then id+package
+  const keyStr = (it) => `${it.id}::${it.package?.name || ""}::${it.package?.version || ""}`;
+  const sortFn = (a, b) => {
+    const s = severityRank(a.severity) - severityRank(b.severity);
+    if (s !== 0) return s;
+    return keyStr(a).localeCompare(keyStr(b));
+    };
+  NEW.sort(sortFn);
+  REMOVED.sort(sortFn);
 
-function buildMarkdownReport({
-  baseLabel, baseInput, baseSha, baseCommitLine,
-  headLabel, headInput, headSha, headCommitLine,
-  minSeverity, counts, table
-}) {
-  const md = [];
-  md.push("### Vulnerability Diff (Syft + Grype)\n");
-  md.push(`- **Base**: \`${baseLabel}\` (_input:_ \`${baseInput}\`) → \`${shortSha(baseSha)}\``);
-  md.push(`  - ${baseCommitLine}`);
-  md.push(`- **Head**: \`${headLabel}\` (_input:_ \`${headInput}\`) → \`${shortSha(headSha)}\``);
-  md.push(`  - ${headCommitLine}`);
-  md.push(`- **Min severity**: \`${minSeverity}\``);
-  md.push(`- **Counts**: NEW=${counts.new} · REMOVED=${counts.removed} · UNCHANGED=${counts.unchanged}\n`);
-  md.push("#### Diff Table");
-  md.push(table);
-  return md.join("\n");
+  return { new: NEW, removed: REMOVED, unchanged_count: UNCHANGED };
 }
 
 module.exports = {
-  buildMarkdownReport,
-  buildDependencyPathsTable,
-  renderPathsMarkdownTable,
-  buildMermaidGraphFromBOMImproved,
-  ORDER
+  normalizeFinding,
+  summarizeBySeverity,
+  computeDiff,
+  matchKey,
+  shortSha,
+  pickPreferredUrl,
 };

@@ -1,69 +1,71 @@
-const core = require("@actions/core");
-const exec = require("@actions/exec");
-const fs = require("fs");
+/**
+ * SBOM generation: prefer CycloneDX Maven when a Maven reactor is detected,
+ * otherwise fallback to Syft scanning a path.
+ *
+ * Outputs a path to a CycloneDX JSON SBOM file.
+ */
+
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+const execFileP = promisify(execFile);
 const path = require("path");
+const fs = require("fs/promises");
 
-async function ensureSyft() {
-  await exec.exec("bash", ["-lc", "command -v syft >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin"]);
+async function fileExists(p) {
+  try { await fs.access(p); return true; } catch { return false; }
 }
 
-// Pure Syft directory scan (fallback)
-async function generateSbomSyftDir(sourceDir, outFile) {
-  await ensureSyft();
-  await exec.exec("bash", ["-lc", `syft packages dir:${sourceDir} -o cyclonedx-json > ${outFile}`], { cwd: sourceDir });
-  core.info(`SBOM (Syft dir) written: ${outFile}`);
+async function hasMavenProject(rootDir) {
+  // Simple heuristic: any pom.xml in root or submodule triggers Maven path.
+  const pom = path.join(rootDir, "pom.xml");
+  return fileExists(pom);
 }
 
-// Try Maven CycloneDX plugin for accurate dependency SBOM
-async function generateSbomMaven(rootDir, outFile) {
-  // Use a pinned plugin version for reproducibility
-  const cmd = [
-    "mvn",
-    "-q",
-    "-DskipTests",
-    "-Dcyclonedx.skipAttach=true",
-    "org.cyclonedx:cyclonedx-maven-plugin:2.7.10:makeAggregateBom",
-    "-DoutputFormat=json",
-    "-DoutputName=sbom"
-  ].join(" ");
+async function run(cmd, args, opts = {}) {
+  const { stdout, stderr } = await execFileP(cmd, args, { ...opts });
+  return { stdout, stderr };
+}
 
-  await exec.exec("bash", ["-lc", cmd], { cwd: rootDir });
+/**
+ * Generate SBOM with CycloneDX Maven (json).
+ * @returns {Promise<string>} path to generated sbom file
+ */
+async function genSbomCycloneDx(rootDir, outDir) {
+  // Ensure outDir
+  await fs.mkdir(outDir, { recursive: true });
+  // Use cyclonedx-maven-plugin if available
+  // Generate at target/sbom-cyclonedx.json then copy into outDir
+  await run("mvn", ["-q", "-DskipTests", "org.cyclonedx:cyclonedx-maven-plugin:2.7.10:makeAggregateBom"], { cwd: rootDir });
+  // Default output by plugin:
+  const candidate = path.join(rootDir, "target", "bom.json");
+  const dst = path.join(outDir, "sbom-cyclonedx.json");
+  await fs.copyFile(candidate, dst);
+  return dst;
+}
 
-  // Look for the resulting SBOM (target/sbom.json preferred; fallback to any target/{sbom,bom}.json)
-  const candidateA = path.join(rootDir, "target", "sbom.json");
-  if (fs.existsSync(candidateA)) {
-    await exec.exec("bash", ["-lc", `cp ${JSON.stringify(candidateA)} ${JSON.stringify(outFile)}`]);
-    core.info(`SBOM (Maven CycloneDX) written: ${outFile}`);
-    return;
+/**
+ * Generate SBOM with Syft scanning the directory.
+ */
+async function genSbomSyft(rootDir, outDir) {
+  await fs.mkdir(outDir, { recursive: true });
+  const out = path.join(outDir, "sbom-syft.json");
+  await run("syft", ["dir:"+rootDir, "-o", "cyclonedx-json", "--file", out]);
+  return out;
+}
+
+/**
+ * Decide which SBOM path to use and return { path, tool }.
+ */
+async function generateSbom(rootDir, outDir) {
+  if (await hasMavenProject(rootDir)) {
+    const p = await genSbomCycloneDx(rootDir, outDir);
+    return { path: p, tool: "cyclonedx_maven" };
+  } else {
+    const p = await genSbomSyft(rootDir, outDir);
+    return { path: p, tool: "syft" };
   }
-
-  let found = "";
-  await exec.exec("bash", ["-lc", `set -e; find . -type f \\( -name sbom.json -o -name bom.json \\) -path '*/target/*' | head -n1`], {
-    cwd: rootDir,
-    listeners: { stdout: d => (found += d.toString()) }
-  });
-  found = found.trim();
-  if (found && fs.existsSync(path.resolve(rootDir, found))) {
-    await exec.exec("bash", ["-lc", `cp ${JSON.stringify(path.resolve(rootDir, found))} ${JSON.stringify(outFile)}`]);
-    core.info(`SBOM (Maven CycloneDX) written: ${outFile}`);
-    return;
-  }
-
-  core.warning("CycloneDX Maven plugin did not produce sbom.json; falling back to Syft directory scan.");
-  await generateSbomSyftDir(rootDir, outFile);
 }
 
-// Auto: if pom.xml exists, use Maven CycloneDX; else Syft dir
-async function generateSbomAuto(rootDir, outFile) {
-  if (fs.existsSync(path.join(rootDir, "pom.xml"))) {
-    try {
-      await generateSbomMaven(rootDir, outFile);
-      return;
-    } catch (e) {
-      core.warning(`Maven CycloneDX failed (${e.message}). Falling back to Syft dir scan.`);
-    }
-  }
-  await generateSbomSyftDir(rootDir, outFile);
-}
-
-module.exports = { generateSbomAuto };
+module.exports = {
+  generateSbom,
+};

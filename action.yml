@@ -1,43 +1,43 @@
-name: "Vulnerability Diff Action"
-description: "Compare vulnerabilities between two refs using Syft+Grype → base.json, head.json, diff.json → Markdown/HTML/PDF renderers"
+name: "Vulnerability Diff Action (sec-open/vuln-diff-action)"
+description: "Compare vulnerabilities between two Git refs using Syft/Grype; render Markdown (PR, Summary), HTML bundle, and PDF."
 author: "sec-open"
-runs:
-  using: "node20"
-  main: "dist/index.js"
+branding:
+  icon: "shield"
+  color: "blue"
 
 inputs:
   base_ref:
-    description: "Base branch/tag/SHA"
+    description: "Base Git ref (branch/tag/SHA)"
     required: true
   head_ref:
-    description: "Head branch/tag/SHA"
+    description: "Head Git ref (branch/tag/SHA)"
     required: true
   path:
-    description: "Directory to scan"
+    description: "Path to scan (working directory of the project)"
     required: false
     default: "."
-  build_command:
-    description: "Optional build command (e.g. mvn -q -DskipTests package)"
-    required: false
-    default: ""
   min_severity:
-    description: "LOW|MEDIUM|HIGH|CRITICAL"
+    description: "Minimum severity to include (CRITICAL|HIGH|MEDIUM|LOW|UNKNOWN)"
     required: false
     default: "LOW"
   write_summary:
-    description: "Write GitHub job summary (markdown)"
+    description: "Write Job Summary (Markdown)"
+    required: false
+    default: "true"
+  pr_comment:
+    description: "Post PR comment with hovercards (requires github_token)"
     required: false
     default: "true"
   report_html:
-    description: "Generate interactive HTML report"
+    description: "Generate deployable HTML bundle"
     required: false
     default: "true"
   report_pdf:
-    description: "Generate PDF (cover + main + landscape)"
+    description: "Generate PDF report (requires Puppeteer, if integrated)"
     required: false
     default: "true"
   upload_artifact:
-    description: "Upload artifacts (JSON/HTML/PDF)"
+    description: "Upload artifact with HTML bundle and PDF"
     required: false
     default: "true"
   artifact_name:
@@ -45,34 +45,34 @@ inputs:
     required: false
     default: "vulnerability-diff"
   title_logo_url:
-    description: "Optional logo URL for cover/header/footer"
+    description: "URL for the report cover logo (PDF/HTML)"
     required: false
     default: ""
   graph_max_nodes:
-    description: "Max graph nodes (mermaid)"
+    description: "Max nodes for Mermaid graphs"
     required: false
     default: "150"
-  pr_comment:
-    description: "Create/update PR comment with NEW vulns"
-    required: false
-    default: "false"
-  pr_comment_marker:
-    description: "Hidden marker for updatable PR comment"
-    required: false
-    default: "<!-- vuln-diff-action:comment -->"
   github_token:
-    description: "GitHub token for PR comment"
+    description: "GitHub token for PR comments"
     required: false
     default: ""
   slack_webhook_url:
-    description: "Optional Slack incoming webhook"
+    description: "Slack webhook URL to notify NEW vulnerabilities"
     required: false
     default: ""
 
 outputs:
-  new_count:
-    description: "Number of NEW vulns"
-  removed_count:
-    description: "Number of REMOVED vulns"
-  unchanged_count:
-    description: "Number of UNCHANGED vulns"
+  base_json_path:
+    description: "Path to base.json"
+  head_json_path:
+    description: "Path to head.json"
+  diff_json_path:
+    description: "Path to diff.json"
+  report_html_path:
+    description: "Path to the HTML bundle directory"
+  report_pdf_path:
+    description: "Path to the generated PDF (if enabled)"
+
+runs:
+  using: "node20"
+  main: "dist/index.js"

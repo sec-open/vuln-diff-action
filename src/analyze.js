@@ -1,183 +1,191 @@
-// src/analyze.js
-// Phase 1 — Analysis: produce normalized JS objects for base/head (SBOM + Grype)
-// Adds an orchestrator: analyzeBranches(opts) to support older entrypoints.
+/**
+ * Analyze two Git refs: generate SBOM, scan with Grype, normalize, summarize,
+ * and emit base.json, head.json, diff.json (schema v2.0.0).
+ */
 
 const path = require("path");
-const fs = require("fs");
-const exec = require("@actions/exec");
-const { generateSbomAuto } = require("./sbom");
-const { scanSbom } = require("./grype");
-const git = require("./git");
+const fs = require("fs/promises");
+const { fetchAll, resolveRef, commitInfo } = require("./git");
+const { generateSbom } = require("./sbom");
+const { runGrypeOnSbom } = require("./grype");
+const { normalizeFinding, summarizeBySeverity, computeDiff, shortSha } = require("./report");
+const { normalizeSeverity } = require("./severity");
 
-// ---- tiny shell helper ----
-async function sh(cmd, opts = {}) {
-  return exec.exec("bash", ["-lc", cmd], opts);
-}
+async function ensureDir(dir) { await fs.mkdir(dir, { recursive: true }); }
 
-function pick(obj, keys) {
-  const out = {};
-  for (const k of keys) if (obj && Object.prototype.hasOwnProperty.call(obj, k)) out[k] = obj[k];
-  return out;
-}
+async function getToolVersions() {
+  const { execFile } = require("child_process");
+  const { promisify } = require("util");
+  const execFileP = promisify(execFile);
 
-function normalizeMatches(grypeJson) {
-  const matches = Array.isArray(grypeJson?.matches) ? grypeJson.matches : [];
-  return matches.map((m) => {
-    const v = m.vulnerability || {};
-    const a = m.artifact || {};
-    // Keep everything that might be useful later for renderers
-    return {
-      id: v.id || "",
-      severity: v.severity || "UNKNOWN",
-      dataSource: v.dataSource || "",
-      description: v.description || "",
-      urls: v.urls || [],
-      cvss: v.cvss || [],
-      advisories: v.advisories || [],
-      package: a.name || "",
-      version: a.version || "",
-      type: a.type || "",
-      purl: a.purl || "",
-      locations: a.locations || [],
-      // Keep related IDs if any
-      related: Array.isArray(m.relatedVulnerabilities) ? m.relatedVulnerabilities.map(r => r.id) : [],
-      _raw: m
-    };
-  });
-}
-
-async function analyzeOneRef(refLabel, worktreeDir, scanPath, outSbomPath) {
-  // SBOM (CycloneDX if Maven; else Syft directory)
-  await generateSbomAuto(path.join(worktreeDir, scanPath), outSbomPath);
-  // Grype scan
-  const grype = await scanSbom(outSbomPath);
-  const normalized = normalizeMatches(grype);
-  return { sbomPath: outSbomPath, grype: grype, items: normalized };
-}
-
-function makeDiff(baseItems, headItems, minSeverity) {
-  const sevOrder = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
-  const sevRank = (s) => {
-    const i = sevOrder.indexOf((s || "").toUpperCase());
-    return i >= 0 ? i : sevOrder.length - 1;
-  };
-  const meets = (s) => sevRank(s) <= sevRank(minSeverity);
-  const key = (x) => (x.id || "") + "§" + (x.package || "") + "§" + (x.version || "");
-  const map = (arr) => {
-    const m = new Map();
-    for (const x of arr) if (meets(x.severity)) m.set(key(x), x);
-    return m;
-  };
-  const mb = map(baseItems);
-  const mh = map(headItems);
-  const news = [];
-  const removed = [];
-  const unchanged = [];
-  for (const [k, v] of mh) { if (!mb.has(k)) news.push(v); else unchanged.push(v); }
-  for (const [k, v] of mb) { if (!mh.has(k)) removed.push(v); }
-
-  // Sort by severity desc, then id/package
-  const cmp = (a, b) => {
-    const d = sevRank(a.severity) - sevRank(b.severity);
-    if (d !== 0) return d;
-    return (a.id + a.package).localeCompare(b.id + b.package);
-  };
-  news.sort(cmp);
-  removed.sort(cmp);
-  unchanged.sort(cmp);
-
-  return { news, removed, unchanged };
-}
-
-/**
- * High-level orchestrator used by some entrypoints (e.g., older tags).
- * - Resolves refs to SHAs
- * - Creates worktrees
- * - (Optionally) runs build commands
- * - Generates SBOMs and scans with Grype
- * - Returns normalized base/head objects and diff
- *
- * @param {Object} opts
- * @param {string} opts.workspace   Runner workspace (process.cwd() if not set)
- * @param {string} opts.baseRef     Base ref (branch/tag/SHA)
- * @param {string} opts.headRef     Head ref (branch/tag/SHA)
- * @param {string} [opts.scanPath]  Directory to scan (default ".")
- * @param {string} [opts.buildCommand] Optional build command to run in each worktree
- * @param {string} [opts.minSeverity]  LOW|MEDIUM|HIGH|CRITICAL (default LOW)
- * @returns {Promise<{base:{ref,commit,message?,sbomPath,grype,items}, head:{...}, diff:{news,removed,unchanged}}>}
- */
-async function analyzeBranches(opts) {
-  const workspace = opts?.workspace || process.cwd();
-  const scanPath = opts?.scanPath || ".";
-  const buildCommand = opts?.buildCommand || "";
-  const minSeverity = (opts?.minSeverity || "LOW").toUpperCase();
-
-  // Resolve refs and prepare worktrees
-  await git.sh("git fetch --all --tags --prune --force");
-  await git.ensureRefLocal(opts.baseRef);
-  await git.ensureRefLocal(opts.headRef);
-
-  const baseSha = await git.resolveRefToSha(opts.baseRef);
-  const headSha = await git.resolveRefToSha(opts.headRef);
-  const baseLabel = git.guessLabel(opts.baseRef);
-  const headLabel = git.guessLabel(opts.headRef);
-
-  const workdir = workspace;
-  const baseDir = path.join(workdir, "__base__");
-  const headDir = path.join(workdir, "__head__");
-  await fs.promises.mkdir(baseDir, { recursive: true });
-
-  // Current HEAD SHA to decide if we need a separate head worktree
-  let currentSha = "";
-  await exec.exec("bash", ["-lc", "git rev-parse HEAD"], {
-    listeners: { stdout: (d) => (currentSha += d.toString()) },
-  });
-  currentSha = currentSha.trim();
-
-  await git.addWorktree(baseDir, baseSha);
-  const createdHeadWorktree = currentSha !== headSha;
-  if (createdHeadWorktree) {
-    await fs.promises.mkdir(headDir, { recursive: true });
-    await git.addWorktree(headDir, headSha);
-  }
-
-  try {
-    if (buildCommand) {
-      await sh(buildCommand, { cwd: baseDir });
-      await sh(buildCommand, { cwd: createdHeadWorktree ? headDir : workdir });
-    }
-
-    // SBOM + Grype
-    const baseSbomPath = path.join(workdir, "sbom-base.json");
-    const headSbomPath = path.join(workdir, "sbom-head.json");
-
-    const base = await analyzeOneRef(baseLabel, baseDir, scanPath, baseSbomPath);
-    const head = await analyzeOneRef(headLabel, createdHeadWorktree ? headDir : workdir, scanPath, headSbomPath);
-
-    // Add minimal git info (commit message one-liner)
-    let baseLine = "";
-    let headLine = "";
-    try { baseLine = await git.commitLine(baseSha); } catch {}
-    try { headLine = await git.commitLine(headSha); } catch {}
-
-    const diff = makeDiff(base.items, head.items, minSeverity);
-
-    return {
-      base: { ref: baseLabel, commit: baseSha, message: baseLine, ...pick(base, ["sbomPath", "grype", "items"]) },
-      head: { ref: headLabel, commit: headSha, message: headLine, ...pick(head, ["sbomPath", "grype", "items"]) },
-      diff
-    };
-  } finally {
-    // Cleanup worktrees
-    try { await git.removeWorktree(baseDir); } catch {}
+  async function ver(cmd, args) {
     try {
-      if (createdHeadWorktree && fs.existsSync(headDir)) await git.removeWorktree(headDir);
-    } catch {}
+      const { stdout, stderr } = await execFileP(cmd, args);
+      return (stdout || stderr || "").trim().split(/\r?\n/)[0];
+    } catch {
+      return undefined;
+    }
   }
+
+  return {
+    syft: await ver("syft", ["version"]),
+    grype: await ver("grype", ["version"]),
+    cyclonedx_maven: await ver("mvn", ["-q", "help:evaluate", "-Dexpression=project.version"]),
+    node: process.version.replace(/^v/,""),
+  };
 }
 
-module.exports = {
-  analyzeOneRef,
-  makeDiff,
-  analyzeBranches, // <- added for older entrypoints expecting it
-};
+function filterByMinSeverity(items, minSeverity = "LOW") {
+  const order = ["CRITICAL","HIGH","MEDIUM","LOW","UNKNOWN"];
+  const idx = order.indexOf(normalizeSeverity(minSeverity));
+  const allowed = new Set(order.slice(0, idx + 1)); // include UNKNOWN only if idx covers it (never)
+  // Ensure UNKNOWN is included only when minSeverity is UNKNOWN
+  if (normalizeSeverity(minSeverity) === "UNKNOWN") allowed.add("UNKNOWN");
+  return items.filter(it => allowed.has(normalizeSeverity(it.severity)));
+}
+
+async function analyzeRefs(opts) {
+  const {
+    cwd = process.cwd(),
+    pathRoot = ".",
+    baseRef,
+    headRef,
+    minSeverity = "LOW",
+    outDir = path.join(process.cwd(), "vuln-diff-output"),
+    actionMeta = { name: "sec-open/vuln-diff-action", version: "", commit: "", ref: "" },
+    repo = "",
+  } = opts;
+
+  if (!baseRef || !headRef) throw new Error("Missing baseRef/headRef");
+
+  await fetchAll();
+  const baseSha = await resolveRef(baseRef);
+  const headSha = await resolveRef(headRef);
+
+  const baseInfo = await commitInfo(baseSha);
+  const headInfo = await commitInfo(headSha);
+
+  const tools = await getToolVersions();
+
+  await ensureDir(outDir);
+
+  // SBOM + Grype for each ref (we assume same working directory contents; typical in Actions we checkout once at head)
+  // For determinism, we scan the provided pathRoot as is.
+  const sbomBase = await generateSbom(path.resolve(cwd, pathRoot), outDir);
+  const grypeBase = await runGrypeOnSbom(sbomBase.path);
+
+  const sbomHead = await generateSbom(path.resolve(cwd, pathRoot), outDir);
+  const grypeHead = await runGrypeOnSbom(sbomHead.path);
+
+  // Normalize
+  const baseItemsAll = Array.isArray(grypeBase.matches) ? grypeBase.matches.map(normalizeFinding) : [];
+  const headItemsAll = Array.isArray(grypeHead.matches) ? grypeHead.matches.map(normalizeFinding) : [];
+
+  const baseItems = filterByMinSeverity(baseItemsAll, minSeverity);
+  const headItems = filterByMinSeverity(headItemsAll, minSeverity);
+
+  // Summaries
+  const baseSummary = summarizeBySeverity(baseItems);
+  const headSummary = summarizeBySeverity(headItems);
+
+  // Build base.json and head.json
+  const now = new Date().toISOString();
+  const baseJson = {
+    schema_version: "2.0.0",
+    generated_at: now,
+    parameters: { min_severity: normalizeSeverity(minSeverity) },
+    tools,
+    git: {
+      repo,
+      ref: baseRef,
+      sha: baseInfo.sha,
+      sha_short: baseInfo.sha_short,
+      commit_subject: baseInfo.subject,
+      author: baseInfo.author,
+      authored_at: baseInfo.date,
+    },
+    sbom: {
+      path: sbomBase.path,
+      format: "cyclonedx-json",
+      component_count: grypeBase?.descriptor?.relationships?.length || undefined,
+      tool: sbomBase.tool,
+    },
+    summary: baseSummary,
+    vulnerabilities: baseItems,
+  };
+
+  const headJson = {
+    schema_version: "2.0.0",
+    generated_at: now,
+    parameters: { min_severity: normalizeSeverity(minSeverity) },
+    tools,
+    git: {
+      repo,
+      ref: headRef,
+      sha: headInfo.sha,
+      sha_short: headInfo.sha_short,
+      commit_subject: headInfo.subject,
+      author: headInfo.author,
+      authored_at: headInfo.date,
+    },
+    sbom: {
+      path: sbomHead.path,
+      format: "cyclonedx-json",
+      component_count: grypeHead?.descriptor?.relationships?.length || undefined,
+      tool: sbomHead.tool,
+    },
+    summary: headSummary,
+    vulnerabilities: headItems,
+  };
+
+  // Diff
+  const diff = computeDiff(baseItems, headItems);
+
+  // Aggregate severity x state
+  const sevLevels = ["CRITICAL","HIGH","MEDIUM","LOW","UNKNOWN"];
+  const by_sev_state = Object.fromEntries(sevLevels.map(s => [s, { NEW: 0, REMOVED: 0, UNCHANGED: 0 }]));
+  for (const it of diff.new) by_sev_state[normalizeSeverity(it.severity)].NEW++;
+  for (const it of diff.removed) by_sev_state[normalizeSeverity(it.severity)].REMOVED++;
+  // unchanged_count is a number; distribute by severity by intersecting match_keys
+  const baseMap = new Map(baseItems.map(i => [i.match_key, i]));
+  for (const it of headItems) {
+    if (baseMap.has(it.match_key)) by_sev_state[normalizeSeverity(it.severity)].UNCHANGED++;
+  }
+
+  const diffJson = {
+    schema_version: "2.0.0",
+    generated_at: now,
+    parameters: { min_severity: normalizeSeverity(minSeverity) },
+    base: { ref: baseRef, sha: baseInfo.sha, short_sha: shortSha(baseInfo.sha) },
+    head: { ref: headRef, sha: headInfo.sha, short_sha: shortSha(headInfo.sha) },
+    tools,
+    action: actionMeta,
+    repo,
+    summary: {
+      totals: {
+        NEW: diff.new.length,
+        REMOVED: diff.removed.length,
+        UNCHANGED: diff.unchanged_count,
+      },
+      by_severity_and_state: by_sev_state,
+    },
+    changes: {
+      new: diff.new,
+      removed: diff.removed,
+      unchanged: undefined,           // not storing list, only count
+      unchanged_count: diff.unchanged_count,
+    },
+  };
+
+  // Persist
+  const basePath = path.join(outDir, "base.json");
+  const headPath = path.join(outDir, "head.json");
+  const diffPath = path.join(outDir, "diff.json");
+  await fs.writeFile(basePath, JSON.stringify(baseJson, null, 2));
+  await fs.writeFile(headPath, JSON.stringify(headJson, null, 2));
+  await fs.writeFile(diffPath, JSON.stringify(diffJson, null, 2));
+
+  return { basePath, headPath, diffPath, baseJson, headJson, diffJson };
+}
+
+module.exports = { analyzeRefs };

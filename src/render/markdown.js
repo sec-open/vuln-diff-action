@@ -1,95 +1,110 @@
-// src/render/markdown.js
-// Phase 3 — Markdown-only components (job summary, PR text, Slack text helpers)
-//
-// IMPORTANT
-// - Do NOT wrap vulnerability IDs in backticks. GitHub hovercards only appear
-//   on regular links like https://github.com/advisories/GHSA-xxxx.
-// - Do NOT add a `title` attribute to links; browsers show their own tooltip
-//   that obscures GitHub’s hovercard experience in supported contexts.
+/**
+ * Markdown renderers:
+ *  - PR comment table (with GitHub hovercards for GHSA links).
+ *  - Job Summary table (with HTML anchors + title tooltips) + header summary block.
+ *
+ * Columns: Severity | Vulnerability | Package | Branch
+ * Package format: `name:version`
+ */
 
-function bold(s) { return `**${String(s || "")}**`; }
-function code(s) { return `\`${String(s || "")}\``; }
+const { ORDER: SEV_ORDER, STATUS_ORDER, severityRank } = require("../severity");
 
-// Plain Markdown link WITHOUT a `title` attribute.
-function mdLink(text, href) {
-  const safeText = String(text || "");
-  const safeHref = String(href || "#");
-  return `[${safeText}](${safeHref})`;
+function formatPkg(name, version) {
+  const n = name || "unknown";
+  const v = (version && String(version).trim()) ? String(version).trim() : "-";
+  return `\`${n}:${v}\``;
 }
 
-// Prefer a GHSA alias for richer GitHub hovercards. If x.id is already GHSA, use it.
-function pickGhsaAlias(x) {
-  const id = x?.id || "";
-  if (/^GHSA-[A-Za-z0-9-]+$/.test(id)) return id;
-  const aliases = Array.isArray(x?.aliases) ? x.aliases : [];
-  for (const a of aliases) {
-    if (typeof a === "string" && /^GHSA-[A-Za-z0-9-]+$/.test(a)) return a;
-  }
-  return null;
-}
-
-// Canonical URL for a vulnerability ID.
-function hrefForId(id) {
-  if (!id) return "#";
-  if (/^GHSA-[A-Za-z0-9-]+$/.test(id)) return `https://github.com/advisories/${id}`;
-  if (/^CVE-\d{4}-\d{4,7}$/.test(id)) return `https://nvd.nist.gov/vuln/detail/${id}`;
+function advisoryLink(v) {
+  if (v?.ids?.ghsa) return `https://github.com/advisories/${v.ids.ghsa}`;
+  if (v?.ids?.cve) return `https://nvd.nist.gov/vuln/detail/${v.ids.cve}`;
+  if (v?.url) return v.url;
   return "#";
 }
 
-// Build the "Vulnerability" cell prioritizing GHSA links for GitHub hovercards.
-function vulnLinkCell(x) {
-  const ghsa = pickGhsaAlias(x);
-  const id = ghsa || x?.id || "UNKNOWN";
-  const href = x?.url && /^https:\/\/github\.com\/advisories\/GHSA-/.test(x.url) ? x.url : hrefForId(id);
-  // No `title` attribute -> no browser tooltip; if the context supports hovercards, GitHub will show it.
-  return mdLink(id, href);
+function idText(v) {
+  return v?.ids?.ghsa || v?.ids?.cve || v?.id || "UNKNOWN-ID";
 }
 
-// Linkify IDs in free text (kept for compatibility with other markdown blocks).
-function linkifyIdsMarkdown(s) {
-  if (!s) return s;
-  let out = String(s);
-  out = out.replace(/\b(GHSA-[A-Za-z0-9-]{9,})\b/g, (_m, id) => `[${id}](https://github.com/advisories/${id})`);
-  out = out.replace(/\b(CVE-\d{4}-\d{4,7})\b/g, (_m, id) => `[${id}](https://nvd.nist.gov/vuln/detail/${id})`);
-  return out;
-}
-
-// Internal: build rows for the diff table (used by both summary and generic render).
-function buildDiffRows(diff, baseLabel, headLabel) {
+function rowsFromDiff(diff) {
   const rows = [];
-  rows.push("| Severity | Vulnerability | Package | Version | Branch |");
-  rows.push("|---|---|---|---|---|");
-
-  const pushRows = (arr, branchLabel) => {
-    for (const x of arr || []) {
-      const vulnCell = vulnLinkCell(x); // GHSA-first -> GitHub hovercard (if context supports it)
-      const pkg = x?.package ? code(x.package) : "`unknown`";
-      const ver = x?.version ? code(x.version) : "`-`";
-      rows.push(`| ${bold(x?.severity || "UNKNOWN")} | ${vulnCell} | ${pkg} | ${ver} | ${branchLabel} |`);
-    }
-  };
-
-  // Order: new (head), removed (base), unchanged (BOTH)
-  pushRows(diff?.news, headLabel);
-  pushRows(diff?.removed, baseLabel);
-  pushRows(diff?.unchanged, "BOTH");
+  for (const it of (diff?.changes?.new || [])) rows.push({ item: it, status: "NEW" });
+  for (const it of (diff?.changes?.removed || [])) rows.push({ item: it, status: "REMOVED" });
+  // UNCHANGED are not listed individually; we could add if needed from head∩base
+  // Sort by severity then id+package
+  rows.sort((a, b) => {
+    const s = severityRank(a.item.severity) - severityRank(b.item.severity);
+    if (s !== 0) return s;
+    const ka = `${idText(a.item)}::${a.item.package?.name || ""}::${a.item.package?.version || ""}`;
+    const kb = `${idText(b.item)}::${b.item.package?.name || ""}::${b.item.package?.version || ""}`;
+    return ka.localeCompare(kb);
+  });
   return rows;
 }
 
-// Entry point for the Job Summary table (Actions step summary).
-function renderSummaryTableMarkdown(diff, baseLabel, headLabel) {
-  return buildDiffRows(diff, baseLabel, headLabel).join("\n");
+// --- PR renderer (hovercards) ---
+function renderPrTableMarkdown(diff, baseLabel, headLabel, options = {}) {
+  const rows = rowsFromDiff(diff);
+  const header = `| Severity | Vulnerability | Package | Branch |\n|---|---|---|---|`;
+  const lines = [header];
+  for (const { item, status } of rows) {
+    const sev = `**${item.severity || "UNKNOWN"}**`;
+    const id = idText(item);
+    const url = advisoryLink(item);
+    // For PR: use standard Markdown link => GitHub hovercard for GHSA
+    const vuln = `[${id}](${url})`;
+    const pkg = formatPkg(item.package?.name, item.package?.version);
+    const branch = status === "NEW" ? headLabel || "HEAD" : "BASE";
+    lines.push(`| ${sev} | ${vuln} | ${pkg} | ${status === "NEW" ? "HEAD" : status === "REMOVED" ? "BASE" : "BOTH"} |`);
+  }
+
+  // Optionally add UNCHANGED total line
+  const unchanged = diff?.summary?.totals?.UNCHANGED ?? 0;
+  if (unchanged > 0) {
+    lines.push(`\n> Unchanged: **${unchanged}**`);
+  }
+
+  return lines.join("\n");
 }
 
-// Generic Markdown table (used wherever a full diff table is needed).
-function renderDiffTableMarkdown(diff, baseLabel, headLabel) {
-  return buildDiffRows(diff, baseLabel, headLabel).join("\n");
+// --- Summary renderer (tooltips + header summary) ---
+function renderSummaryTableMarkdown(diff, base, head, actionMeta, baseLabel, headLabel, options = { includeHeaderSummary: true }) {
+  const parts = [];
+  if (options.includeHeaderSummary !== false) {
+    const lines = [];
+    const baseLine = `- Base: \`${base?.git?.ref || baseLabel || "BASE"}\` @ \`${base?.git?.sha_short || ""}\` — ${base?.git?.commit_subject || ""}`;
+    const headLine = `- Head: \`${head?.git?.ref || headLabel || "HEAD"}\` @ \`${head?.git?.sha_short || ""}\` — ${head?.git?.commit_subject || ""}`;
+    const tools = `- Syft ${head?.tools?.syft || ""} · Grype ${head?.tools?.grype || ""} · CycloneDX Maven ${head?.tools?.cyclonedx_maven || ""} · Node ${head?.tools?.node || ""}\n- Action: ${actionMeta?.name || "sec-open/vuln-diff-action"} ${actionMeta?.version || ""} (\`${(actionMeta?.commit || "").slice(0,7)}\`)`;
+    lines.push(`**Summary**`, baseLine, headLine, ``, `**Tools**`, tools, ``);
+    parts.push(lines.join("\n"));
+  }
+
+  const rows = rowsFromDiff(diff);
+  const header = `| Severity | Vulnerability | Package | Branch |\n|---|---|---|---|`;
+  const lines = [header];
+  for (const { item, status } of rows) {
+    const sev = `**${item.severity || "UNKNOWN"}**`;
+    const id = idText(item);
+    const url = advisoryLink(item);
+    // For Summary: use HTML anchor with title to show tooltip
+    const title = `${id} — ${item.package?.name || "unknown"}:${item.package?.version || "-"}`;
+    const vuln = `<a href="${url}" title="${escapeHtml(title)}">${id}</a>`;
+    const pkg = formatPkg(item.package?.name, item.package?.version);
+    lines.push(`| ${sev} | ${vuln} | ${pkg} | ${status === "NEW" ? "HEAD" : status === "REMOVED" ? "BASE" : "BOTH"} |`);
+  }
+  const unchanged = diff?.summary?.totals?.UNCHANGED ?? 0;
+  if (unchanged > 0) {
+    lines.push(`\n> Unchanged: **${unchanged}**`);
+  }
+  parts.push(lines.join("\n"));
+  return parts.join("\n");
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
 module.exports = {
+  renderPrTableMarkdown,
   renderSummaryTableMarkdown,
-  renderDiffTableMarkdown,
-  linkifyIdsMarkdown,
-  bold,
-  code,
 };

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="report-generated-at" content="" />
+    <title>VulnDiff Report</title>
+    <link rel="stylesheet" href="./assets/app.css" />
+</head>
+<body>
+<header class="topbar">
+    <nav class="menu">
+        <a href="#summary">Summary</a>
+        <a href="#overview">Change overview</a>
+        <a href="#diff-table">Vulnerability diff table</a>
+        <a href="#dep-graph">Dependency graph</a>
+        <a href="#dep-graph-base">— base</a>
+        <a href="#dep-graph-head">— head</a>
+        <a href="#dep-path">Dependency path</a>
+        <a href="#dep-path-base">— base</a>
+        <a href="#dep-path-head">— head</a>
+    </nav>
+</header>
+
+<main id="app">
+    <section id="filters" class="filters"></section>
+
+    <section id="summary" class="route"></section>
+
+    <section id="overview" class="route">
+        <div class="grid">
+            <canvas id="chart-states-by-sev"></canvas>
+            <div class="row">
+                <canvas id="chart-donut-new"></canvas>
+                <canvas id="chart-donut-removed"></canvas>
+                <canvas id="chart-totals-per-state"></canvas>
+            </div>
+            <canvas id="chart-heatmap"></canvas>
+            <div id="mini-tables" class="row">
+                <div id="table-base" class="card"></div>
+                <div id="table-head" class="card"></div>
+            </div>
+        </div>
+    </section>
+
+    <section id="diff-table" class="route">
+        <div id="diff-table-container"></div>
+    </section>
+
+    <section id="dep-graph" class="route info">
+        <p>Select “base” or “head”.</p>
+    </section>
+    <section id="dep-graph-base" class="route"><div class="mermaid" id="mermaid-base"></div></section>
+    <section id="dep-graph-head" class="route"><div class="mermaid" id="mermaid-head"></div></section>
+
+    <section id="dep-path" class="route info">
+        <p>Select “base” or “head”.</p>
+    </section>
+    <section id="dep-path-base" class="route"><div id="path-table-base"></div></section>
+    <section id="dep-path-head" class="route"><div id="path-table-head"></div></section>
+</main>
+
+<!-- Vendor (local, sin CDN) -->
+<script src="./assets/chart.umd.js" defer></script>
+<script src="./assets/chartjs-plugin-annotation.min.js" defer></script>
+<script src="./assets/chartjs-plugin-datalabels.min.js" defer></script>
+<script src="./assets/chartjs-chart-matrix.min.js" defer></script>
+<script src="./assets/mermaid.min.js" defer></script>
+
+<!-- App -->
+<script src="./assets/app.js" defer></script>
+</body>
+</html>
