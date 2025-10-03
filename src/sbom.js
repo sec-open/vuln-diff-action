@@ -1,7 +1,8 @@
 /**
- * SBOM generation: prefer CycloneDX Maven when a Maven reactor is detected
- * AND mvn/java are available (we will try to auto-install them).
- * Otherwise fallback to Syft scanning a path.
+ * SBOM generation:
+ *  - Prefer CycloneDX Maven if a reactor is detected and mvn/java are available
+ *    (we auto-install them when necessary).
+ *  - Otherwise fallback to Syft using provided absolute syft binary path.
  */
 
 const { execFile } = require("child_process");
@@ -20,7 +21,6 @@ async function run(cmd, args, opts = {}) {
 
 /**
  * Generate SBOM with CycloneDX Maven (json).
- * @returns {Promise<string>} path to generated sbom file
  */
 async function genSbomCycloneDx(rootDir, outDir) {
   await fs.mkdir(outDir, { recursive: true });
@@ -32,20 +32,22 @@ async function genSbomCycloneDx(rootDir, outDir) {
 }
 
 /**
- * Generate SBOM with Syft scanning the directory.
+ * Generate SBOM with Syft scanning the directory using an absolute syft path.
  */
-async function genSbomSyft(rootDir, outDir) {
+async function genSbomSyftWith(syftBin, rootDir, outDir) {
   await fs.mkdir(outDir, { recursive: true });
   const out = path.join(outDir, "sbom-syft.json");
-  await run("syft", ["dir:"+rootDir, "-o", "cyclonedx-json", "--file", out]);
+  await run(syftBin, ["dir:"+rootDir, "-o", "cyclonedx-json", "--file", out]);
   return out;
 }
 
 /**
- * Decide which SBOM path to use and return { path, tool }.
- * Will attempt to auto-install Maven/Java if a Maven project is detected.
+ * Decide SBOM path and return { path, tool }.
+ * @param {string} rootDir
+ * @param {string} outDir
+ * @param {{ syftPath: string }} bins
  */
-async function generateSbom(rootDir, outDir) {
+async function generateSbom(rootDir, outDir, bins) {
   const mavenDetected = await hasMavenProject(rootDir);
   if (mavenDetected) {
     await ensureJavaMavenIfNeeded({ hasMavenProject: true });
@@ -56,8 +58,7 @@ async function generateSbom(rootDir, outDir) {
     const p = await genSbomCycloneDx(rootDir, outDir);
     return { path: p, tool: "cyclonedx_maven" };
   }
-  // Fallback to Syft
-  const p = await genSbomSyft(rootDir, outDir);
+  const p = await genSbomSyftWith(bins.syftPath, rootDir, outDir);
   return { path: p, tool: "syft" };
 }
 

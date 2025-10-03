@@ -7,9 +7,10 @@ const path = require("path");
 const fs = require("fs/promises");
 const { fetchAll, resolveRef, commitInfo } = require("./git");
 const { generateSbom } = require("./sbom");
-const { runGrypeOnSbom } = require("./grype");
+const { runGrypeOnSbomWith } = require("./grype");
 const { normalizeFinding, summarizeBySeverity, computeDiff, shortSha } = require("./report");
 const { normalizeSeverity } = require("./severity");
+const { ensureAndLocateScannerTools } = require("./tools");
 
 async function ensureDir(dir) { await fs.mkdir(dir, { recursive: true }); }
 
@@ -38,8 +39,7 @@ async function getToolVersions() {
 function filterByMinSeverity(items, minSeverity = "LOW") {
   const order = ["CRITICAL","HIGH","MEDIUM","LOW","UNKNOWN"];
   const idx = order.indexOf(normalizeSeverity(minSeverity));
-  const allowed = new Set(order.slice(0, idx + 1)); // include UNKNOWN only if idx covers it (never)
-  // Ensure UNKNOWN is included only when minSeverity is UNKNOWN
+  const allowed = new Set(order.slice(0, idx + 1));
   if (normalizeSeverity(minSeverity) === "UNKNOWN") allowed.add("UNKNOWN");
   return items.filter(it => allowed.has(normalizeSeverity(it.severity)));
 }
@@ -58,6 +58,7 @@ async function analyzeRefs(opts) {
 
   if (!baseRef || !headRef) throw new Error("Missing baseRef/headRef");
 
+  // Resolve refs
   await fetchAll();
   const baseSha = await resolveRef(baseRef);
   const headSha = await resolveRef(headRef);
@@ -65,17 +66,19 @@ async function analyzeRefs(opts) {
   const baseInfo = await commitInfo(baseSha);
   const headInfo = await commitInfo(headSha);
 
+  // Ensure scanners installed and get absolute paths
+  const bins = await ensureAndLocateScannerTools();
+
   const tools = await getToolVersions();
 
   await ensureDir(outDir);
 
-  // SBOM + Grype for each ref (we assume same working directory contents; typical in Actions we checkout once at head)
-  // For determinism, we scan the provided pathRoot as is.
-  const sbomBase = await generateSbom(path.resolve(cwd, pathRoot), outDir);
-  const grypeBase = await runGrypeOnSbom(sbomBase.path);
+  // SBOM + Grype for each ref (scan the workspace pathRoot)
+  const sbomBase = await generateSbom(path.resolve(cwd, pathRoot), outDir, bins);
+  const grypeBase = await runGrypeOnSbomWith(bins.grypePath, sbomBase.path);
 
-  const sbomHead = await generateSbom(path.resolve(cwd, pathRoot), outDir);
-  const grypeHead = await runGrypeOnSbom(sbomHead.path);
+  const sbomHead = await generateSbom(path.resolve(cwd, pathRoot), outDir, bins);
+  const grypeHead = await runGrypeOnSbomWith(bins.grypePath, sbomHead.path);
 
   // Normalize
   const baseItemsAll = Array.isArray(grypeBase.matches) ? grypeBase.matches.map(normalizeFinding) : [];
@@ -88,8 +91,8 @@ async function analyzeRefs(opts) {
   const baseSummary = summarizeBySeverity(baseItems);
   const headSummary = summarizeBySeverity(headItems);
 
-  // Build base.json and head.json
   const now = new Date().toISOString();
+
   const baseJson = {
     schema_version: "2.0.0",
     generated_at: now,
@@ -146,7 +149,7 @@ async function analyzeRefs(opts) {
   const by_sev_state = Object.fromEntries(sevLevels.map(s => [s, { NEW: 0, REMOVED: 0, UNCHANGED: 0 }]));
   for (const it of diff.new) by_sev_state[normalizeSeverity(it.severity)].NEW++;
   for (const it of diff.removed) by_sev_state[normalizeSeverity(it.severity)].REMOVED++;
-  // unchanged_count is a number; distribute by severity by intersecting match_keys
+
   const baseMap = new Map(baseItems.map(i => [i.match_key, i]));
   for (const it of headItems) {
     if (baseMap.has(it.match_key)) by_sev_state[normalizeSeverity(it.severity)].UNCHANGED++;
@@ -172,7 +175,7 @@ async function analyzeRefs(opts) {
     changes: {
       new: diff.new,
       removed: diff.removed,
-      unchanged: undefined,           // not storing list, only count
+      unchanged: undefined,
       unchanged_count: diff.unchanged_count,
     },
   };
