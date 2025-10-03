@@ -1,110 +1,214 @@
 /**
  * Markdown renderers:
- *  - PR comment table (with GitHub hovercards for GHSA links).
- *  - Job Summary table (with HTML anchors + title tooltips) + header summary block.
+ * - Summary (Job Summary): plain Markdown/HTML, uses title tooltips (no hovercards)
+ * - PR comment: allows GitHub hovercards on vulnerability IDs
  *
- * Columns: Severity | Vulnerability | Package | Branch
- * Package format: `name:version`
+ * Notes
+ * - Package column is single "<name>:<version>"
+ * - Severity order: CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN
+ * - Status order: NEW, REMOVED, UNCHANGED
  */
 
-const { ORDER: SEV_ORDER, STATUS_ORDER, severityRank } = require("../severity");
-
-function formatPkg(name, version) {
+function severityRank(s) {
+  const map = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, UNKNOWN: 4 };
+  return map[String(s || "UNKNOWN").toUpperCase()] ?? 9;
+}
+function statusRank(s) {
+  const map = { NEW: 0, REMOVED: 1, UNCHANGED: 2 };
+  return map[String(s || "UNCHANGED").toUpperCase()] ?? 9;
+}
+function fmtInt(n) {
+  return new Intl.NumberFormat("en-US").format(n || 0);
+}
+function escapeHtml(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function fmtPkg(name, version) {
   const n = name || "unknown";
   const v = (version && String(version).trim()) ? String(version).trim() : "-";
-  return `\`${n}:${v}\``;
+  return `${n}:${v}`;
+}
+function advisoryHref(vuln) {
+  // Prefer GHSA, then CVE, finally fallback URL if any
+  const ids = vuln?.ids || {};
+  if (ids.ghsa) return `https://github.com/advisories/${ids.ghsa}`;
+  if (ids.cve)  return `https://nvd.nist.gov/vuln/detail/${ids.cve}`;
+  return vuln?.url || "#";
+}
+function vulnTitle(v) {
+  const parts = [];
+  if (v?.id) parts.push(v.id);
+  if (v?.severity) parts.push(`Severity: ${v.severity}`);
+  const p = v?.package;
+  if (p?.name) parts.push(`Package: ${fmtPkg(p.name, p.version)}`);
+  if (v?.cvss_max?.score != null) parts.push(`CVSS: ${v.cvss_max.score}`);
+  if (v?.fix?.state) parts.push(`Fix: ${v.fix.state}`);
+  return parts.join(" · ");
 }
 
-function advisoryLink(v) {
-  if (v?.ids?.ghsa) return `https://github.com/advisories/${v.ids.ghsa}`;
-  if (v?.ids?.cve) return `https://nvd.nist.gov/vuln/detail/${v.ids.cve}`;
-  if (v?.url) return v.url;
-  return "#";
+function branchLine(label, info) {
+  const ref = info?.git?.ref || "";
+  const sha = info?.git?.sha_short || "";
+  const msg = info?.git?.commit_subject || "";
+  return `- **${label}**: \`${escapeHtml(ref)}\` @ \`${escapeHtml(sha)}\` — ${escapeHtml(msg)}`;
 }
 
-function idText(v) {
-  return v?.ids?.ghsa || v?.ids?.cve || v?.id || "UNKNOWN-ID";
+function toolsLine(tools, actionMeta) {
+  const t = [];
+  if (tools?.syft) t.push(`Syft Application: ${inlineVersion(tools.syft)}`);
+  if (tools?.grype) t.push(`Grype Application: ${inlineVersion(tools.grype)}`);
+  if (tools?.cyclonedx_maven) t.push(`CycloneDX Maven`);
+  if (tools?.node) t.push(`Node ${tools.node}`);
+  if (actionMeta) t.push(`Action: ${actionMeta.name} (\`${(actionMeta.commit || "").slice(0,7)}\`)`);
+  return `- ${t.join(" · ")}`;
+}
+function inlineVersion(line) {
+  // show first line only, without ANSI noise
+  return String(line || "").split(/\r?\n/)[0];
 }
 
-function rowsFromDiff(diff) {
+function sevTable(summary) {
+  const s = summary?.by_severity || {};
+  return [
+    "",
+    "<table>",
+    "<thead><tr><th>Severity</th><th>Count</th></tr></thead>",
+    "<tbody>",
+    `<tr><td>CRITICAL</td><td>${fmtInt(s.CRITICAL || 0)}</td></tr>`,
+    `<tr><td>HIGH</td><td>${fmtInt(s.HIGH || 0)}</td></tr>`,
+    `<tr><td>MEDIUM</td><td>${fmtInt(s.MEDIUM || 0)}</td></tr>`,
+    `<tr><td>LOW</td><td>${fmtInt(s.LOW || 0)}</td></tr>`,
+    `<tr><td>UNKNOWN</td><td>${fmtInt(s.UNKNOWN || 0)}</td></tr>`,
+    "</tbody>",
+    "</table>",
+    ""
+  ].join("\n");
+}
+
+function totalsCards(diffSummary) {
+  const t = diffSummary?.totals || {};
+  return [
+    "",
+    "<table>",
+    "<thead><tr><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>",
+    `<tbody><tr><td>${fmtInt(t.NEW||0)}</td><td>${fmtInt(t.REMOVED||0)}</td><td>${fmtInt(t.UNCHANGED||0)}</td></tr></tbody>`,
+    "</table>",
+    ""
+  ].join("\n");
+}
+
+function diffRows(diffJson) {
   const rows = [];
-  for (const it of (diff?.changes?.new || [])) rows.push({ item: it, status: "NEW" });
-  for (const it of (diff?.changes?.removed || [])) rows.push({ item: it, status: "REMOVED" });
-  // UNCHANGED are not listed individually; we could add if needed from head∩base
-  // Sort by severity then id+package
+  for (const v of diffJson?.changes?.new || []) rows.push({ ...v, __status: "NEW", __branch: "HEAD" });
+  for (const v of diffJson?.changes?.removed || []) rows.push({ ...v, __status: "REMOVED", __branch: "BASE" });
+
   rows.sort((a, b) => {
-    const s = severityRank(a.item.severity) - severityRank(b.item.severity);
+    const s = severityRank(a.severity) - severityRank(b.severity);
     if (s !== 0) return s;
-    const ka = `${idText(a.item)}::${a.item.package?.name || ""}::${a.item.package?.version || ""}`;
-    const kb = `${idText(b.item)}::${b.item.package?.name || ""}::${b.item.package?.version || ""}`;
-    return ka.localeCompare(kb);
+    const st = statusRank(a.__status) - statusRank(b.__status);
+    if (st !== 0) return st;
+    return String(a.id).localeCompare(String(b.id));
   });
   return rows;
 }
 
-// --- PR renderer (hovercards) ---
-function renderPrTableMarkdown(diff, baseLabel, headLabel, options = {}) {
-  const rows = rowsFromDiff(diff);
-  const header = `| Severity | Vulnerability | Package | Branch |\n|---|---|---|---|`;
-  const lines = [header];
-  for (const { item, status } of rows) {
-    const sev = `**${item.severity || "UNKNOWN"}**`;
-    const id = idText(item);
-    const url = advisoryLink(item);
-    // For PR: use standard Markdown link => GitHub hovercard for GHSA
-    const vuln = `[${id}](${url})`;
-    const pkg = formatPkg(item.package?.name, item.package?.version);
-    const branch = status === "NEW" ? headLabel || "HEAD" : "BASE";
-    lines.push(`| ${sev} | ${vuln} | ${pkg} | ${status === "NEW" ? "HEAD" : status === "REMOVED" ? "BASE" : "BOTH"} |`);
+/* ---------------- Summary (Job Summary) ---------------- */
+
+function renderSummaryTableMarkdown(diffJson, baseJson, headJson, actionMeta, baseLabel = "BASE", headLabel = "HEAD") {
+  const lines = [];
+
+  lines.push(`### compare-branches summary`);
+  lines.push("");
+  lines.push("**Summary**");
+  lines.push("");
+  lines.push(branchLine(baseLabel, baseJson));
+  lines.push(branchLine(headLabel, headJson));
+  lines.push("");
+  lines.push("**Tools**");
+  lines.push("");
+  lines.push(toolsLine(diffJson?.tools || baseJson?.tools || headJson?.tools || {}, actionMeta));
+  lines.push("");
+
+  // Totals cards (NEW/REMOVED/UNCHANGED)
+  lines.push(totalsCards(diffJson?.summary));
+
+  // Branch severity tables
+  lines.push(`**${baseLabel} severity counts**`);
+  lines.push(sevTable(baseJson?.summary));
+  lines.push(`**${headLabel} severity counts**`);
+  lines.push(sevTable(headJson?.summary));
+
+  // Diff table with title tooltips (no hovercards here)
+  lines.push("");
+  lines.push("<table>");
+  lines.push("<thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Branch</th><th>Status</th></tr></thead>");
+  lines.push("<tbody>");
+
+  const rows = diffRows(diffJson);
+  for (const r of rows) {
+    const href = advisoryHref(r);
+    const title = escapeHtml(vulnTitle(r));
+    const pkg = escapeHtml(fmtPkg(r?.package?.name, r?.package?.version));
+    const sev = escapeHtml(r.severity || "UNKNOWN");
+    const id = escapeHtml(r.id || "");
+    lines.push(
+      `<tr><td>${sev}</td><td><a href="${href}" title="${title}" target="_blank" rel="noopener noreferrer">${id}</a></td><td><code>${pkg}</code></td><td>${r.__branch}</td><td>${r.__status}</td></tr>`
+    );
   }
 
-  // Optionally add UNCHANGED total line
-  const unchanged = diff?.summary?.totals?.UNCHANGED ?? 0;
-  if (unchanged > 0) {
-    lines.push(`\n> Unchanged: **${unchanged}**`);
-  }
+  lines.push("</tbody>");
+  lines.push("</table>");
+  lines.push("");
+  lines.push(`_Unchanged_: **${fmtInt(diffJson?.summary?.totals?.UNCHANGED || 0)}**`);
+  lines.push("");
 
   return lines.join("\n");
 }
 
-// --- Summary renderer (tooltips + header summary) ---
-function renderSummaryTableMarkdown(diff, base, head, actionMeta, baseLabel, headLabel, options = { includeHeaderSummary: true }) {
-  const parts = [];
-  if (options.includeHeaderSummary !== false) {
-    const lines = [];
-    const baseLine = `- Base: \`${base?.git?.ref || baseLabel || "BASE"}\` @ \`${base?.git?.sha_short || ""}\` — ${base?.git?.commit_subject || ""}`;
-    const headLine = `- Head: \`${head?.git?.ref || headLabel || "HEAD"}\` @ \`${head?.git?.sha_short || ""}\` — ${head?.git?.commit_subject || ""}`;
-    const tools = `- Syft ${head?.tools?.syft || ""} · Grype ${head?.tools?.grype || ""} · CycloneDX Maven ${head?.tools?.cyclonedx_maven || ""} · Node ${head?.tools?.node || ""}\n- Action: ${actionMeta?.name || "sec-open/vuln-diff-action"} ${actionMeta?.version || ""} (\`${(actionMeta?.commit || "").slice(0,7)}\`)`;
-    lines.push(`**Summary**`, baseLine, headLine, ``, `**Tools**`, tools, ``);
-    parts.push(lines.join("\n"));
+/* ---------------- PR comment (hovercards) ---------------- */
+
+function renderPrTableMarkdown(diffJson, baseLabel = "BASE", headLabel = "HEAD") {
+  const lines = [];
+  lines.push(`### Vulnerability diff (${baseLabel} vs ${headLabel})`);
+  lines.push("");
+
+  lines.push("<table>");
+  lines.push("<thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Branch</th><th>Status</th></tr></thead>");
+  lines.push("<tbody>");
+
+  const rows = diffRows(diffJson);
+  for (const r of rows) {
+    const href = advisoryHref(r);
+    const pkg = escapeHtml(fmtPkg(r?.package?.name, r?.package?.version));
+    const sev = escapeHtml(r.severity || "UNKNOWN");
+    const id = escapeHtml(r.id || "");
+
+    // GitHub advisory hovercard, if GHSA id exists
+    let anchor = `<a href="${href}" target="_blank" rel="noopener noreferrer">${id}</a>`;
+    if (r?.ids?.ghsa) {
+      const ghsa = r.ids.ghsa;
+      anchor =
+        `<a href="https://github.com/advisories/${ghsa}" ` +
+        `data-hovercard-type="advisory" ` +
+        `data-hovercard-url="/advisories/${ghsa}/hovercard" ` +
+        `target="_blank" rel="noopener noreferrer">${id}</a>`;
+    }
+
+    lines.push(
+      `<tr><td>${sev}</td><td>${anchor}</td><td><code>${pkg}</code></td><td>${r.__branch}</td><td>${r.__status}</td></tr>`
+    );
   }
 
-  const rows = rowsFromDiff(diff);
-  const header = `| Severity | Vulnerability | Package | Branch |\n|---|---|---|---|`;
-  const lines = [header];
-  for (const { item, status } of rows) {
-    const sev = `**${item.severity || "UNKNOWN"}**`;
-    const id = idText(item);
-    const url = advisoryLink(item);
-    // For Summary: use HTML anchor with title to show tooltip
-    const title = `${id} — ${item.package?.name || "unknown"}:${item.package?.version || "-"}`;
-    const vuln = `<a href="${url}" title="${escapeHtml(title)}">${id}</a>`;
-    const pkg = formatPkg(item.package?.name, item.package?.version);
-    lines.push(`| ${sev} | ${vuln} | ${pkg} | ${status === "NEW" ? "HEAD" : status === "REMOVED" ? "BASE" : "BOTH"} |`);
-  }
-  const unchanged = diff?.summary?.totals?.UNCHANGED ?? 0;
-  if (unchanged > 0) {
-    lines.push(`\n> Unchanged: **${unchanged}**`);
-  }
-  parts.push(lines.join("\n"));
-  return parts.join("\n");
-}
+  lines.push("</tbody>");
+  lines.push("</table>");
+  lines.push("");
+  lines.push(`_Unchanged_: **${fmtInt(diffJson?.summary?.totals?.UNCHANGED || 0)}**`);
+  lines.push("");
 
-function escapeHtml(s) {
-  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  return lines.join("\n");
 }
 
 module.exports = {
-  renderPrTableMarkdown,
   renderSummaryTableMarkdown,
+  renderPrTableMarkdown,
 };

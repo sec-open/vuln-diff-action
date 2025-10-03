@@ -1,81 +1,122 @@
 /**
  * HTML bundle renderer
- * - Copies the static bundle skeleton (no CDNs) to an output directory.
- * - Writes runtime data files: data/base.json, data/head.json, data/diff.json.
- * - Optionally injects small meta into index.html (non-destructive).
+ * - Copies the static bundle (index.html, assets/*) to outputDir
+ * - Writes data/*.json alongside it
+ * - Does not rely on 'dist/html-bundle' (ncc does not include non-JS by default)
  */
 
-const fs = require("fs");
-const fsp = require("fs/promises");
+const fs = require("fs/promises");
+const fssync = require("fs");
 const path = require("path");
 
-async function renderHtmlBundle(args) {
+/**
+ * Resolve the source directory where 'html-bundle' lives.
+ * We try multiple candidates so the action works both from source and from a packaged dist:
+ *  1) $GITHUB_ACTION_PATH/html-bundle
+ *  2) <action-root>/html-bundle  (two levels up from dist: __dirname/../..)
+ *  3) process.cwd()/html-bundle
+ */
+async function resolveBundleDir() {
+  const candidates = [
+    process.env.GITHUB_ACTION_PATH && path.join(process.env.GITHUB_ACTION_PATH, "html-bundle"),
+    path.resolve(__dirname, "..", "..", "html-bundle"),
+    path.resolve(process.cwd(), "html-bundle"),
+  ].filter(Boolean);
+
+  for (const dir of candidates) {
+    try {
+      const stat = await fs.stat(dir);
+      if (stat.isDirectory() && fssync.existsSync(path.join(dir, "index.html"))) {
+        return dir;
+      }
+    } catch {
+      // ignore and continue
+    }
+  }
+
+  const tried = candidates.join(", ");
+  throw new Error(
+    `HTML bundle not found. Looked for: ${tried}. ` +
+    `Ensure the 'html-bundle/' directory is included in your repository/tag next to action.yml.`
+  );
+}
+
+/**
+ * Recursively copy a directory (Node 16+: fs.cp; Node 20 is guaranteed on Actions).
+ */
+async function copyDir(src, dst) {
+  await fs.mkdir(dst, { recursive: true });
+  // Node 20+ supports fs.cp; keep a fallback just in case.
+  if (fs.cp) {
+    await fs.cp(src, dst, { recursive: true, force: true, errorOnExist: false });
+  } else {
+    // simple fallback
+    const entries = await fs.readdir(src, { withFileTypes: true });
+    for (const e of entries) {
+      const s = path.join(src, e.name);
+      const d = path.join(dst, e.name);
+      if (e.isDirectory()) await copyDir(s, d);
+      else if (e.isFile()) {
+        await fs.mkdir(path.dirname(d), { recursive: true });
+        await fs.copyFile(s, d);
+      }
+    }
+  }
+}
+
+/**
+ * Write JSON helper (pretty-printed).
+ */
+async function writeJson(filePath, obj) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify(obj, null, 2), "utf8");
+}
+
+/**
+ * Render the deployable HTML bundle.
+ * @param {Object} opts
+ * @param {string} opts.outputDir           Destination directory for the bundle
+ * @param {Object} opts.baseJson
+ * @param {Object} opts.headJson
+ * @param {Object} opts.diffJson
+ * @param {Object} [opts.meta]              Extra metadata to embed as data/meta.json
+ */
+async function renderHtmlBundle(opts) {
   const {
-    bundleTemplateDir = path.resolve(__dirname, "../../html-bundle"),
     outputDir,
     baseJson,
     headJson,
     diffJson,
     meta = {},
-  } = args || {};
+  } = opts || {};
 
   if (!outputDir) throw new Error("renderHtmlBundle: 'outputDir' is required");
-  if (!baseJson || !headJson || !diffJson) throw new Error("renderHtmlBundle: baseJson, headJson, diffJson required");
 
-  await fsp.mkdir(outputDir, { recursive: true });
-  await copyDir(bundleTemplateDir, outputDir);
+  // 1) Locate the source html-bundle directory
+  const bundleSrc = await resolveBundleDir();
 
+  // 2) Copy the entire bundle to outputDir
+  await copyDir(bundleSrc, outputDir);
+
+  // 3) Write data/*.json next to the copied index.html
   const dataDir = path.join(outputDir, "data");
-  await fsp.mkdir(dataDir, { recursive: true });
-  await fsp.writeFile(path.join(dataDir, "base.json"), JSON.stringify(baseJson, null, 2));
-  await fsp.writeFile(path.join(dataDir, "head.json"), JSON.stringify(headJson, null, 2));
-  await fsp.writeFile(path.join(dataDir, "diff.json"), JSON.stringify(diffJson, null, 2));
+  await writeJson(path.join(dataDir, "base.json"), baseJson || {});
+  await writeJson(path.join(dataDir, "head.json"), headJson || {});
+  await writeJson(path.join(dataDir, "diff.json"), diffJson || {});
+  await writeJson(path.join(dataDir, "meta.json"), {
+    generatedAt: new Date().toISOString(),
+    ...meta,
+  });
 
+  // 4) Sanity log
   const indexPath = path.join(outputDir, "index.html");
-  await injectIndexMeta(indexPath, meta);
-
-  return { outDir: outputDir, dataDir };
-}
-
-async function copyDir(srcDir, dstDir) {
-  if (typeof fs.cp === "function") {
-    await fsp.cp(srcDir, dstDir, { recursive: true, force: true });
-    return;
+  if (!fssync.existsSync(indexPath)) {
+    throw new Error(`renderHtmlBundle: 'index.html' not found at ${indexPath}. Check your html-bundle source.`);
   }
-  const entries = await fsp.readdir(srcDir, { withFileTypes: true });
-  await fsp.mkdir(dstDir, { recursive: true });
-  for (const ent of entries) {
-    const src = path.join(srcDir, ent.name);
-    const dst = path.join(dstDir, ent.name);
-    if (ent.isDirectory()) await copyDir(src, dst);
-    else if (ent.isFile()) await fsp.copyFile(src, dst);
-  }
+  return { outputDir, indexPath };
 }
 
-async function injectIndexMeta(indexPath, meta) {
-  try {
-    let html = await fsp.readFile(indexPath, "utf8");
-    if (meta.generatedAt) {
-      const tag = /<meta\s+name=["']report-generated-at["']\s+content=["'][^"']*["']\s*\/?>/i;
-      const replacement = `<meta name="report-generated-at" content="${escapeHtmlAttr(meta.generatedAt)}" />`;
-      if (tag.test(html)) html = html.replace(tag, replacement);
-      else html = html.replace(/<\/head>/i, `  ${replacement}\n</head>`);
-    }
-    const tiny = {};
-    if (meta.repo) tiny.repo = String(meta.repo);
-    if (meta.base?.ref) tiny.baseRef = String(meta.base.ref);
-    if (meta.head?.ref) tiny.headRef = String(meta.head.ref);
-    if (Object.keys(tiny).length > 0) {
-      html = html.replace(/<\/head>/i, `<script>window.__REPORT_META=${JSON.stringify(tiny)}</script>\n</head>`);
-    }
-    await fsp.writeFile(indexPath, html, "utf8");
-  } catch {
-    // best-effort
-  }
-}
-
-function escapeHtmlAttr(s) {
-  return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-}
-
-module.exports = { renderHtmlBundle };
+module.exports = {
+  renderHtmlBundle,
+  _internal: { resolveBundleDir, copyDir, writeJson },
+};
