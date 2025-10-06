@@ -141,43 +141,64 @@ const scanSbomFn =
   grypeMod.runGrypeOnSbom ||
   grypeMod.default;
 
+// Reemplaza la implementación de callGenSbom por esta
 async function callGenSbom(dir, outPath, maybeBins) {
   if (typeof genSbomFn !== "function") {
     throw new Error("SBOM generator function not found in './sbom' (expected generateSbomAuto/generateSbom/makeSbom/default).");
   }
-  // Try (dir, outPath, bins)
+
+  // Intenta (dir, outPath, bins) y luego (dir, outPath)
+  let ret;
   try {
-    const res = await genSbomFn(dir, outPath, maybeBins);
-    // If function returns an object with path, accept it
-    if (res && typeof res === "object" && res.path) {
-      await fsp.access(res.path);
-      return { path: res.path, tool: res.tool || "auto" };
-    }
-    // Otherwise, assume it wrote to outPath
-    await fsp.access(outPath);
-    return { path: outPath, tool: "auto" };
-  } catch (e1) {
-    // Try simpler signature (dir, outPath)
-    const res2 = await genSbomFn(dir, outPath);
-    if (res2 && typeof res2 === "object" && res2.path) {
-      await fsp.access(res2.path);
-      return { path: res2.path, tool: res2.tool || "auto" };
-    }
-    await fsp.access(outPath);
-    return { path: outPath, tool: "auto" };
+    ret = await genSbomFn(dir, outPath, maybeBins);
+  } catch {
+    ret = await genSbomFn(dir, outPath);
   }
+
+  // Determina ruta “real” del SBOM
+  let candidate = (ret && typeof ret === "object" && ret.path) ? ret.path : outPath;
+
+  // Si 'candidate' es un directorio, intenta localizar el JSON dentro
+  try {
+    const st = await fsp.stat(candidate);
+    if (st.isDirectory()) {
+      const files = await fsp.readdir(candidate);
+      // heurística común en CycloneDX Maven o generadores
+      const pick = files.find(f => /sbom.*\.json$/i.test(f)) ||
+                   files.find(f => /cyclonedx.*\.json$/i.test(f)) ||
+                   files.find(f => /\.json$/i.test(f));
+      if (!pick) throw new Error(`SBOM JSON not found inside directory: ${candidate}`);
+      candidate = path.join(candidate, pick);
+    }
+  } catch (e) {
+    // si falla stat, intentará access normal más abajo
+  }
+
+  // Verifica que exista
+  await fsp.access(candidate);
+
+  return { path: candidate, tool: (ret && ret.tool) || "auto" };
 }
 
-async function callScanSbom(sbomPath) {
-  if (typeof scanSbomFn !== "function") {
-    throw new Error("Grype scanner function not found in './grype' (expected scanSbom/runGrypeOnSbomWith/runGrypeOnSbom/default).");
+
+// Reemplaza la implementación de callScanSbom por esta
+async function callScanSbom(sbomPath, bins) {
+  if (grypeMod.runGrypeOnSbomWith && typeof grypeMod.runGrypeOnSbomWith === "function") {
+    const grypePath = bins?.grypePath || "grype";
+    return await grypeMod.runGrypeOnSbomWith(grypePath, sbomPath);
   }
-  const res = await scanSbomFn(sbomPath);
-  // Some wrappers may return {json:...}
-  if (res && res.matches) return res;
-  if (res && res.json && res.json.matches) return res.json;
-  return res;
+  if (grypeMod.scanSbom && typeof grypeMod.scanSbom === "function") {
+    return await grypeMod.scanSbom(sbomPath);
+  }
+  if (typeof scanSbomFn === "function") {
+    return await scanSbomFn(sbomPath);
+  }
+  if (typeof grypeMod.default === "function") {
+    return await grypeMod.default(sbomPath);
+  }
+  throw new Error("No suitable Grype wrapper found (expected runGrypeOnSbomWith/scanSbom/default).");
 }
+
 
 /* ---------------- Analyze one ref ---------------- */
 
@@ -186,7 +207,8 @@ async function analyzeOneRef(refLabel, worktreeDir, scanPath, outSbomPath, minSe
   const sbom = await callGenSbom(path.join(worktreeDir, scanPath), outSbomPath, bins);
 
   // Grype
-  const grypeJson = await callScanSbom(sbom.path);
+  const grypeJson = await callScanSbom(sbom.path, bins);
+
 
   // Normalize, filter, dedupe by ID keeping worst
   const all = normalizeMatches(grypeJson);
@@ -273,9 +295,24 @@ async function analyzeRefs({
   const baseSbom = path.join(outDir, "sbom-base.json");
   const headSbom = path.join(outDir, "sbom-head.json");
 
+  let bins = {};
+  try {
+    const toolsMod = require("./tools");
+    if (toolsMod && typeof toolsMod.ensureAndLocateScannerTools === "function") {
+      bins = await toolsMod.ensureAndLocateScannerTools();
+    }
+  } catch {}
+  if (!bins.grypePath) {
+    try {
+      const { stdout } = await execFileP("bash", ["-lc", "command -v grype"]);
+      bins.grypePath = stdout.trim();
+    } catch {}
+  }
+
   // Analyze each ref
-  const baseRes = await analyzeOneRef("BASE", baseDir, ".", baseSbom, minSeverity);
-  const headRes = await analyzeOneRef("HEAD", headDir, ".", headSbom, minSeverity);
+  const baseRes = await analyzeOneRef("BASE", baseDir, ".", baseSbom, minSeverity, bins);
+  const headRes = await analyzeOneRef("HEAD", headDir, ".", headSbom, minSeverity, bins);
+
 
   // Build normalized JSONs
   const now = new Date().toISOString();
