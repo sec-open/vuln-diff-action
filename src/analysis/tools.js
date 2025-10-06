@@ -1,111 +1,84 @@
-// Tool detection & best-effort installers for syft/grype; record versions
+// Tool detection & Linux APT installers for syft/grype/maven
 const os = require('os');
 const path = require('path');
 const { execCmd, which } = require('./exec');
-const { ensureDir } = require('./fsx');
-
-const DEFAULTS = {
-  syft: process.env.SYFT_VERSION || 'v1.13.0',
-  grype: process.env.GRYPE_VERSION || 'v0.79.2',
-};
 
 function isLinux() { return os.platform() === 'linux'; }
-function isMac() { return os.platform() === 'darwin'; }
-function archTag() {
-  // Map Node arch to release arch
-  const a = os.arch();
-  if (a === 'x64') return 'amd64';
-  if (a === 'arm64') return 'arm64';
-  return 'amd64'; // fallback
+
+async function aptExists() {
+  try { await execCmd('bash', ['-lc', 'command -v apt-get >/dev/null 2>&1']); return true; }
+  catch { return false; }
 }
 
-async function tryGetNodeVersion() {
-  try {
-    const { stdout } = await execCmd('node', ['-v']);
-    return stdout.trim();
-  } catch { return null; }
+async function runApt(cmd) {
+  // Try with sudo, then without (self-hosted runners may not need sudo)
+  try { return await execCmd('bash', ['-lc', `sudo ${cmd}`]); } catch { /* try without sudo */ }
+  return await execCmd('bash', ['-lc', cmd]);
 }
 
-async function tryGetMavenVersion() {
-  const mvn = await which('mvn');
-  if (!mvn) return null;
-  try {
-    const { stdout } = await execCmd(mvn, ['-v']);
-    // first line like: Apache Maven 3.9.6 ...
-    const line = stdout.split('\n')[0].trim();
-    return line || stdout.trim();
-  } catch { return null; }
+async function ensureAnchoreAptRepo() {
+  // idempotent: si ya existe, no pasa nada
+  await runApt('apt-get update -y');
+  await runApt('apt-get install -y curl gpg');
+  // repo estable de anchore (trusted=yes evita manejar llaves por separado en runners efímeros)
+  await runApt(`bash -lc "echo 'deb [trusted=yes] https://apt.anchore.io stable main' > /etc/apt/sources.list.d/anchore.list"`);
+  await runApt('apt-get update -y');
+}
+
+async function ensureSyft() {
+  let syft = await which('syft');
+  if (syft || !isLinux() || !(await aptExists())) return syft;
+  await ensureAnchoreAptRepo();
+  await runApt('apt-get install -y syft');
+  return await which('syft');
+}
+
+async function ensureGrype() {
+  let grype = await which('grype');
+  if (grype || !isLinux() || !(await aptExists())) return grype;
+  await ensureAnchoreAptRepo();
+  await runApt('apt-get install -y grype');
+  return await which('grype');
+}
+
+async function ensureMaven() {
+  let mvn = await which('mvn');
+  if (mvn || !isLinux() || !(await aptExists())) return mvn;
+  await runApt('apt-get install -y maven');
+  return await which('mvn');
 }
 
 async function tryGetJsonVersion(bin, args) {
   try {
     const { stdout } = await execCmd(bin, args);
     const j = JSON.parse(stdout);
-    // syft/grype both have .Version
     return j.Version || j.version || null;
   } catch { return null; }
 }
 
-async function detectOrInstallSyft(toolsDir) {
-  let syftPath = await which('syft');
-  if (syftPath) return syftPath;
-
-  // best-effort download (Linux/macOS only, curl required)
-  const curl = await which('curl');
-  if (!curl || (!isLinux() && !isMac())) return null;
-
-  const arch = archTag();
-  const plat = isLinux() ? 'linux' : 'darwin';
-  const ver = DEFAULTS.syft;
-  const url = `https://github.com/anchore/syft/releases/download/${ver}/syft_${plat}_${arch}`;
-  const binDir = path.join(toolsDir, 'syft');
-  const binPath = path.join(binDir, 'syft');
-
-  await ensureDir(binDir);
-  await execCmd(curl, ['-sSLf', '-o', binPath, url]);
-  await execCmd('chmod', ['+x', binPath]);
-  return binPath;
-}
-
-async function detectOrInstallGrype(toolsDir) {
-  let grypePath = await which('grype');
-  if (grypePath) return grypePath;
-
-  const curl = await which('curl');
-  if (!curl || (!isLinux() && !isMac())) return null;
-
-  const arch = archTag();
-  const plat = isLinux() ? 'linux' : 'darwin';
-  const ver = DEFAULTS.grype;
-  const url = `https://github.com/anchore/grype/releases/download/${ver}/grype_${plat}_${arch}`;
-  const binDir = path.join(toolsDir, 'grype');
-  const binPath = path.join(binDir, 'grype');
-
-  await ensureDir(binDir);
-  await execCmd(curl, ['-sSLf', '-o', binPath, url]);
-  await execCmd('chmod', ['+x', binPath]);
-  return binPath;
+async function tryGetMavenVersion(mvnPath) {
+  if (!mvnPath) return null;
+  try {
+    const { stdout } = await execCmd(mvnPath, ['-v']);
+    return stdout.split('\n')[0].trim();
+  } catch { return null; }
 }
 
 async function detectTools() {
-  const toolsDir = path.resolve(process.cwd(), '.tools');
-  const node = await tryGetNodeVersion();
-  const mvnVersion = await tryGetMavenVersion();
+  // Ensure tools if possible (Linux/Ubuntu with APT)
+  const mvnPath  = await ensureMaven();
+  const syftPath = await ensureSyft();
+  const grypePath= await ensureGrype();
 
-  const syftPath = await detectOrInstallSyft(toolsDir);
-  const grypePath = await detectOrInstallGrype(toolsDir);
-
-  const syftVersion = syftPath ? await tryGetJsonVersion(syftPath, ['version', '-o', 'json']) : null;
-  const grypeVersion = grypePath ? await tryGetJsonVersion(grypePath, ['version', '-o', 'json']) : null;
+  // Versions
+  const node = process.version;
+  const cyclonedx_maven = await tryGetMavenVersion(mvnPath);
+  const syft = syftPath ? await tryGetJsonVersion(syftPath, ['version', '-o', 'json']) : null;
+  const grype = grypePath ? await tryGetJsonVersion(grypePath, ['version', '-o', 'json']) : null;
 
   return {
-    paths: { syft: syftPath, grype: grypePath, mvn: mvnVersion ? 'mvn' : null },
-    versions: {
-      node: node,
-      cyclonedx_maven: mvnVersion,
-      syft: syftVersion,
-      grype: grypeVersion,
-    },
+    paths: { syft: syftPath, grype: grypePath, mvn: mvnPath },
+    versions: { node, cyclonedx_maven, syft, grype },
   };
 }
 

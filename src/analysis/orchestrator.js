@@ -12,6 +12,10 @@ const { makeMeta, writeMeta } = require('./meta');
 const { uploadPhase1Artifact } = require('./artifact');
 
 async function phase1() {
+  if (os.platform() !== 'linux') {
+    core.setFailed('This action requires a Linux runner (Ubuntu recommended).');
+    return;
+  }
   // 1) Inputs
   const base_ref = core.getInput('base_ref', { required: true });
   const head_ref = core.getInput('head_ref', { required: true });
