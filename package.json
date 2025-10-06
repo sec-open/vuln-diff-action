@@ -1,6 +1,6 @@
 {
   "name": "sec-open-vuln-diff-action",
-  "version": "2.0.0-alpha.1",
+  "version": "2.0.0-phase1",
   "private": true,
   "description": "Phase 1 (Analysis) for sec-open/vuln-diff-action: SBOM generation (Maven->Syft) + Grype scans + meta/artifact.",
   "license": "ISC",
@@ -9,10 +9,10 @@
   "files": [
     "index.js",
     "action.yml",
-    "README_ANALYSIS.md",
     "src/analysis/"
   ],
   "scripts": {
+    "build": "ncc build index.js -o .bundle --minify",
     "phase1": "node index.js",
     "test": "echo \"No tests yet for Phase 1\""
   },
@@ -23,5 +23,8 @@
     "@actions/artifact": "^2.2.1",
     "@actions/core": "^1.11.1",
     "@actions/github": "^6.0.0"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.38.3"
   }
 }
