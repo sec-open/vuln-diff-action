@@ -1,10 +1,9 @@
-// Upload ONLY Phase-1 outputs
+// Upload ONLY Phase-1 outputs (modern @actions/artifact API)
 const artifact = require('@actions/artifact');
 const path = require('path');
 const { layout, sanitizeName } = require('./paths');
 
 async function uploadPhase1Artifact({ baseRef, headRef }) {
-  const client = artifact.create();
   const l = layout();
   const name = `vulnerability-diff-${sanitizeName(baseRef)}-vs-${sanitizeName(headRef)}-phase1`;
 
@@ -16,14 +15,16 @@ async function uploadPhase1Artifact({ baseRef, headRef }) {
     l.sbom.head,
     l.grype.base,
     l.grype.head,
-    // NOTE: dist/refs/* are checkouts, not uploaded (per spec). Only Phase-1 files.
   ];
 
   const root = l.root;
-  const uploadResponse = await client.uploadArtifact(name, files, root, {
-    continueOnError: false,
-    retentionDays: undefined,
-  });
+  const uploadResponse = await artifact.uploadArtifact(
+    name,        // artifact name
+    files,       // files array
+    root,        // root directory
+    { continueOnError: false }
+  );
+
   return uploadResponse;
 }
 
