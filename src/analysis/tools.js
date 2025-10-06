@@ -51,20 +51,20 @@ async function downloadTarballTool({ repo, ver, binName, toolsDir }) {
   const plat = isLinux() ? 'linux' : (os.platform() === 'darwin' ? 'darwin' : null);
   if (!plat) return null;
 
-  const url = `https://github.com/anchore/${repo}/releases/download/${ver}/${binName}_${ver}_${plat}_${arch}.tar.gz`;
+  const fileVer = String(ver).replace(/^v/, ''); // <- quitar la 'v' para el nombre del asset
+  const url = `https://github.com/anchore/${repo}/releases/download/${ver}/${binName}_${fileVer}_${plat}_${arch}.tar.gz`;
+
   const toolDir = path.join(toolsDir, binName);
   const tarPath = path.join(toolDir, `${binName}.tar.gz`);
   const binPath = path.join(toolDir, binName);
 
   await ensureDir(toolDir);
-  // curl + tar (sin sudo)
   await execCmd('bash', ['-lc', `curl -sSLf -o "${tarPath}" "${url}"`]);
   await execCmd('bash', ['-lc', `tar -xzf "${tarPath}" -C "${toolDir}"`]);
   await execCmd('chmod', ['+x', binPath]);
   await addToPath(toolDir);
   return binPath;
 }
-
 async function ensureSyft(toolsDir) {
   let syft = await which('syft');
   if (syft) return syft;
@@ -75,30 +75,19 @@ async function ensureSyft(toolsDir) {
       await runApt('apt-get install -y syft');
       syft = await which('syft');
       if (syft) return syft;
-    } catch (e) {
-      // si APT falla por permisos/lock, hacemos fallback tar.gz
-      if (!toolsDir) toolsDir = path.resolve(process.cwd(), '.tools');
+    } catch (eAPT) {
+      // Fallback sin sudo
       try {
-        return await downloadTarballTool({
-          repo: 'syft',
-          ver: DEFAULTS.syft,
-          binName: 'syft',
-          toolsDir
-        });
-      } catch (d) {
-        throw e; // re-lanzamos el error APT (para que quede claro en logs) si fallback también falla
+        if (!toolsDir) toolsDir = path.resolve(process.cwd(), '.tools');
+        return await downloadTarballTool({ repo: 'syft', ver: DEFAULTS.syft, binName: 'syft', toolsDir });
+      } catch (eDL) {
+        throw new Error(`Syft install failed.\nAPT error:\n${eAPT.stderr || eAPT.message}\n\nTarball error:\n${eDL.stderr || eDL.message}`);
       }
     }
   }
 
-  // Linux sin apt o macOS: intentamos tar.gz directos
   if (!toolsDir) toolsDir = path.resolve(process.cwd(), '.tools');
-  return await downloadTarballTool({
-    repo: 'syft',
-    ver: DEFAULTS.syft,
-    binName: 'syft',
-    toolsDir
-  });
+  return await downloadTarballTool({ repo: 'syft', ver: DEFAULTS.syft, binName: 'syft', toolsDir });
 }
 
 async function ensureGrype(toolsDir) {
@@ -111,28 +100,18 @@ async function ensureGrype(toolsDir) {
       await runApt('apt-get install -y grype');
       grype = await which('grype');
       if (grype) return grype;
-    } catch (e) {
-      if (!toolsDir) toolsDir = path.resolve(process.cwd(), '.tools');
+    } catch (eAPT) {
       try {
-        return await downloadTarballTool({
-          repo: 'grype',
-          ver: DEFAULTS.grype,
-          binName: 'grype',
-          toolsDir
-        });
-      } catch (d) {
-        throw e;
+        if (!toolsDir) toolsDir = path.resolve(process.cwd(), '.tools');
+        return await downloadTarballTool({ repo: 'grype', ver: DEFAULTS.grype, binName: 'grype', toolsDir });
+      } catch (eDL) {
+        throw new Error(`Grype install failed.\nAPT error:\n${eAPT.stderr || eAPT.message}\n\nTarball error:\n${eDL.stderr || eDL.message}`);
       }
     }
   }
 
   if (!toolsDir) toolsDir = path.resolve(process.cwd(), '.tools');
-  return await downloadTarballTool({
-    repo: 'grype',
-    ver: DEFAULTS.grype,
-    binName: 'grype',
-    toolsDir
-  });
+  return await downloadTarballTool({ repo: 'grype', ver: DEFAULTS.grype, binName: 'grype', toolsDir });
 }
 
 async function ensureMaven() {
