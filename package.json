@@ -5,15 +5,14 @@
   "description": "Phase 1 (Analysis) for sec-open/vuln-diff-action: SBOM generation (Maven->Syft) + Grype scans + meta/artifact.",
   "license": "ISC",
   "type": "commonjs",
-  "main": "index.js",
+  "main": "src/index.js",
   "files": [
-    "index.js",
     "action.yml",
-    "src/analysis/"
+    "src/"
   ],
   "scripts": {
-    "build": "ncc build index.js -o .bundle --minify",
-    "phase1": "node index.js",
+    "build": "echo \"(optional) no bundle for local/internal use\"",
+    "phase1": "node src/index.js",
     "test": "echo \"No tests yet for Phase 1\""
   },
   "engines": {
@@ -23,8 +22,5 @@
     "@actions/artifact": "^2.2.1",
     "@actions/core": "^1.11.1",
     "@actions/github": "^6.0.0"
-  },
-  "devDependencies": {
-    "@vercel/ncc": "^0.38.3"
   }
 }
