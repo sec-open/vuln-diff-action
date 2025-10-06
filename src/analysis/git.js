@@ -8,9 +8,34 @@ async function gitFetchAll(cwd) {
 }
 
 async function resolveRefToSha(ref, cwd) {
-  const { stdout } = await execCmd('git', ['rev-parse', ref], { cwd });
-  return stdout.trim();
+  const trimmed = (ref || '').trim();
+  if (!trimmed) throw new Error('Empty ref');
+
+  // Si ya parece SHA, devuélvelo validado
+  if (/^[0-9a-f]{7,40}$/i.test(trimmed)) {
+    const { stdout } = await execCmd('git', ['rev-parse', trimmed], { cwd });
+    return stdout.trim();
+  }
+
+  const candidates = [
+    trimmed,                    // e.g. "develop"
+    `origin/${trimmed}`,        // e.g. "origin/develop"
+    `refs/heads/${trimmed}`,    // e.g. "refs/heads/develop"
+    `refs/tags/${trimmed}`,     // e.g. "refs/tags/v2.0.0"
+  ];
+
+  let lastErr;
+  for (const c of candidates) {
+    try {
+      const { stdout } = await execCmd('git', ['rev-parse', c], { cwd });
+      return stdout.trim();
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error(`Unable to resolve ref: ${ref}\nLast error: ${lastErr ? lastErr.message : 'unknown'}`);
 }
+
 
 function shortSha(sha) { return sha.slice(0, 7); }
 
