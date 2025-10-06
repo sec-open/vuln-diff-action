@@ -1,17 +1,17 @@
 name: 'vuln-diff-action: phase1 (analysis)'
-description: 'Phase 1 — Analysis: SBOM + Grype scan y meta (sin normalización/diff/render).'
+description: 'Phase 1 — Analysis: SBOM + Grype + meta (sin normalización/diff/render).'
 branding:
   color: 'purple'
   icon: 'shield'
 inputs:
   base_ref:
-    description: 'Ref base (por ejemplo origin/develop o un SHA)'
+    description: 'Ref base (p.ej. origin/develop o un SHA)'
     required: true
   head_ref:
-    description: 'Ref head (por ejemplo origin/feature-x o un SHA)'
+    description: 'Ref head (p.ej. origin/feature-x o un SHA)'
     required: true
   path:
-    description: 'Subdirectorio a analizar (raíz del módulo/proyecto).'
+    description: 'Subdirectorio a analizar'
     required: false
     default: '.'
 outputs:
@@ -21,4 +21,4 @@ outputs:
     description: 'SHA resuelto de head_ref'
 runs:
   using: 'node20'
-  main: 'src/index.js'
+  main: '.bundle/index.js'
