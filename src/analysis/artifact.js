@@ -1,4 +1,4 @@
-// Upload ONLY Phase-1 outputs (modern @actions/artifact API)
+// Upload ONLY Phase-1 outputs — compatible with @actions/artifact v1/v2/v3
 const artifact = require('@actions/artifact');
 const path = require('path');
 const { layout, sanitizeName } = require('./paths');
@@ -16,16 +16,28 @@ async function uploadPhase1Artifact({ baseRef, headRef }) {
     l.grype.base,
     l.grype.head,
   ];
-
   const root = l.root;
-  const uploadResponse = await artifact.uploadArtifact(
-    name,        // artifact name
-    files,       // files array
-    root,        // root directory
+
+  // Detect the proper upload function depending on artifact version
+  const uploadFn =
+    (artifact?.uploadArtifact) ||
+    (artifact?.default?.uploadArtifact) ||
+    (typeof artifact.create === 'function'
+      ? artifact.create().uploadArtifact
+      : null);
+
+  if (!uploadFn) {
+    throw new Error('Cannot find uploadArtifact() in @actions/artifact API');
+  }
+
+  const response = await uploadFn(
+    name,
+    files,
+    root,
     { continueOnError: false }
   );
 
-  return uploadResponse;
+  return response;
 }
 
 module.exports = { uploadPhase1Artifact };
