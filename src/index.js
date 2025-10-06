@@ -1,5 +1,5 @@
 const core = require('@actions/core');
-const { phase1 } = require('./src/analysis/orchestrator');
+const { phase1 } = require('./analysis/orchestrator');
 
 module.exports = { phase1 };
 
