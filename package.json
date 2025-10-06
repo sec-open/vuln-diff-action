@@ -1,57 +1,27 @@
 {
-  "name": "vuln-diff-action",
-  "version": "2.0.0",
+  "name": "sec-open-vuln-diff-action",
+  "version": "2.0.0-alpha.1",
   "private": true,
-  "description": "Compare vulnerabilities between two Git refs using Syft/Grype and render Markdown/HTML/PDF.",
-  "license": "MIT",
-  "main": "dist/index.js",
-  "engines": {
-    "node": ">=20"
-  },
+  "description": "Phase 1 (Analysis) for sec-open/vuln-diff-action: SBOM generation (Maven->Syft) + Grype scans + meta/artifact.",
+  "license": "ISC",
+  "type": "commonjs",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "action.yml",
+    "README_ANALYSIS.md",
+    "src/analysis/"
+  ],
   "scripts": {
-    "build": "ncc build src/index.js -o dist -m",
-    "clean": "rimraf dist",
-    "lint": "eslint . --ext .js",
-    "test": "node -e \"console.log('No tests yet')\"",
-    "assets:bundle": "node scripts/copy-html-assets.js",
-    "postinstall": "npm run assets:bundle || true",
-    "render:pdf": "node -e \"console.log('Puppeteer export runs inside the action runtime')\"",
-    "bundle:html": "node -e \"console.log('HTML assets are static; copied at runtime by src/render/html.js')\""
+    "phase1": "node index.js",
+    "test": "echo \"No tests yet for Phase 1\""
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
-    "@actions/core": "^1.10.1",
-    "@actions/github": "^6.0.0",
-    "@actions/artifact": "^2.3.2",
-    "puppeteer": "^22.7.1",
-    "@puppeteer/browsers": "^2.2.3",
-    "pdf-lib": "^1.17.1"
-  },
-  "devDependencies": {
-    "@vercel/ncc": "^0.38.1",
-    "eslint": "^9.6.0",
-    "rimraf": "^6.0.1",
-    "chart.js": "^4.4.4",
-    "chartjs-plugin-annotation": "^3.0.1",
-    "chartjs-plugin-datalabels": "^2.2.0",
-    "chartjs-chart-matrix": "^2.0.1",
-    "mermaid": "^10.9.1"
-  },
-  "files": [
-    "dist/",
-    "html-bundle/",
-    "action.yml",
-    "LICENSE",
-    "README.md",
-    "scripts/"
-  ],
-  "keywords": [
-    "github-action",
-    "security",
-    "sbom",
-    "grype",
-    "syft",
-    "cyclonedx",
-    "vulnerability",
-    "report"
-  ]
+    "@actions/artifact": "^2.2.1",
+    "@actions/core": "^1.11.1",
+    "@actions/github": "^6.0.0"
+  }
 }

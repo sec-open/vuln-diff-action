@@ -1,82 +1,24 @@
-name: "Vulnerability Diff Action (sec-open/vuln-diff-action)"
-description: "Compare vulnerabilities between two Git refs using Syft/Grype; render Markdown (PR, Summary), HTML bundle, and PDF."
-author: "sec-open"
+name: 'vuln-diff-action: phase1 (analysis)'
+description: 'Phase 1 — Analysis: SBOM + Grype scan y meta (sin normalización/diff/render).'
 branding:
-  icon: "shield"
-  color: "blue"
-
+  color: 'purple'
+  icon: 'shield'
 inputs:
   base_ref:
-    description: "Base Git ref (branch/tag/SHA)"
+    description: 'Ref base (por ejemplo origin/develop o un SHA)'
     required: true
   head_ref:
-    description: "Head Git ref (branch/tag/SHA)"
+    description: 'Ref head (por ejemplo origin/feature-x o un SHA)'
     required: true
   path:
-    description: "Path to scan (working directory of the project)"
+    description: 'Subdirectorio a analizar (raíz del módulo/proyecto).'
     required: false
-    default: "."
-  min_severity:
-    description: "Minimum severity to include (CRITICAL|HIGH|MEDIUM|LOW|UNKNOWN)"
-    required: false
-    default: "LOW"
-  write_summary:
-    description: "Write Job Summary (Markdown)"
-    required: false
-    default: "true"
-  pr_comment:
-    description: "Post PR comment with hovercards (requires github_token)"
-    required: false
-    default: "true"
-  pr_comment_marker:
-    description: "Marker to identify/update the PR comment in place"
-    required: false
-    default: "<!-- vuln-diff-action:comment -->"
-  report_html:
-    description: "Generate deployable HTML bundle"
-    required: false
-    default: "true"
-  report_pdf:
-    description: "Generate PDF report (uses bundled Puppeteer Chromium)"
-    required: false
-    default: "true"
-  upload_artifact:
-    description: "Upload artifact with HTML bundle and PDF"
-    required: false
-    default: "true"
-  artifact_name:
-    description: "Artifact name"
-    required: false
-    default: "vulnerability-diff"
-  title_logo_url:
-    description: "URL for the report cover logo (PDF/HTML)"
-    required: false
-    default: ""
-  graph_max_nodes:
-    description: "Max nodes for Mermaid graphs"
-    required: false
-    default: "150"
-  github_token:
-    description: "GitHub token for PR comments"
-    required: false
-    default: ""
-  slack_webhook_url:
-    description: "Slack webhook URL to notify NEW vulnerabilities"
-    required: false
-    default: ""
-
+    default: '.'
 outputs:
-  base_json_path:
-    description: "Path to base.json"
-  head_json_path:
-    description: "Path to head.json"
-  diff_json_path:
-    description: "Path to diff.json"
-  report_html_path:
-    description: "Path to the HTML bundle directory"
-  report_pdf_path:
-    description: "Path to the generated PDF (if enabled)"
-
+  base_sha:
+    description: 'SHA resuelto de base_ref'
+  head_sha:
+    description: 'SHA resuelto de head_ref'
 runs:
-  using: "node20"
-  main: "dist/index.js"
+  using: 'node20'
+  main: 'index.js'
