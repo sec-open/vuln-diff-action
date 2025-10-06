@@ -1,8 +1,9 @@
 // src/analyze.js
-// Phase 1+2 — Analysis & Normalization orchestrator
-// - analyzeRefs(): resolve refs, isolated checkouts, SBOM+Grype per ref, ID-dedup,
-//   summaries and diff (NEW/REMOVED/UNCHANGED by ID), and write base.json/head.json/diff.json/meta.json
-// - Keeps analyzeOneRef/makeDiff primitives (ID-based dedupe) for reuse.
+// Phase 1+2 — Analysis & Normalization orchestrator (robust to module exports)
+// - Resolves SBOM/Grype runners dynamically (generateSbomAuto/generateSbom/...; scanSbom/runGrype...)
+// - Analyzes base/head in isolated checkouts, dedupes by vulnerability ID, builds summaries and diff.
+// - Writes base.json, head.json, diff.json, meta.json
+// Comments in English.
 
 const path = require("path");
 const fsp = require("fs/promises");
@@ -11,12 +12,12 @@ const { execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileP = promisify(execFile);
 
-// ------- helpers to shell-out safely
 async function sh(cmd, opts = {}) {
   return execFileP("bash", ["-lc", cmd], { maxBuffer: 64 * 1024 * 1024, ...opts });
 }
 
-// ------- severity helpers
+/* ---------------- Severity helpers ---------------- */
+
 const SEV_ORDER_LIST = ["UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
 const SEV_TO_RANK = new Map(SEV_ORDER_LIST.map((s, i) => [s, i]));
 function normSev(s) {
@@ -24,7 +25,8 @@ function normSev(s) {
   return SEV_TO_RANK.has(v) ? v : "UNKNOWN";
 }
 
-// ------- tools
+/* ---------------- Tool versions ---------------- */
+
 async function toolVersion(cmd, args) {
   try {
     const { stdout, stderr } = await execFileP(cmd, args || []);
@@ -32,7 +34,7 @@ async function toolVersion(cmd, args) {
   } catch { return undefined; }
 }
 
-// ======= RAW NORMALIZATION (Grype matches) =======
+/* ---------------- Grype normalization ---------------- */
 
 // Stable key by vulnerability ID only (GHSA > CVE > raw id)
 function keyFromIds(obj) {
@@ -120,31 +122,85 @@ function summarizeBySeverity(items) {
   return res;
 }
 
-// ======= SBOM & GRYPE RUNNERS (reuse your existing modules if present) =======
+/* ---------------- SBOM & Grype dynamic loaders ---------------- */
 
-const { generateSbomAuto } = require("./sbom");  // auto-detect Maven Syft etc.
-const { scanSbom } = require("./grype");        // run grype against a CycloneDX/Syft JSON
+// Load modules
+const sbomMod = require("./sbom");
+const grypeMod = require("./grype");
 
-// Analyze one ref (checkout dir ready) -> normalized & deduped findings
-async function analyzeOneRef(refLabel, worktreeDir, scanPath, outSbomPath, minSeverity = "LOW") {
-  // Build SBOM
-  await generateSbomAuto(path.join(worktreeDir, scanPath), outSbomPath);
+// Pick available functions (handle default/named exports across versions)
+const genSbomFn =
+  sbomMod.generateSbomAuto ||
+  sbomMod.generateSbom ||
+  sbomMod.makeSbom ||
+  sbomMod.default;
 
-  // Grype scan
-  const grype = await scanSbom(outSbomPath);
+const scanSbomFn =
+  grypeMod.scanSbom ||
+  grypeMod.runGrypeOnSbomWith ||
+  grypeMod.runGrypeOnSbom ||
+  grypeMod.default;
+
+async function callGenSbom(dir, outPath, maybeBins) {
+  if (typeof genSbomFn !== "function") {
+    throw new Error("SBOM generator function not found in './sbom' (expected generateSbomAuto/generateSbom/makeSbom/default).");
+  }
+  // Try (dir, outPath, bins)
+  try {
+    const res = await genSbomFn(dir, outPath, maybeBins);
+    // If function returns an object with path, accept it
+    if (res && typeof res === "object" && res.path) {
+      await fsp.access(res.path);
+      return { path: res.path, tool: res.tool || "auto" };
+    }
+    // Otherwise, assume it wrote to outPath
+    await fsp.access(outPath);
+    return { path: outPath, tool: "auto" };
+  } catch (e1) {
+    // Try simpler signature (dir, outPath)
+    const res2 = await genSbomFn(dir, outPath);
+    if (res2 && typeof res2 === "object" && res2.path) {
+      await fsp.access(res2.path);
+      return { path: res2.path, tool: res2.tool || "auto" };
+    }
+    await fsp.access(outPath);
+    return { path: outPath, tool: "auto" };
+  }
+}
+
+async function callScanSbom(sbomPath) {
+  if (typeof scanSbomFn !== "function") {
+    throw new Error("Grype scanner function not found in './grype' (expected scanSbom/runGrypeOnSbomWith/runGrypeOnSbom/default).");
+  }
+  const res = await scanSbomFn(sbomPath);
+  // Some wrappers may return {json:...}
+  if (res && res.matches) return res;
+  if (res && res.json && res.json.matches) return res.json;
+  return res;
+}
+
+/* ---------------- Analyze one ref ---------------- */
+
+async function analyzeOneRef(refLabel, worktreeDir, scanPath, outSbomPath, minSeverity = "LOW", bins) {
+  // SBOM
+  const sbom = await callGenSbom(path.join(worktreeDir, scanPath), outSbomPath, bins);
+
+  // Grype
+  const grypeJson = await callScanSbom(sbom.path);
 
   // Normalize, filter, dedupe by ID keeping worst
-  const all = normalizeMatches(grype);
+  const all = normalizeMatches(grypeJson);
 
   const sevRank = (s) => SEV_ORDER_LIST.indexOf(normSev(s));
   const threshold = Math.max(0, sevRank(minSeverity));
   const itemsFilt = all.filter(x => sevRank(x.severity) >= threshold);
   const items = dedupeByIdKeepingWorst(itemsFilt);
 
-  return { sbomPath: outSbomPath, grypeRaw: grype, items };
+  return { sbomPath: sbom.path, sbomTool: sbom.tool, grypeRaw: grypeJson, items };
 }
 
-// Diff by ID
+/* ---------------- Diff by ID ---------------- */
+
 function makeDiff(baseItems, headItems) {
   const baseDedup = dedupeByIdKeepingWorst(Array.isArray(baseItems) ? baseItems : []);
   const headDedup = dedupeByIdKeepingWorst(Array.isArray(headItems) ? headItems : []);
@@ -173,11 +229,11 @@ function makeDiff(baseItems, headItems) {
   return { news, removed, unchanged };
 }
 
-// ======= GIT helpers (robust ref resolution + isolated checkouts) =======
+/* ---------------- Git helpers ---------------- */
 
 const { fetchAll, resolveRef, commitInfo, shortSha, prepareCheckout } = require("./git");
 
-// ======= Orchestrator: analyzeRefs (Fase 1+2) =======
+/* ---------------- Orchestrator: analyzeRefs ---------------- */
 
 async function analyzeRefs({
   baseRef,
@@ -198,7 +254,6 @@ async function analyzeRefs({
   const baseInfo = await commitInfo(baseSha);
   const headInfo = await commitInfo(headSha);
 
-  // tools metadata (best-effort)
   const tools = {
     syft: await toolVersion("syft", ["version"]),
     grype: await toolVersion("grype", ["version"]),
@@ -222,7 +277,7 @@ async function analyzeRefs({
   const baseRes = await analyzeOneRef("BASE", baseDir, ".", baseSbom, minSeverity);
   const headRes = await analyzeOneRef("HEAD", headDir, ".", headSbom, minSeverity);
 
-  // Build normalized JSONs (fase 2)
+  // Build normalized JSONs
   const now = new Date().toISOString();
 
   const baseJson = {
@@ -253,15 +308,14 @@ async function analyzeRefs({
     vulnerabilities: headRes.items,
   };
 
-  // Diff (fase 2): ID-based
+  // Diff by ID
   const diffRes = makeDiff(baseRes.items, headRes.items);
 
-  // Severity x state matrix
   const sevLevels = ["CRITICAL","HIGH","MEDIUM","LOW","UNKNOWN"];
   const by_sev_state = Object.fromEntries(sevLevels.map(s => [s, { NEW: 0, REMOVED: 0, UNCHANGED: 0 }]));
-  for (const it of diffRes.news)     by_sev_state[normSev(it.severity)].NEW++;
-  for (const it of diffRes.removed)  by_sev_state[normSev(it.severity)].REMOVED++;
-  for (const it of diffRes.unchanged)by_sev_state[normSev(it.severity)].UNCHANGED++;
+  for (const it of diffRes.news)      by_sev_state[normSev(it.severity)].NEW++;
+  for (const it of diffRes.removed)   by_sev_state[normSev(it.severity)].REMOVED++;
+  for (const it of diffRes.unchanged) by_sev_state[normSev(it.severity)].UNCHANGED++;
 
   const diffJson = {
     schema_version: "2.0.0",
@@ -292,7 +346,7 @@ async function analyzeRefs({
     ],
   };
 
-  // meta.json (fase 1 cache / reusable config)
+  // meta.json
   const meta = {
     generated_at: now,
     inputs: { base_ref: baseRef, head_ref: headRef, path: pathRoot, min_severity: normSev(minSeverity) },
@@ -311,7 +365,8 @@ async function analyzeRefs({
   return { baseJson, headJson, diffJson };
 }
 
-// ------- exports (both styles, plus keep primitives) -------
+/* ---------------- Exports ---------------- */
+
 module.exports = analyzeRefs;                // default
 module.exports.analyzeRefs = analyzeRefs;    // named
 module.exports.analyzeOneRef = analyzeOneRef;
