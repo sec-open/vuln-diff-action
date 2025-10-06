@@ -1,5 +1,6 @@
 // Phase 1 end-to-end orchestration (no Phase 2/3 logic)
 const path = require('path');
+const os = require('os');
 const core = require('@actions/core');
 const github = require('@actions/github');
 const { layout } = require('./paths');
