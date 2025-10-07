@@ -1,3 +1,4 @@
+// src/render/markdown/markdown.js
 // Phase 3.1 (Markdown)
 // - Reads ONLY ./dist/{diff.json, base.json, head.json}
 // - Writes markdown outputs under ./dist/markdown/
@@ -50,12 +51,16 @@ function asGav(v) {
   return `${g}:${a}:${ver}`;
 }
 
+function shortSha(sha) {
+  return typeof sha === 'string' && sha.length >= 7 ? sha.slice(0, 7) : (sha || '-');
+}
+
 function vulnerabilityUrl(id) {
   if (!id || typeof id !== 'string') return null;
   const up = id.toUpperCase();
   if (up.startsWith('CVE-')) {
     return `https://nvd.nist.gov/vuln/detail/${up}`;
-  }
+    }
   if (up.startsWith('GHSA-')) {
     return `https://github.com/advisories/${up}`;
   }
@@ -69,17 +74,6 @@ function hyperlinkId(id) {
 
 function formatTotalsLine(totals) {
   return `**Totals** — NEW: ${totals?.NEW ?? 0} · REMOVED: ${totals?.REMOVED ?? 0} · UNCHANGED: ${totals?.UNCHANGED ?? 0}`;
-}
-
-function tableFromBySeverityAndState(by) {
-  const header = `| Severity | NEW | REMOVED | UNCHANGED |
-|---|---:|---:|---:|`;
-  const lines = [];
-  for (const sev of SEVERITY_ORDER) {
-    const row = by?.[sev] || {};
-    lines.push(`| ${sev} | ${row.NEW ?? 0} | ${row.REMOVED ?? 0} | ${row.UNCHANGED ?? 0} |`);
-  }
-  return [header, ...lines].join('\n');
 }
 
 function fullItemsTable(items) {
@@ -151,6 +145,53 @@ function getEventName() {
 
 function getGithubToken() {
   return core.getInput('github_token') || process.env.GITHUB_TOKEN || '';
+}
+
+function coalesceTools(diff, base, head) {
+  return diff?.meta?.tools || base?.meta?.tools || head?.meta?.tools || {};
+}
+
+function coalesceGit(doc) {
+  // Attempt to extract git/ref/sha from a Phase-2 document (base/head)
+  // Common shapes (defensive):
+  //   doc.git.{ref,sha}
+  //   doc.meta.git.{ref,sha}
+  //   doc.meta.inputs.{base_ref/head_ref}
+  const git = doc?.git || doc?.meta?.git || {};
+  return {
+    ref: git.ref || doc?.meta?.inputs?.ref || undefined,
+    sha: git.sha || undefined,
+  };
+}
+
+function buildComparisonCard({ diff, base, head }) {
+  const { owner, repo } = github.context.repo || {};
+  const inputsBase = core.getInput('base_ref') || 'base';
+  const inputsHead = core.getInput('head_ref') || 'head';
+
+  const baseGit = coalesceGit(base);
+  const headGit = coalesceGit(head);
+
+  const baseRef = baseGit.ref || inputsBase;
+  const headRef = headGit.ref || inputsHead;
+  const baseSha = shortSha(baseGit.sha || '');
+  const headSha = shortSha(headGit.sha || '');
+
+  const tools = coalesceTools(diff, base, head);
+  const toolList = Object.entries(tools)
+    .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
+    .join(' · ') || 'n/a';
+
+  const header = `| Key | Value |
+|---|---|`;
+  const lines = [
+    `| Repo | \`${owner}/${repo}\` |`,
+    `| Base | \`${baseRef}\` → \`${baseSha || '-'}\` |`,
+    `| Head | \`${headRef}\` → \`${headSha || '-'}\` |`,
+    `| Tools | ${toolList} |`,
+  ];
+
+  return ['> **Comparison**', header, ...lines].join('\n');
 }
 
 async function upsertPrComment({ owner, repo, issue_number, body, octokit }) {
@@ -227,7 +268,8 @@ async function postToSlackWebhook(webhookUrl, text) {
  * Build concise job summary for GitHub Action and write it to:
  * - ./dist/markdown/summary.md (always)
  * - $GITHUB_STEP_SUMMARY (append same content)
- * Now includes a full table of ALL vulnerabilities: | Severity | Vulnerability | Package | Status |
+ * Now includes a "comparison card" at the top and removes the "By Severity and State" table.
+ * Still includes a full table of ALL vulnerabilities: | Severity | Vulnerability | Package | Status |
  */
 async function renderSummaryMarkdown(ctx = {}) {
   core.startGroup('[render/markdown] summary');
@@ -239,21 +281,21 @@ async function renderSummaryMarkdown(ctx = {}) {
     const diff = await readJSON(path.join(distDir, 'diff.json'));
     const base = await readJSON(path.join(distDir, 'base.json'));
     const head = await readJSON(path.join(distDir, 'head.json'));
-    void base; void head;
 
     const totals = diff?.summary?.totals || { NEW: 0, REMOVED: 0, UNCHANGED: 0 };
-    const by = diff?.summary?.by_severity_and_state || {};
     const items = Array.isArray(diff?.items) ? diff.items : [];
 
     const lines = [];
     lines.push(`# Vulnerability Diff — Summary`);
     lines.push(`_Generated at ${nowISO()}_`);
     lines.push('');
+    // Comparison card
+    lines.push(buildComparisonCard({ diff, base, head }));
+    lines.push('');
+    // Totals
     lines.push(formatTotalsLine(totals));
     lines.push('');
-    lines.push('**By Severity and State**');
-    lines.push(tableFromBySeverityAndState(by));
-    lines.push('');
+    // Full table (ALL vulns)
     lines.push('**All Vulnerabilities**');
     lines.push(fullItemsTable(items));
     lines.push('');
@@ -339,11 +381,11 @@ async function renderPrCommentMarkdown(ctx = {}) {
 }
 
 /**
- * Produce Slack-friendly message similar to the screenshot:
+ * Produce Slack-friendly message:
  * - Header with repo, base→head, PR link (when available)
  * - A bulleted list of NEW vulnerabilities with severity icons and advisory links
  * - Writes ./dist/markdown/slack.md (always)
- * - Delivery only if slack_webhook_url is provided
+ * - Delivery only if slack_webhook_url input is provided
  */
 async function renderSlackMarkdown(ctx = {}) {
   core.startGroup('[render/markdown] slack');
@@ -355,7 +397,6 @@ async function renderSlackMarkdown(ctx = {}) {
     const diff = await readJSON(path.join(distDir, 'diff.json'));
     const base = await readJSON(path.join(distDir, 'base.json'));
     const head = await readJSON(path.join(distDir, 'head.json'));
-    void base; void head;
 
     const totals = diff?.summary?.totals || { NEW: 0, REMOVED: 0, UNCHANGED: 0 };
 
@@ -365,19 +406,19 @@ async function renderSlackMarkdown(ctx = {}) {
 
     // Context bits
     const { owner, repo } = github.context.repo || {};
-    const baseRef = core.getInput('base_ref') || 'base';
-    const headRef = core.getInput('head_ref') || 'head';
+    const baseRef = core.getInput('base_ref') || (base?.git?.ref) || (base?.meta?.git?.ref) || 'base';
+    const headRef = core.getInput('head_ref') || (head?.git?.ref) || (head?.meta?.git?.ref) || 'head';
+    const baseSha = shortSha((base?.git?.sha) || (base?.meta?.git?.sha) || '');
+    const headSha = shortSha((head?.git?.sha) || (head?.meta?.git?.sha) || '');
     const prNum = github.context.payload?.pull_request?.number;
-    const prUrl = prNum
-      ? `https://github.com/${owner}/${repo}/pull/${prNum}`
-      : '';
+    const prUrl = prNum ? `https://github.com/${owner}/${repo}/pull/${prNum}` : '';
 
     const lines = [];
     const emojiAlert = totals.NEW > 0 ? ':rotating_light:' : ':white_check_mark:';
     lines.push(`${emojiAlert}  *${totals.NEW} new vulnerabilities introduced*`);
     lines.push(`• Repo: \`${owner}/${repo}\``);
-    lines.push(`• Base: \`${baseRef}\``);
-    lines.push(`• Head: \`${headRef}\``);
+    lines.push(`• Base: \`${baseRef}\` → \`${baseSha}\``);
+    lines.push(`• Head: \`${headRef}\` → \`${headSha}\``);
     if (prUrl) lines.push(`• PR: ${prUrl}`);
     lines.push('');
     if (newItems.length > 0) {
