@@ -1,4 +1,3 @@
-// src/render/markdown/index.js
 // Phase 3.1 (Markdown)
 // - Reads ONLY ./dist/{diff.json, base.json, head.json}
 // - Writes markdown outputs under ./dist/markdown/
@@ -18,6 +17,15 @@ const REUSABLE_COMMENT_MARKER = '<!-- VULN-DIFF-PR-COMMENT -->';
 function sevRank(s) {
   const idx = SEVERITY_ORDER.indexOf(String(s || '').toUpperCase());
   return idx >= 0 ? idx : SEVERITY_ORDER.length;
+}
+
+function sevIcon(sev) {
+  const s = String(sev || 'UNKNOWN').toUpperCase();
+  if (s === 'CRITICAL') return '🛑';
+  if (s === 'HIGH') return '🟠';
+  if (s === 'MEDIUM') return '🟡';
+  if (s === 'LOW') return '🟢';
+  return '⚪';
 }
 
 async function ensureDir(dir) {
@@ -42,6 +50,23 @@ function asGav(v) {
   return `${g}:${a}:${ver}`;
 }
 
+function vulnerabilityUrl(id) {
+  if (!id || typeof id !== 'string') return null;
+  const up = id.toUpperCase();
+  if (up.startsWith('CVE-')) {
+    return `https://nvd.nist.gov/vuln/detail/${up}`;
+  }
+  if (up.startsWith('GHSA-')) {
+    return `https://github.com/advisories/${up}`;
+  }
+  return null; // unknown scheme; caller can render plain text
+}
+
+function hyperlinkId(id) {
+  const url = vulnerabilityUrl(id);
+  return url ? `[${id}](${url})` : id || 'UNKNOWN';
+}
+
 function formatTotalsLine(totals) {
   return `**Totals** — NEW: ${totals?.NEW ?? 0} · REMOVED: ${totals?.REMOVED ?? 0} · UNCHANGED: ${totals?.UNCHANGED ?? 0}`;
 }
@@ -57,9 +82,25 @@ function tableFromBySeverityAndState(by) {
   return [header, ...lines].join('\n');
 }
 
+function fullItemsTable(items) {
+  const header = `| Severity | Vulnerability | Package | Status |
+|---|---|---|---|`;
+  const rows = (items || [])
+    .slice()
+    .sort((a, b) => sevRank(a.severity) - sevRank(b.severity))
+    .map(v => {
+      const sev = String(v.severity || 'UNKNOWN').toUpperCase();
+      const id = v.id || v.ids?.ghsa || v.ids?.cve || 'UNKNOWN';
+      const gav = asGav(v);
+      const state = String(v.state || 'UNKNOWN').toUpperCase();
+      return `| ${sev} | ${hyperlinkId(id)} | \`${gav}\` | ${state} |`;
+    });
+  return [header, ...rows].join('\n');
+}
+
 function renderNewItemsTable(newItems, limit = 1000) {
   if (!Array.isArray(newItems) || newItems.length === 0) return '_No NEW vulnerabilities._';
-  const header = `| Severity | Vulnerability ID | Package (GAV) | Branches/State |
+  const header = `| Severity | Vulnerability | Package | Status |
 |---|---|---|---|`;
   const rows = newItems
     .slice(0, limit)
@@ -67,19 +108,22 @@ function renderNewItemsTable(newItems, limit = 1000) {
       const sev = String(v.severity || 'UNKNOWN').toUpperCase();
       const id = v.id || v.ids?.ghsa || v.ids?.cve || 'UNKNOWN';
       const gav = asGav(v);
-      const branches = v.branches || v.state || 'HEAD/NEW';
-      return `| ${sev} | ${id} | \`${gav}\` | ${branches} |`;
+      const state = String(v.state || 'NEW').toUpperCase();
+      return `| ${sev} | ${hyperlinkId(id)} | \`${gav}\` | ${state} |`;
     });
   return [header, ...rows].join('\n');
 }
 
-function renderSimpleNewList(newItems, topN = 5) {
-  if (!Array.isArray(newItems) || newItems.length === 0) return '- none';
+function renderSimpleNewListForSlack(newItems, topN = 20) {
+  if (!Array.isArray(newItems) || newItems.length === 0) return '• none';
   const arr = newItems.slice(0, topN).map(v => {
     const sev = String(v.severity || 'UNKNOWN').toUpperCase();
+    const icon = sevIcon(sev);
     const id = v.id || v.ids?.ghsa || v.ids?.cve || 'UNKNOWN';
+    const url = vulnerabilityUrl(id);
+    const idChunk = url ? `<${url}|${id}>` : id;
     const gav = asGav(v);
-    return `- ${sev} · ${id} · \`${gav}\``;
+    return `• ${icon}  ${sev} — ${idChunk}  →  \`${gav}\``;
   });
   return arr.join('\n');
 }
@@ -128,7 +172,7 @@ async function postToSlackWebhook(webhookUrl, text) {
     core.info('[render/markdown] Slack webhook not provided; skipping delivery');
     return { delivered: false, status: 'no-webhook' };
   }
-  const payload = { text };
+  const payload = { text }; // Slack Incoming Webhook expects { text }
   if (typeof fetch === 'function') {
     const res = await fetch(webhookUrl, {
       method: 'POST',
@@ -183,6 +227,7 @@ async function postToSlackWebhook(webhookUrl, text) {
  * Build concise job summary for GitHub Action and write it to:
  * - ./dist/markdown/summary.md (always)
  * - $GITHUB_STEP_SUMMARY (append same content)
+ * Now includes a full table of ALL vulnerabilities: | Severity | Vulnerability | Package | Status |
  */
 async function renderSummaryMarkdown(ctx = {}) {
   core.startGroup('[render/markdown] summary');
@@ -198,6 +243,7 @@ async function renderSummaryMarkdown(ctx = {}) {
 
     const totals = diff?.summary?.totals || { NEW: 0, REMOVED: 0, UNCHANGED: 0 };
     const by = diff?.summary?.by_severity_and_state || {};
+    const items = Array.isArray(diff?.items) ? diff.items : [];
 
     const lines = [];
     lines.push(`# Vulnerability Diff — Summary`);
@@ -207,6 +253,9 @@ async function renderSummaryMarkdown(ctx = {}) {
     lines.push('');
     lines.push('**By Severity and State**');
     lines.push(tableFromBySeverityAndState(by));
+    lines.push('');
+    lines.push('**All Vulnerabilities**');
+    lines.push(fullItemsTable(items));
     lines.push('');
 
     const content = lines.join('\n');
@@ -224,6 +273,7 @@ async function renderSummaryMarkdown(ctx = {}) {
  * Generate PR comment ONLY if NEW > 0 and the event is pull_request.
  * Upsert a single reusable comment (identified by REUSABLE_COMMENT_MARKER).
  * Also writes the content to ./dist/markdown/pr-comment.md if generated.
+ * Vulnerability IDs are hyperlinked to their advisory pages.
  */
 async function renderPrCommentMarkdown(ctx = {}) {
   core.startGroup('[render/markdown] pr-comment');
@@ -289,9 +339,11 @@ async function renderPrCommentMarkdown(ctx = {}) {
 }
 
 /**
- * Produce Slack-friendly markdown (table-like) and write to:
- * - ./dist/markdown/slack.md (always)
- * Delivery happens ONLY if slack_webhook_url input is provided.
+ * Produce Slack-friendly message similar to the screenshot:
+ * - Header with repo, base→head, PR link (when available)
+ * - A bulleted list of NEW vulnerabilities with severity icons and advisory links
+ * - Writes ./dist/markdown/slack.md (always)
+ * - Delivery only if slack_webhook_url is provided
  */
 async function renderSlackMarkdown(ctx = {}) {
   core.startGroup('[render/markdown] slack');
@@ -301,20 +353,39 @@ async function renderSlackMarkdown(ctx = {}) {
     const outFile = path.join(outDir, 'slack.md');
 
     const diff = await readJSON(path.join(distDir, 'diff.json'));
+    const base = await readJSON(path.join(distDir, 'base.json'));
+    const head = await readJSON(path.join(distDir, 'head.json'));
+    void base; void head;
+
     const totals = diff?.summary?.totals || { NEW: 0, REMOVED: 0, UNCHANGED: 0 };
 
     const newItems = (diff?.items || [])
       .filter(v => String(v.state).toUpperCase() === 'NEW')
       .sort((a, b) => sevRank(a.severity) - sevRank(b.severity));
 
-    const topNewList = renderSimpleNewList(newItems, 5);
+    // Context bits
+    const { owner, repo } = github.context.repo || {};
+    const baseRef = core.getInput('base_ref') || 'base';
+    const headRef = core.getInput('head_ref') || 'head';
+    const prNum = github.context.payload?.pull_request?.number;
+    const prUrl = prNum
+      ? `https://github.com/${owner}/${repo}/pull/${prNum}`
+      : '';
 
     const lines = [];
-    lines.push(`*Vulnerability Diff — Slack Digest*`);
-    lines.push(formatTotalsLine(totals));
+    const emojiAlert = totals.NEW > 0 ? ':rotating_light:' : ':white_check_mark:';
+    lines.push(`${emojiAlert}  *${totals.NEW} new vulnerabilities introduced*`);
+    lines.push(`• Repo: \`${owner}/${repo}\``);
+    lines.push(`• Base: \`${baseRef}\``);
+    lines.push(`• Head: \`${headRef}\``);
+    if (prUrl) lines.push(`• PR: ${prUrl}`);
     lines.push('');
-    lines.push('*Top NEW*');
-    lines.push(topNewList);
+    if (newItems.length > 0) {
+      lines.push('*New Vulnerabilities:*');
+      lines.push(renderSimpleNewListForSlack(newItems, 50));
+    } else {
+      lines.push('_No NEW vulnerabilities._');
+    }
     lines.push('');
     const content = lines.join('\n');
 
