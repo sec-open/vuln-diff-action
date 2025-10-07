@@ -10,7 +10,6 @@ const { gitFetchAll, resolveRefToSha, shortSha, commitInfo, prepareIsolatedCheck
 const { generateSbom } = require('./sbom');
 const { scanSbomWithGrype } = require('./grype');
 const { makeMeta, writeMeta } = require('./meta');
-const { uploadPhase1Artifact } = require('./artifact');
 
 async function phase1() {
   if (os.platform() !== 'linux') {
@@ -82,10 +81,7 @@ async function phase1() {
   });
   await writeMeta(l.meta, meta);
 
-  // 7) Upload artifact (ONLY Phase-1 outputs)
-  const result = await uploadPhase1Artifact({ baseRef: base_ref, headRef: head_ref });
-
-  // 8) Cleanup worktrees (best-effort)
+  // 7) Cleanup worktrees (best-effort)
   await Promise.all([
     cleanupWorktree(baseCheckout, repoRoot),
     cleanupWorktree(headCheckout, repoRoot),

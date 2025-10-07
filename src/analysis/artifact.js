@@ -1,43 +1,85 @@
-// Upload ONLY Phase-1 outputs — compatible with @actions/artifact v1/v2/v3
-const artifact = require('@actions/artifact');
+// Sube un ÚNICO artifact que contiene TODO el contenido de ./dist
+// Compatible con @actions/artifact v1/v2/v3
+
 const path = require('path');
-const { layout, sanitizeName } = require('./paths');
+const fs = require('fs');
+const fsp = require('fs/promises');
 
-async function uploadPhase1Artifact({ baseRef, headRef }) {
-  const l = layout();
-  const name = `vulnerability-diff-${sanitizeName(baseRef)}-vs-${sanitizeName(headRef)}-phase1`;
+function sanitizeName(s) {
+  return String(s ?? '')
+    .replace(/[^\w.\-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    || 'unknown';
+}
 
-  const files = [
-    l.meta,
-    l.git.base,
-    l.git.head,
-    l.sbom.base,
-    l.sbom.head,
-    l.grype.base,
-    l.grype.head,
-  ];
-  const root = l.root;
+async function collectAllFiles(dir) {
+  const files = [];
+  async function walk(d) {
+    const entries = await fsp.readdir(d, { withFileTypes: true });
+    for (const e of entries) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) await walk(p);
+      else files.push(p);
+    }
+  }
+  await walk(dir);
+  return files;
+}
 
-  // Detect the proper upload function depending on artifact version
-  const uploadFn =
-    (artifact?.uploadArtifact) ||
-    (artifact?.default?.uploadArtifact) ||
-    (typeof artifact.create === 'function'
-      ? artifact.create().uploadArtifact
-      : null);
+function resolveUploadFunction() {
+  let artifactLib;
+  try {
+    artifactLib = require('@actions/artifact');
+  } catch {
+    return null;
+  }
+  if (typeof artifactLib?.uploadArtifact === 'function') {
+    return artifactLib.uploadArtifact.bind(artifactLib);
+  }
+  if (typeof artifactLib?.default?.uploadArtifact === 'function') {
+    return artifactLib.default.uploadArtifact.bind(artifactLib.default);
+  }
+  if (typeof artifactLib?.create === 'function') {
+    const client = artifactLib.create();
+    if (typeof client?.uploadArtifact === 'function') {
+      return client.uploadArtifact.bind(client);
+    }
+  }
+  return null;
+}
 
+/**
+ * Sube un ÚNICO artifact con TODO ./dist
+ * Nombre por defecto: vulnerability-diff-<base>-vs-<head>-phase2
+ */
+async function uploadDistAsSingleArtifact({
+  baseRef,
+  headRef,
+  distDir = './dist',
+  nameOverride,               // opcional: fuerza el nombre del artifact
+  continueOnError = false,
+} = {}) {
+  const root = path.resolve(distDir);
+  const files = await collectAllFiles(root);
+  if (!files.length) {
+    throw new Error(`Artifact upload: no files found under ${root}`);
+  }
+
+  const name =
+    nameOverride ||
+    `vulnerability-diff-${sanitizeName(baseRef)}-vs-${sanitizeName(headRef)}-phase2`;
+
+  const uploadFn = resolveUploadFunction();
   if (!uploadFn) {
     throw new Error('Cannot find uploadArtifact() in @actions/artifact API');
   }
 
-  const response = await uploadFn(
-    name,
-    files,
-    root,
-    { continueOnError: false }
-  );
-
-  return response;
+  // Sube TODO dist como un ÚNICO artifact
+  return await uploadFn(name, files, root, { continueOnError });
 }
 
-module.exports = { uploadPhase1Artifact };
+module.exports = {
+  sanitizeName,
+  uploadDistAsSingleArtifact,
+};
