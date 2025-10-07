@@ -59,7 +59,7 @@ async function markdown_init({ distDir = './dist' } = {}) {
  * - For now, runs only Phase 3.1 (Markdown).
  * - Later, this function will also call Phase 3.2 (HTML) and Phase 3.3 (PDF).
  */
-async function phase3(options = {}) {
+async function render(options = {}) {
   const distDir = options.distDir || './dist';
 
   core.info('[render] Phase 3: start');
@@ -72,6 +72,6 @@ async function phase3(options = {}) {
 }
 
 module.exports = {
-  phase3,
+  render,
   markdown_init, // exposed explicitly as requested
 };

@@ -18,7 +18,7 @@ const { generateSbom } = require('./sbom');
 const { scanSbomWithGrype } = require('./grype');
 const { makeMeta, writeMeta } = require('./meta');
 
-async function phase1() {
+async function analysis() {
   // Small helper to time steps
   const time = () => {
     const start = Date.now();
@@ -167,4 +167,4 @@ async function phase1() {
   }
 }
 
-module.exports = { phase1 };
+module.exports = { analysis };

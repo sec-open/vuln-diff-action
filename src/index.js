@@ -1,29 +1,27 @@
-// src/index.js
 const core = require('@actions/core');
 const fs = require('fs/promises');
 const path = require('path');
-
-const { phase1 } = require('./analysis/orchestrator');
+const { analysis } = require('./analysis/analysis');
 const { uploadDistAsSingleArtifact } = require('./utils/artifact');
 
-let phase2;
+let normalization;
 try {
-  ({ phase2 } = require('./normalization/orchestrator')); // phase 2 may not exist in early builds
+  ({ normalization } = require('./normalization/normalization')); // phase 2 may not exist in early builds
 } catch (e) {
   core.warning(`[vuln-diff] Phase 2 not available in this build: ${e?.message || e}`);
 }
 
-let phase3;
+let render;
 try {
-  ({ phase3 } = require('./render/orchestrator')); // new: render orchestrator (Phase 3 entrypoint)
+  ({ render } = require('./render/render')); // new: render orchestrator (Phase 3 entrypoint)
 } catch (e) {
   core.warning(`[vuln-diff] Phase 3 not available in this build: ${e?.message || e}`);
 }
 
 module.exports = {
-  phase1,
-  ...(phase2 ? { phase2 } : {}),
-  ...(phase3 ? { phase3 } : {}),
+  analysis,
+  ...(normalization ? { normalization } : {}),
+  ...(render ? { render } : {}),
 };
 
 async function runMain() {
@@ -33,7 +31,7 @@ async function runMain() {
   // Phase 1
   try {
     core.info('[vuln-diff] Phase 1: start');
-    await phase1();
+    await analysis();
     core.info('[vuln-diff] Phase 1: done');
   } catch (e) {
     core.setFailed(`[vuln-diff] Phase 1 failed: ${e?.message || e}`);
@@ -41,12 +39,12 @@ async function runMain() {
   }
 
   // Phase 2
-  if (!phase2) {
+  if (!normalization) {
     core.info('[vuln-diff] Phase 2: skipped (not available in this build)');
   } else {
     try {
       core.info('[vuln-diff] Phase 2: start');
-      await phase2();
+      await normalization();
       core.info('[vuln-diff] Phase 2: done');
     } catch (e) {
       core.setFailed(`[vuln-diff] Phase 2 failed: ${e?.message || e}`);
@@ -55,12 +53,12 @@ async function runMain() {
   }
 
   // Phase 3 (Render) — always attempt if available
-  if (!phase3) {
+  if (!render) {
     core.info('[vuln-diff] Phase 3: skipped (not available in this build)');
   } else {
     try {
       core.info('[vuln-diff] Phase 3: start');
-      await phase3({ distDir });
+      await render({ distDir });
       core.info('[vuln-diff] Phase 3: done');
     } catch (e) {
       core.setFailed(`[vuln-diff] Phase 3 failed: ${e?.message || e}`);
