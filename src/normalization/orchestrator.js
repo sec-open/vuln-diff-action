@@ -1,3 +1,4 @@
+// src/normalization/orchestrator.js
 const core = require('@actions/core');
 const fs = require('fs/promises');
 const path = require('path');
@@ -10,58 +11,63 @@ const { uploadDistAsSingleArtifact } = require('../utils/artifact');
 
 /**
  * Phase 2 entrypoint.
- * - Lee únicamente ./dist/ (meta.json, sbom/*.json, grype/*.json, git/*.json)
- * - Escribe base.json, head.json, diff.json en ./dist/
- * - Sube un ÚNICO artifact con TODO el directorio ./dist
+ * - Reads ONLY ./dist/ outputs from Phase 1 (meta.json, sbom/*.json, grype/*.json, git/*.json)
+ * - Writes base.json, head.json, diff.json into ./dist/
+ * - Uploads a SINGLE artifact containing the entire ./dist directory (Phase 1 + Phase 2)
  */
 async function phase2(options = {}) {
   const distDir = options.distDir || './dist';
   const absDist = path.resolve(distDir);
 
-  core.info(`[vuln-diff][phase2] dist dir: ${absDist}`);
+  core.info(`[vuln-diff][phase2] dist directory: ${absDist}`);
 
-  // Sanity check: dist existe y tiene meta.json
+  // Sanity check: Phase 1 must have produced meta.json
   try {
     await fs.access(path.join(absDist, 'meta.json'));
   } catch {
-    throw new Error(`[phase2] dist no preparado: falta ${path.join(absDist, 'meta.json')}. ¿Se ejecutó Phase 1?`);
+    throw new Error(`[phase2] dist not ready: missing ${path.join(absDist, 'meta.json')}. Was Phase 1 executed?`);
   }
 
-  // Cargar salidas de Fase 1
-  core.info('[vuln-diff][phase2] leyendo salidas de Phase 1…');
+  // Read Phase 1 outputs
+  core.info('[vuln-diff][phase2] reading Phase 1 outputs…');
   const ctx = await readPhase1Dist(distDir);
   const { meta, git, sbom, grype } = ctx;
 
-  // Indexar SBOM por rama
-  core.info('[vuln-diff][phase2] indexando SBOM (base)…');
+  // Index SBOM for each side
+  core.info('[vuln-diff][phase2] indexing SBOM (base)…');
   const sbomBaseIdx = buildSbomIndex(sbom.base);
-  core.info('[vuln-diff][phase2] indexando SBOM (head)…');
+  core.info('[vuln-diff][phase2] indexing SBOM (head)…');
   const sbomHeadIdx = buildSbomIndex(sbom.head);
 
-  // 2.1: Normalización por rama (per-occurrence model)
-  core.info('[vuln-diff][phase2] normalizando BASE…');
+  // Phase 2.1 — Normalize per side (per-occurrence model)
+  core.info('[vuln-diff][phase2] normalizing BASE…');
   const baseDoc = normalizeOneSide(grype.base, sbomBaseIdx, meta, git.base, { limitPaths: 5 });
-  core.info(`[vuln-diff][phase2] BASE: ${baseDoc.summary.total} ocurrencias`);
+  core.info(`[vuln-diff][phase2] BASE occurrences: ${baseDoc.summary.total}`);
 
-  core.info('[vuln-diff][phase2] normalizando HEAD…');
+  core.info('[vuln-diff][phase2] normalizing HEAD…');
   const headDoc = normalizeOneSide(grype.head, sbomHeadIdx, meta, git.head, { limitPaths: 5 });
-  core.info(`[vuln-diff][phase2] HEAD: ${headDoc.summary.total} ocurrencias`);
+  core.info(`[vuln-diff][phase2] HEAD occurrences: ${headDoc.summary.total}`);
 
-  // Guardar
+  // Persist normalized outputs
   const baseOut = path.join(distDir, 'base.json');
   const headOut = path.join(distDir, 'head.json');
   await writeJSON(baseOut, baseDoc);
   await writeJSON(headOut, headDoc);
-  core.info('[vuln-diff][phase2] escritos base.json y head.json');
+  core.info('[vuln-diff][phase2] wrote base.json and head.json');
 
-  // 2.2: Diff NEW/REMOVED/UNCHANGED
-  core.info('[vuln-diff][phase2] calculando diff…');
+  // Phase 2.2 — Build diff (NEW/REMOVED/UNCHANGED)
+  core.info('[vuln-diff][phase2] computing diff…');
   const diffDoc = buildDiff(baseDoc, headDoc, meta);
   const diffOut = path.join(distDir, 'diff.json');
   await writeJSON(diffOut, diffDoc);
-  core.info(`[vuln-diff][phase2] escrito diff.json — totales: NEW=${diffDoc.summary.totals.NEW}, REMOVED=${diffDoc.summary.totals.REMOVED}, UNCHANGED=${diffDoc.summary.totals.UNCHANGED}`);
+  core.info(
+    `[vuln-diff][phase2] wrote diff.json — totals: ` +
+    `NEW=${diffDoc.summary.totals.NEW}, ` +
+    `REMOVED=${diffDoc.summary.totals.REMOVED}, ` +
+    `UNCHANGED=${diffDoc.summary.totals.UNCHANGED}`
+  );
 
-  // Conteo de ficheros en dist (útil para diagnosticar por qué no sube)
+  // Count files under dist (useful when diagnosing artifact uploads)
   let fileCount = 0;
   async function countFiles(dir) {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -73,24 +79,24 @@ async function phase2(options = {}) {
     return fileCount;
   }
   await countFiles(absDist);
-  core.info(`[vuln-diff][phase2] ficheros a subir en artifact: ${fileCount}`);
+  core.info(`[vuln-diff][phase2] files to upload in artifact: ${fileCount}`);
 
-  // Upload results as single artifact (TODO: si quieres nombre único por refs, quita nameOverride)
+  // Upload results as a single artifact
   const baseRef = meta?.inputs?.base_ref || git?.base?.ref || 'base';
   const headRef = meta?.inputs?.head_ref || git?.head?.ref || 'head';
 
   try {
-    core.info(`[vuln-diff][phase2] subiendo artifact único (base=${baseRef}, head=${headRef})…`);
+    core.info(`[vuln-diff][phase2] uploading single artifact (base=${baseRef}, head=${headRef})…`);
     const response = await uploadDistAsSingleArtifact({
       baseRef,
       headRef,
-      distDir: './dist',
-      // nameOverride: `vulnerability-diff-${baseRef}-vs-${headRef}-phase2`, // si prefieres el nombre “oficial”
-      nameOverride: 'report-files', // como tienes ahora
+      distDir, // use the provided distDir
+      // If you want reference-based artifact names, remove nameOverride and let the uploader compute it:
+      // nameOverride: `vulnerability-diff-${baseRef}-vs-${headRef}-phase2`,
+      nameOverride: 'report-files', // keep current fixed name if preferred
     });
-    core.info(`[vuln-diff][phase2] artifact subido OK: ${JSON.stringify(response)}`);
+    core.info(`[vuln-diff][phase2] artifact upload OK: ${JSON.stringify(response)}`);
   } catch (e) {
-    // Esto ayuda si el problema está en @actions/artifact (v1/v2/v3) o si hay ficheros ausentes.
     core.warning(`[vuln-diff][phase2] artifact upload FAILED: ${e?.message || e}`);
     throw e;
   }
