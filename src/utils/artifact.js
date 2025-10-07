@@ -64,10 +64,8 @@ function resolveArtifactClient() {
  * Sube un ÚNICO artifact con TODO ./dist
  */
 async function uploadDistAsSingleArtifact({
-  baseRef,
-  headRef,
   distDir = './dist',
-  nameOverride,
+  name,
   continueOnError = false,
 } = {}) {
   const root = path.resolve(distDir);
@@ -92,10 +90,6 @@ async function uploadDistAsSingleArtifact({
     core.warning(`[artifact] some files are outside of root and will break upload:\n- ${invalid.join('\n- ')}`);
     throw new Error('Artifact upload aborted: files outside rootDirectory');
   }
-
-  const name =
-    nameOverride ||
-    `vulnerability-diff-${sanitizeName(baseRef)}-vs-${sanitizeName(headRef)}-phase2`;
 
   core.info(`[artifact] uploading: name="${name}" (continueOnError=${continueOnError})`);
 

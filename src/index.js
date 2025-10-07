@@ -55,19 +55,11 @@ async function runMain() {
     await countFiles(absDist);
     core.info(`[vuln-diff][upload] files to upload in artifact: ${fileCount}`);
 
-    // Upload results as a single artifact
-    const baseRef = meta?.inputs?.base_ref || git?.base?.ref || 'base';
-    const headRef = meta?.inputs?.head_ref || git?.head?.ref || 'head';
-
     try {
       core.info(`[vuln-diff][upload] uploading single artifact (base=${baseRef}, head=${headRef})…`);
       const response = await uploadDistAsSingleArtifact({
-        baseRef,
-        headRef,
-        distDir, // use the provided distDir
-        // If you want reference-based artifact names, remove nameOverride and let the uploader compute it:
-        // nameOverride: `vulnerability-diff-${baseRef}-vs-${headRef}-phase2`,
-        nameOverride: 'report-files', // keep current fixed name if preferred
+        distDir,
+        name: 'report-files', // keep current fixed name if preferred
       });
       core.info(`[vuln-diff][upload] artifact upload OK: ${JSON.stringify(response)}`);
     } catch (e) {
