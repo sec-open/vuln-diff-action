@@ -56,7 +56,7 @@ async function runMain() {
     core.info(`[vuln-diff][upload] files to upload in artifact: ${fileCount}`);
 
     try {
-      core.info(`[vuln-diff][upload] uploading single artifact (base=${baseRef}, head=${headRef})…`);
+      core.info(`[vuln-diff][upload] uploading single artifact`);
       const response = await uploadDistAsSingleArtifact({
         distDir,
         name: 'report-files', // keep current fixed name if preferred
