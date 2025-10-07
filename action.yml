@@ -22,6 +22,11 @@ inputs:
     description: 'GitHub token for PR comment upsert in pull_request events'
     required: false
     default: '${{ github.token }}'
+  html_logo_url:
+    description: 'Optional logo URL (absolute or relative within the bundle) for the HTML header'
+    required: false
+    default: ''
+
 outputs:
   base_sha:
     description: 'Resolved SHA from base_ref'
