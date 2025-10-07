@@ -15,6 +15,80 @@ const https = require('https');
 const SEVERITY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
 const REUSABLE_COMMENT_MARKER = '<!-- VULN-DIFF-PR-COMMENT -->';
 
+function mdsafe(s) {
+  return (s === undefined || s === null || s === '') ? 'n/a' : String(s);
+}
+function shortSha(sha) {
+  return typeof sha === 'string' && sha.length >= 7 ? sha.slice(0,7) : (sha || '');
+}
+function safe(obj, path, fallback) {
+  return path.split('.').reduce((o,k)=> (o && o[k] !== undefined) ? o[k] : undefined, obj) ?? fallback;
+}
+
+function cardBranches(diff, base, head) {
+  const baseRef = mdsafe(safe(diff, 'meta.inputs.base_ref', safe(base, 'git.ref', '')));
+  const headRef = mdsafe(safe(diff, 'meta.inputs.head_ref', safe(head, 'git.ref', '')));
+
+  const baseSha = shortSha(safe(diff, 'meta.git.base.sha', safe(base, 'git.sha', '')));
+  const headSha = shortSha(safe(diff, 'meta.git.head.sha', safe(head, 'git.sha', '')));
+
+  const baseTitle = mdsafe(safe(diff, 'meta.git.base.title', safe(base, 'git.title', '')));
+  const headTitle = mdsafe(safe(diff, 'meta.git.head.title', safe(head, 'git.title', '')));
+
+  const baseAuthor = mdsafe(safe(diff, 'meta.git.base.author_name', safe(base, 'git.author_name', '')));
+  const headAuthor = mdsafe(safe(diff, 'meta.git.head.author_name', safe(head, 'git.author_name', '')));
+
+  const baseCommitter = mdsafe(safe(diff, 'meta.git.base.committer_name', safe(base, 'git.committer_name', '')));
+  const headCommitter = mdsafe(safe(diff, 'meta.git.head.committer_name', safe(head, 'git.committer_name', '')));
+
+  const baseTime = mdsafe(safe(diff, 'meta.git.base.committed_at', safe(base, 'git.committed_at', '')));
+  const headTime = mdsafe(safe(diff, 'meta.git.head.committed_at', safe(head, 'git.committed_at', '')));
+
+  return [
+    `> **Base**`,
+    `> - Ref: \`${baseRef}\``,
+    `> - SHA: \`${baseSha || 'n/a'}\``,
+    `> - Title: ${baseTitle}`,
+    `> - Author: ${baseAuthor}`,
+    `> - Committer: ${baseCommitter}`,
+    `> - Committed at: ${baseTime}`,
+    `>`,
+    `> **Head**`,
+    `> - Ref: \`${headRef}\``,
+    `> - SHA: \`${headSha || 'n/a'}\``,
+    `> - Title: ${headTitle}`,
+    `> - Author: ${headAuthor}`,
+    `> - Committer: ${headCommitter}`,
+    `> - Committed at: ${headTime}`,
+  ].join('\n');
+}
+
+function cardTools(diff) {
+  const tools = safe(diff, 'meta.tools', {});
+  const entries = Object.entries(tools || {});
+  if (!entries.length) {
+    return `> **Tools**\n> - n/a`;
+  }
+  const lines = entries.map(([k,v]) => `> - ${k}: ${typeof v === 'string' ? v : '`' + JSON.stringify(v) + '`'}`);
+  return [`> **Tools**`, ...lines].join('\n');
+}
+
+function cardInputs(diff) {
+  const inputs = safe(diff, 'meta.inputs', {});
+  const entries = Object.entries(inputs || {});
+  if (!entries.length) {
+    return `> **Inputs**\n> - n/a`;
+  }
+  const lines = entries.map(([k,v]) => `> - ${k}: \`${mdsafe(v)}\``);
+  return [`> **Inputs**`, ...lines].join('\n');
+}
+
+function totalsLine(totals) {
+  return `**Totals** — NEW: ${totals?.NEW ?? 0} · REMOVED: ${totals?.REMOVED ?? 0} · UNCHANGED: ${totals?.UNCHANGED ?? 0}`;
+}
+
+
+
 function sevRank(s) {
   const idx = SEVERITY_ORDER.indexOf(String(s || '').toUpperCase());
   return idx >= 0 ? idx : SEVERITY_ORDER.length;
@@ -164,35 +238,6 @@ function coalesceGit(doc) {
   };
 }
 
-function buildComparisonCard({ diff, base, head }) {
-  const { owner, repo } = github.context.repo || {};
-  const inputsBase = core.getInput('base_ref') || 'base';
-  const inputsHead = core.getInput('head_ref') || 'head';
-
-  const baseGit = coalesceGit(base);
-  const headGit = coalesceGit(head);
-
-  const baseRef = baseGit.ref || inputsBase;
-  const headRef = headGit.ref || inputsHead;
-  const baseSha = shortSha(baseGit.sha || '');
-  const headSha = shortSha(headGit.sha || '');
-
-  const tools = coalesceTools(diff, base, head);
-  const toolList = Object.entries(tools)
-    .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
-    .join(' · ') || 'n/a';
-
-  const header = `| Key | Value |
-|---|---|`;
-  const lines = [
-    `| Repo | \`${owner}/${repo}\` |`,
-    `| Base | \`${baseRef}\` → \`${baseSha || '-'}\` |`,
-    `| Head | \`${headRef}\` → \`${headSha || '-'}\` |`,
-    `| Tools | ${toolList} |`,
-  ];
-
-  return ['> **Comparison**', header, ...lines].join('\n');
-}
 
 async function upsertPrComment({ owner, repo, issue_number, body, octokit }) {
   const existing = await octokit.paginate(octokit.rest.issues.listComments, {
@@ -272,6 +317,32 @@ async function postToSlackWebhook(webhookUrl, text) {
  * Still includes a full table of ALL vulnerabilities: | Severity | Vulnerability | Package | Status |
  */
 async function renderSummaryMarkdown(ctx = {}) {
+  const core = require('@actions/core');
+  const path = require('path');
+  const { promises: fs } = require('fs');
+
+  async function readJSON(p) {
+    const text = await fs.readFile(p, 'utf8');
+    return JSON.parse(text);
+  }
+  async function writeText(p, content) {
+    const dir = require('path').dirname(p);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(p, content, 'utf8');
+  }
+  async function appendToJobSummary(markdown) {
+    try {
+      await core.summary.addRaw(markdown, true).write();
+    } catch {
+      const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+      if (summaryFile) {
+        await fs.appendFile(summaryFile, `\n${markdown}\n`, 'utf8');
+      } else {
+        core.warning('[render/markdown] Could not append to $GITHUB_STEP_SUMMARY');
+      }
+    }
+  }
+
   core.startGroup('[render/markdown] summary');
   try {
     const distDir = ctx.distDir || path.resolve('./dist');
@@ -279,23 +350,79 @@ async function renderSummaryMarkdown(ctx = {}) {
     const outFile = path.join(outDir, 'summary.md');
 
     const diff = await readJSON(path.join(distDir, 'diff.json'));
-    const base = await readJSON(path.join(distDir, 'base.json'));
-    const head = await readJSON(path.join(distDir, 'head.json'));
+    const base = await readJSON(path.join(distDir, 'base.json')).catch(() => ({}));
+    const head = await readJSON(path.join(distDir, 'head.json')).catch(() => ({}));
+
+    const generatedAt =
+      safe(diff, 'generated_at', '') || safe(diff, 'meta.generated_at', '') || new Date().toISOString();
 
     const totals = diff?.summary?.totals || { NEW: 0, REMOVED: 0, UNCHANGED: 0 };
     const items = Array.isArray(diff?.items) ? diff.items : [];
 
+    // Repo name (owner/repo)
+    const repoFull =
+      safe(diff, 'meta.repo.full', '') ||
+      `${safe(diff, 'meta.repo.owner', 'owner')}/${safe(diff, 'meta.repo.name', 'repo')}`;
+
     const lines = [];
     lines.push(`# Vulnerability Diff — Summary`);
-    lines.push(`_Generated at ${nowISO()}_`);
     lines.push('');
-    // Comparison card
-    lines.push(buildComparisonCard({ diff, base, head }));
+    lines.push(`_Generated at ${generatedAt}_`);
     lines.push('');
+
+    // --- NEW: cards instead of the old table "Comparison" ---
+    lines.push(cardBranches(diff, base, head));
+    lines.push('');
+    lines.push(cardTools(diff));
+    lines.push('');
+    lines.push(cardInputs(diff));
+    lines.push('');
+
     // Totals
-    lines.push(formatTotalsLine(totals));
+    lines.push(totalsLine(totals));
     lines.push('');
-    // Full table (ALL vulns)
+
+    // All vulnerabilities table (keep your existing helper if you had one)
+    // Replace these two helpers with your existing implementations if they differ:
+    function asGav(v) {
+      const pkg = v?.package || {};
+      const g = pkg.groupId ?? 'unknown';
+      const a = pkg.artifactId ?? 'unknown';
+      const ver = pkg.version ?? 'unknown';
+      return `${g}:${a}:${ver}`;
+    }
+    function vulnerabilityUrl(id) {
+      if (!id || typeof id !== 'string') return null;
+      const up = id.toUpperCase();
+      if (up.startsWith('CVE-')) return `https://nvd.nist.gov/vuln/detail/${up}`;
+      if (up.startsWith('GHSA-')) return `https://github.com/advisories/${up}`;
+      return null;
+    }
+    function hyperlinkId(id) {
+      const url = vulnerabilityUrl(id);
+      return url ? `[${id}](${url})` : id || 'UNKNOWN';
+    }
+    function fullItemsTable(list) {
+      const header = `| Severity | Vulnerability | Package | Status |
+|---|---|---|---|`;
+      const rows = (list || [])
+        .slice()
+        .sort((a, b) => {
+          const order = {'CRITICAL':0,'HIGH':1,'MEDIUM':2,'LOW':3,'UNKNOWN':4};
+          const ra = order[String(a.severity||'UNKNOWN').toUpperCase()] ?? 5;
+          const rb = order[String(b.severity||'UNKNOWN').toUpperCase()] ?? 5;
+          return ra - rb;
+        })
+        .map(v => {
+          const sev = String(v.severity || 'UNKNOWN').toUpperCase();
+          const id = v.id || v.ids?.ghsa || v.ids?.cve || 'UNKNOWN';
+          const gav = asGav(v);
+          const state = String(v.state || 'UNKNOWN').toUpperCase();
+          return `| ${sev} | ${hyperlinkId(id)} | \`${gav}\` | ${state} |`;
+        });
+      return [header, ...rows].join('\n');
+    }
+
     lines.push('**All Vulnerabilities**');
     lines.push(fullItemsTable(items));
     lines.push('');
@@ -306,10 +433,14 @@ async function renderSummaryMarkdown(ctx = {}) {
 
     await appendToJobSummary(content);
     core.info('[render/markdown] appended summary to $GITHUB_STEP_SUMMARY');
+  } catch (e) {
+    core.setFailed(`[render/markdown] summary failed: ${e?.message || e}`);
+    throw e;
   } finally {
     core.endGroup();
   }
 }
+
 
 /**
  * Generate PR comment ONLY if NEW > 0 and the event is pull_request.
