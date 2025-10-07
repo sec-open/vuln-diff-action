@@ -1,8 +1,8 @@
 // src/render/markdown/index.js
-// Phase 3.1 (Markdown) implementation
+// Phase 3.1 (Markdown)
 // - Reads ONLY ./dist/{diff.json, base.json, head.json}
-// - Writes markdown outputs under ./dist/render/markdown/
-// - Adds summary.md content to $GITHUB_STEP_SUMMARY
+// - Writes markdown outputs under ./dist/markdown/
+// - Appends summary.md to $GITHUB_STEP_SUMMARY
 // - Upserts a reusable PR comment (only on pull_request and NEW > 0)
 // - Slack delivery only if slack_webhook_url input is provided
 
@@ -47,11 +47,9 @@ function formatTotalsLine(totals) {
 }
 
 function tableFromBySeverityAndState(by) {
-  // Build a compact table for by_severity_and_state (NEW/REMOVED/UNCHANGED per severity)
   const header = `| Severity | NEW | REMOVED | UNCHANGED |
 |---|---:|---:|---:|`;
   const lines = [];
-
   for (const sev of SEVERITY_ORDER) {
     const row = by?.[sev] || {};
     lines.push(`| ${sev} | ${row.NEW ?? 0} | ${row.REMOVED ?? 0} | ${row.UNCHANGED ?? 0} |`);
@@ -88,10 +86,8 @@ function renderSimpleNewList(newItems, topN = 5) {
 
 async function appendToJobSummary(markdown) {
   try {
-    // Prefer core.summary API (GH Actions Node16/20)
     await core.summary.addRaw(markdown, true).write();
   } catch {
-    // Fallback to env var path (should not be needed in modern runners)
     const summaryFile = process.env.GITHUB_STEP_SUMMARY;
     if (summaryFile) {
       await fs.appendFile(summaryFile, `\n${markdown}\n`, 'utf8');
@@ -114,30 +110,15 @@ function getGithubToken() {
 }
 
 async function upsertPrComment({ owner, repo, issue_number, body, octokit }) {
-  // Find existing comment with our marker, update it; otherwise create a new one
-  const hiddenMarker = REUSABLE_COMMENT_MARKER;
-
   const existing = await octokit.paginate(octokit.rest.issues.listComments, {
     owner, repo, issue_number, per_page: 100,
   });
-
-  const mine = existing.find(c => typeof c.body === 'string' && c.body.includes(hiddenMarker));
-
+  const mine = existing.find(c => typeof c.body === 'string' && c.body.includes(REUSABLE_COMMENT_MARKER));
   if (mine) {
-    await octokit.rest.issues.updateComment({
-      owner,
-      repo,
-      comment_id: mine.id,
-      body,
-    });
+    await octokit.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
     return { action: 'updated', id: mine.id };
   } else {
-    const res = await octokit.rest.issues.createComment({
-      owner,
-      repo,
-      issue_number,
-      body,
-    });
+    const res = await octokit.rest.issues.createComment({ owner, repo, issue_number, body });
     return { action: 'created', id: res?.data?.id };
   }
 }
@@ -147,12 +128,7 @@ async function postToSlackWebhook(webhookUrl, text) {
     core.info('[render/markdown] Slack webhook not provided; skipping delivery');
     return { delivered: false, status: 'no-webhook' };
   }
-
-  const payload = {
-    text, // simple text body; Slack accepts `text` for Incoming Webhooks
-  };
-
-  // Prefer global fetch if available (Node 18/20), fallback to https
+  const payload = { text };
   if (typeof fetch === 'function') {
     const res = await fetch(webhookUrl, {
       method: 'POST',
@@ -168,21 +144,15 @@ async function postToSlackWebhook(webhookUrl, text) {
     core.info('[render/markdown] Slack delivery OK');
     return { delivered: true, status: 'ok' };
   }
-
-  // https fallback
-  await new Promise((resolve, reject) => {
+  await new Promise((resolve) => {
     const data = Buffer.from(JSON.stringify(payload), 'utf8');
     const url = new URL(webhookUrl);
-
     const req = https.request(
       {
         method: 'POST',
         hostname: url.hostname,
         path: url.pathname + (url.search || ''),
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': data.length,
-        },
+        headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
       },
       (res) => {
         let body = '';
@@ -190,22 +160,20 @@ async function postToSlackWebhook(webhookUrl, text) {
         res.on('end', () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
             core.info('[render/markdown] Slack delivery OK');
-            resolve();
           } else {
             core.warning(`[render/markdown] Slack webhook failed: ${res.statusCode} :: ${body}`);
-            resolve(); // do not reject to avoid failing job
           }
+          resolve();
         });
       }
     );
     req.on('error', (err) => {
       core.warning(`[render/markdown] Slack webhook error: ${err?.message || err}`);
-      resolve(); // do not fail the job
+      resolve();
     });
     req.write(data);
     req.end();
   });
-
   return { delivered: true, status: 'ok-https' };
 }
 
@@ -213,21 +181,20 @@ async function postToSlackWebhook(webhookUrl, text) {
 
 /**
  * Build concise job summary for GitHub Action and write it to:
- * - ./dist/render/markdown/summary.md (always)
+ * - ./dist/markdown/summary.md (always)
  * - $GITHUB_STEP_SUMMARY (append same content)
  */
 async function renderSummaryMarkdown(ctx = {}) {
   core.startGroup('[render/markdown] summary');
   try {
     const distDir = ctx.distDir || path.resolve('./dist');
-    const outDir = path.join(distDir, 'render', 'markdown');
+    const outDir = path.join(distDir, 'markdown');
     const outFile = path.join(outDir, 'summary.md');
 
-    // Read Phase-2 JSONs
     const diff = await readJSON(path.join(distDir, 'diff.json'));
     const base = await readJSON(path.join(distDir, 'base.json'));
     const head = await readJSON(path.join(distDir, 'head.json'));
-    void base; void head; // kept for future use; summary uses mostly diff
+    void base; void head;
 
     const totals = diff?.summary?.totals || { NEW: 0, REMOVED: 0, UNCHANGED: 0 };
     const by = diff?.summary?.by_severity_and_state || {};
@@ -256,18 +223,19 @@ async function renderSummaryMarkdown(ctx = {}) {
 /**
  * Generate PR comment ONLY if NEW > 0 and the event is pull_request.
  * Upsert a single reusable comment (identified by REUSABLE_COMMENT_MARKER).
+ * Also writes the content to ./dist/markdown/pr-comment.md if generated.
  */
 async function renderPrCommentMarkdown(ctx = {}) {
   core.startGroup('[render/markdown] pr-comment');
   try {
-    const eventName = ctx.eventName || getEventName();
+    const eventName = ctx.eventName || (process.env.GITHUB_EVENT_NAME || '');
     if (eventName !== 'pull_request') {
       core.info(`[render/markdown] not a pull_request event; skipping PR comment`);
       return;
     }
 
     const distDir = ctx.distDir || path.resolve('./dist');
-    const outDir = path.join(distDir, 'render', 'markdown');
+    const outDir = path.join(distDir, 'markdown');
     const outFile = path.join(outDir, 'pr-comment.md');
 
     const diff = await readJSON(path.join(distDir, 'diff.json'));
@@ -279,7 +247,6 @@ async function renderPrCommentMarkdown(ctx = {}) {
       return;
     }
 
-    // Prepare new items table
     const newItems = (diff?.items || [])
       .filter(v => String(v.state).toUpperCase() === 'NEW')
       .sort((a, b) => sevRank(a.severity) - sevRank(b.severity));
@@ -298,7 +265,6 @@ async function renderPrCommentMarkdown(ctx = {}) {
     await writeText(outFile, content);
     core.info(`[render/markdown] wrote ${outFile}`);
 
-    // Upsert PR comment
     const token = getGithubToken();
     if (!token) {
       core.warning('[render/markdown] GITHUB_TOKEN not available; cannot upsert PR comment');
@@ -315,14 +281,7 @@ async function renderPrCommentMarkdown(ctx = {}) {
       return;
     }
 
-    const res = await upsertPrComment({
-      owner,
-      repo,
-      issue_number,
-      body: content,
-      octokit,
-    });
-
+    const res = await upsertPrComment({ owner, repo, issue_number, body: content, octokit });
     core.info(`[render/markdown] PR comment ${res.action} (id=${res.id})`);
   } finally {
     core.endGroup();
@@ -331,14 +290,14 @@ async function renderPrCommentMarkdown(ctx = {}) {
 
 /**
  * Produce Slack-friendly markdown (table-like) and write to:
- * - ./dist/render/markdown/slack.md (always)
+ * - ./dist/markdown/slack.md (always)
  * Delivery happens ONLY if slack_webhook_url input is provided.
  */
 async function renderSlackMarkdown(ctx = {}) {
   core.startGroup('[render/markdown] slack');
   try {
     const distDir = ctx.distDir || path.resolve('./dist');
-    const outDir = path.join(distDir, 'render', 'markdown');
+    const outDir = path.join(distDir, 'markdown');
     const outFile = path.join(outDir, 'slack.md');
 
     const diff = await readJSON(path.join(distDir, 'diff.json'));
@@ -362,7 +321,6 @@ async function renderSlackMarkdown(ctx = {}) {
     await writeText(outFile, content);
     core.info(`[render/markdown] wrote ${outFile}`);
 
-    // Deliver only if webhook provided
     const webhook = (ctx.slackWebhookUrl || '').trim();
     if (webhook) {
       await postToSlackWebhook(webhook, content);

@@ -1,24 +1,32 @@
-name: 'vuln-diff-action: phase1 (analysis)'
-description: 'Phase 1 — Analysis: SBOM + Grype + meta (sin normalización/diff/render).'
+name: 'vuln-diff-action'
+description: 'Vulnerability diff: Phase 1 (analysis) + Phase 2 (normalization/diff) + Phase 3.1 (markdown render).'
 branding:
   color: 'purple'
   icon: 'shield'
 inputs:
   base_ref:
-    description: 'Ref base (p.ej. origin/develop o un SHA)'
+    description: 'Base ref (e.g., origin/develop or a SHA)'
     required: true
   head_ref:
-    description: 'Ref head (p.ej. origin/feature-x o un SHA)'
+    description: 'Head ref (e.g., origin/feature-x or a SHA)'
     required: true
   path:
-    description: 'Subdirectorio a analizar'
+    description: 'Subdirectory to analyze'
     required: false
     default: '.'
+  slack_webhook_url:
+    description: 'Optional Slack Incoming Webhook URL to deliver slack.md'
+    required: false
+    default: ''
+  github_token:
+    description: 'GitHub token for PR comment upsert in pull_request events'
+    required: false
+    default: '${{ github.token }}'
 outputs:
   base_sha:
-    description: 'SHA resuelto de base_ref'
+    description: 'Resolved SHA from base_ref'
   head_sha:
-    description: 'SHA resuelto de head_ref'
+    description: 'Resolved SHA from head_ref'
 runs:
   using: 'node20'
   main: '.bundle/index.js'
