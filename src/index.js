@@ -2,7 +2,7 @@ const core = require('@actions/core');
 const { phase1 } = require('./analysis/orchestrator');
 
 // 👉 Añadido: exportamos phase2 desde su orquestador real
-const { phase2 } = require('./src/normalization/orchestrator');
+const { phase2 } = require('./normalization/orchestrator');
 
 module.exports = { phase1, phase2 };
 
