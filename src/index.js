@@ -1,14 +1,42 @@
+// src/index.js
 const core = require('@actions/core');
 const { phase1 } = require('./analysis/orchestrator');
 
-// 👉 Añadido: exportamos phase2 desde su orquestador real
-const { phase2 } = require('./normalization/orchestrator');
+let phase2;
+try {
+  ({ phase2 } = require('./normalization/orchestrator')); // ruta correcta (index.js está en src/)
+} catch (e) {
+  // Si construyes una release sólo con fase 1, no queremos romper la ejecución.
+  core.warning(`[vuln-diff] Phase 2 no disponible en esta versión: ${e?.message || e}`);
+}
 
-module.exports = { phase1, phase2 };
+module.exports = { phase1, ...(phase2 ? { phase2 } : {}) };
 
-// Comportamiento por defecto INALTERADO: ejecutar solo Fase 1 si se invoca directamente
+async function runMain() {
+  try {
+    core.info('[vuln-diff] Phase 1: start');
+    await phase1();
+    core.info('[vuln-diff] Phase 1: done');
+  } catch (e) {
+    core.setFailed(`[vuln-diff] Phase 1 failed: ${e?.message || e}`);
+    return;
+  }
+
+  if (!phase2) {
+    core.info('[vuln-diff] Phase 2: skipped (no disponible en esta build)');
+    return;
+  }
+
+  try {
+    core.info('[vuln-diff] Phase 2: start');
+    await phase2(); // lee ./dist, genera base.json/head.json/diff.json y sube TODO ./dist
+    core.info('[vuln-diff] Phase 2: done');
+  } catch (e) {
+    core.setFailed(`[vuln-diff] Phase 2 failed: ${e?.message || e}`);
+  }
+}
+
+// Ejecutado directamente por Node en GitHub Actions
 if (require.main === module) {
-  phase1().catch((err) => {
-    core.setFailed(err.message || String(err));
-  });
+  runMain().catch((err) => core.setFailed(err?.message || String(err)));
 }
