@@ -121,50 +121,6 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
 })();`;
     await writeText(path.join(assetsJs, 'runtime.js'), runtimeJs);
 
-    const styleCss = `/* Minimal layout for header(top), menu(left), content(center) */
-:root {
-  --bg: #0b0f16;
-  --panel: #121826;
-  --card: #0f1726;
-  --text: #e5e7eb;
-  --muted: #9aa4b2;
-  --accent: #8b5cf6;
-  --border: #1f2937;
-}
-* { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-a { color: #93c5fd; text-decoration: none; }
-a:hover { text-decoration: underline; }
-
-#app-header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
-#app-main { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 60px); }
-
-#app-menu { background: var(--panel); border-right: 1px solid var(--border); padding: 8px; }
-#app-menu .item { display: block; padding: 10px 12px; border-radius: 8px; color: var(--text); margin: 4px 0; }
-#app-menu .item:hover { background: #162033; }
-#app-menu .item.active { background: #1b2740; border: 1px solid #223154; }
-
-#app-content { padding: 16px; }
-
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
-}
-
-.small { color: var(--muted); font-size: 13px; }
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.tag { display:inline-block; padding: 2px 8px; border-radius: 999px; background: #1f2937; color: #cbd5e1; font-size: 12px; }
-h1, h2, h3 { margin: 0 0 10px 0; }
-h1 { font-size: 20px; }
-h2 { font-size: 18px; }
-h3 { font-size: 16px; }
-code { background: #0b1220; padding: 2px 6px; border-radius: 6px; }
-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
-.error { color: #fca5a5; }`;
-    await writeText(path.join(assetsCss, 'style.css'), styleCss);
 
     core.info('[render/html] bundle written to ' + outDir);
   } catch (e) {

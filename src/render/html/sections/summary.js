@@ -1,161 +1,110 @@
 // src/render/html/sections/summary.js
-// Builds sections/summary.html with user narrative, plus:
-// - Tools (from diff.meta.tools)
-// - Inputs (from diff.meta.inputs)
-// - Branch details (from diff.meta.git.base/head or base/head docs)
-// - Totals by state
-// - Totals by severity and state
-// Reads ONLY data passed by caller (diff/base/head objects). No new computations.
+const fs = require('fs');
+const path = require('path');
 
-const SEVERITY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
-
-function safe(obj, path, fallback) {
-  return path.split('.').reduce((o,k)=> (o && o[k] !== undefined) ? o[k] : undefined, obj) ?? fallback;
-}
-function shortSha(sha) {
-  return typeof sha === 'string' && sha.length >= 7 ? sha.slice(0,7) : (sha || '-');
-}
-function kvTable(obj) {
-  const rows = Object.entries(obj || {}).map(([k,v]) => {
-    const val = (v === undefined || v === null || v === '') ? '<span class="small">n/a</span>' : String(v);
-    return `<tr><th style="width:160px;">${k}</th><td>${val}</td></tr>`;
-  });
-  return `<table>${rows.join('')}</table>`;
-}
-function toolsList(metaTools) {
-  const tools = metaTools || {};
-  const rows = Object.entries(tools).map(([k,v]) => `<tr><th style="width:160px;">${k}</th><td>${typeof v === 'string' ? v : JSON.stringify(v)}</td></tr>`);
-  if (!rows.length) return `<table><tr><th>Tools</th><td><span class="small">n/a</span></td></tr></table>`;
-  return `<table>${rows.join('')}</table>`;
-}
-function totalsTable(totals) {
-  const t = totals || {};
-  return `<table>
-    <tr><th style="width:160px;">NEW</th><td>${t.NEW ?? 0}</td></tr>
-    <tr><th>REMOVED</th><td>${t.REMOVED ?? 0}</td></tr>
-    <tr><th>UNCHANGED</th><td>${t.UNCHANGED ?? 0}</td></tr>
-  </table>`;
-}
-function bySeverityAndStateTable(by) {
-  const header = `<tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr>`;
-  const rows = SEVERITY_ORDER.map(sev => {
-    const r = by?.[sev] || {};
-    return `<tr><td>${sev}</td><td>${r.NEW ?? 0}</td><td>${r.REMOVED ?? 0}</td><td>${r.UNCHANGED ?? 0}</td></tr>`;
-  });
-  return `<table>${header}${rows.join('')}</table>`;
+function readDiffStrict(distDir) {
+  const file = path.join(distDir, 'diff.json');
+  if (!fs.existsSync(file)) throw new Error(`[html/summary] Missing file: ${file}`);
+  const d = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const req = [
+    'generated_at',
+    'repo',
+    'tools',
+    'inputs.base_ref',
+    'inputs.head_ref',
+    'inputs.path',
+    'base.ref', 'base.sha', 'base.sha_short', 'base.author', 'base.authored_at', 'base.commit_subject',
+    'head.ref', 'head.sha', 'head.sha_short', 'head.author', 'head.authored_at', 'head.commit_subject',
+    'summary.totals.NEW', 'summary.totals.REMOVED', 'summary.totals.UNCHANGED',
+    'summary.by_severity_and_state',
+  ];
+  for (const p of req) {
+    const ok = p.split('.').reduce((o, k) => (o && k in o ? o[k] : undefined), d);
+    if (ok === undefined) throw new Error(`[html/summary] diff.json missing path: ${p}`);
+  }
+  return d;
 }
 
-module.exports = function makeSummary({ diff = {}, base = {}, head = {} } = {}) {
-  // Repo & refs from diff
-  const owner = safe(diff, 'meta.repo.owner', 'owner');
-  const repo  = safe(diff, 'meta.repo.name', 'repo');
-  const repoFull = safe(diff, 'meta.repo.full', `${owner}/${repo}`);
+function krow(k, v) {
+  return `<tr><th style="width:220px">${k}</th><td>${v ?? 'n/a'}</td></tr>`;
+}
 
-  const baseRef = safe(diff, 'meta.inputs.base_ref', '') || safe(base, 'git.ref', '') || 'base';
-  const headRef = safe(diff, 'meta.inputs.head_ref', '') || safe(head, 'git.ref', '') || 'head';
-  const baseShaShort = shortSha(safe(base, 'git.sha', '') || safe(diff, 'meta.git.base.sha', '') || '');
-  const headShaShort = shortSha(safe(head, 'git.sha', '') || safe(diff, 'meta.git.head.sha', '') || '');
-  const generatedAt = safe(diff, 'generated_at', '') || safe(diff, 'meta.generated_at', '') || new Date().toISOString();
+function toolsTable(tools) {
+  const rows = Object.entries(tools || {}).map(([n, v]) => krow(n, v)).join('');
+  return rows || krow('Tools', 'n/a');
+}
 
-  // Branch commit details (best-effort from diff.meta.git or base/head docs)
-  const baseGit = {
-    ref: baseRef,
-    sha: baseShaShort,
-    title: safe(diff, 'meta.git.base.title', safe(base, 'git.title', '')),
-    author: safe(diff, 'meta.git.base.author_name', safe(base, 'git.author_name', '')),
-    committer: safe(diff, 'meta.git.base.committer_name', safe(base, 'git.committer_name', '')),
-    time: safe(diff, 'meta.git.base.committed_at', safe(base, 'git.committed_at', '')),
-  };
-  const headGit = {
-    ref: headRef,
-    sha: headShaShort,
-    title: safe(diff, 'meta.git.head.title', safe(head, 'git.title', '')),
-    author: safe(diff, 'meta.git.head.author_name', safe(head, 'git.author_name', '')),
-    committer: safe(diff, 'meta.git.head.committer_name', safe(head, 'git.committer_name', '')),
-    time: safe(diff, 'meta.git.head.committed_at', safe(head, 'git.committed_at', '')),
-  };
+function inputsTable(inputs) {
+  return [
+    krow('base_ref', `<code>${inputs.base_ref}</code>`),
+    krow('head_ref', `<code>${inputs.head_ref}</code>`),
+    krow('path', `<code>${inputs.path}</code>`),
+  ].join('');
+}
 
-  // Inputs & Tools
-  const inputs = safe(diff, 'meta.inputs', {});
-  const tools  = safe(diff, 'meta.tools', {});
+function branchTable(title, b) {
+  return `
+<div class="card">
+  <h3>${title}</h3>
+  <table>
+    ${krow('Ref', `<code>${b.ref}</code>`)}
+    ${krow('SHA', `<code>${b.sha_short}</code> &nbsp; <code>${b.sha}</code>`)}
+    ${krow('Author', b.author || 'n/a')}
+    ${krow('Authored at', b.authored_at || 'n/a')}
+    ${krow('Commit', b.commit_subject || 'n/a')}
+  </table>
+</div>`;
+}
 
-  // Summary data tables
-  const totals = safe(diff, 'summary.totals', {});
-  const bySev  = safe(diff, 'summary.by_severity_and_state', {});
+function totalsBlock(sum) {
+  const t = sum.totals;
+  return `<div><b>Totals</b> — <b>NEW:</b> ${t.NEW} · <b>REMOVED:</b> ${t.REMOVED} · <b>UNCHANGED:</b> ${t.UNCHANGED}</div>`;
+}
 
-  const narrative = `
-<h2 id="section-title">Summary</h2>
-<div class="card" style="margin-bottom:12px;">
-  <p><strong>What you’re looking at</strong><br/>
-  This report compares the security posture of <code>${repoFull}</code> between <code>${headRef}</code> (<code>${headShaShort}</code>) and <code>${baseRef}</code> (<code>${baseShaShort}</code>). It shows how known
-  vulnerabilities differ across these two references so reviewers can quickly assess newly introduced risks, confirm improvements, and verify areas that
-  remain unchanged.</p>
+function sevStateTable(by) {
+  const order = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
+  const rows = order.map(s => {
+    const v = by[s] || { NEW: 0, REMOVED: 0, UNCHANGED: 0 };
+    return `<tr><td>${s}</td><td style="text-align:right">${v.NEW}</td><td style="text-align:right">${v.REMOVED}</td><td style="text-align:right">${v.UNCHANGED}</td></tr>`;
+  }).join('');
+  return `<table><thead><tr><th>Severity</th><th style="text-align:right">NEW</th><th style="text-align:right">REMOVED</th><th style="text-align:right">UNCHANGED</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
 
-  <p><strong>How it was produced</strong></p>
-  <ol>
-    <li>SBOM generation — via CycloneDX Maven (when a Maven reactor is detected) or Syft fallback.</li>
-    <li>Vulnerability scanning — SBOM analyzed with Grype to produce machine-readable findings (IDs, severities, CVSS, affected packages, locations, and
-    fix data).</li>
-    <li>Normalization & diff — findings normalized into a unified schema and compared using id::package.name::package.version. Final states are:
-    NEW (head only), REMOVED (base only), UNCHANGED (in both).</li>
-    <li>Rendering — interactive HTML dashboard plus a printable PDF and Markdown summary for CI/PR reviews.</li>
-  </ol>
+function renderSummary(distDir) {
+  const diff = readDiffStrict(distDir);
 
-  <p><strong>Why this matters</strong><br/>
-  The goal is to provide a transparent, reproducible view of changes in known vulnerabilities as the code evolves—supporting risk assessment,
-  remediation prioritization, and merge decisions.</p>
+  const intro = `
+<div class="card">
+  <h2>Summary</h2>
+  <p class="small">Generated at ${diff.generated_at}</p>
+  ${totalsBlock(diff.summary)}
 </div>`;
 
-  const totalsBlock = `
-<div class="card" style="margin-bottom:12px;">
-  <h3>Totals by State</h3>
-  ${totalsTable(totals)}
-</div>`;
-
-  const bySevBlock = `
-<div class="card" style="margin-bottom:12px;">
-  <h3>Totals by Severity & State</h3>
-  ${bySeverityAndStateTable(bySev)}
-</div>`;
-
-  const toolsEnv = `
-<div class="card" style="margin-bottom:12px;">
-  <h3>Tools & Environment</h3>
-  <div class="grid-2">
-    <div>
-      <div><strong>Tools</strong></div>
-      ${toolsList(tools)}
-    </div>
-    <div>
-      <div><strong>Branches</strong></div>
-      ${kvTable({
-        'Base Ref': baseGit.ref,
-        'Base SHA': baseGit.sha,
-        'Base Title': baseGit.title,
-        'Base Author': baseGit.author,
-        'Base Committer': baseGit.committer,
-        'Base Committed At': baseGit.time,
-        'Head Ref': headGit.ref,
-        'Head SHA': headGit.sha,
-        'Head Title': headGit.title,
-        'Head Author': headGit.author,
-        'Head Committer': headGit.committer,
-        'Head Committed At': headGit.time,
-        'Generated at': generatedAt,
-      })}
-    </div>
+  const env = `
+<div class="grid-2">
+  <div class="card">
+    <h3>Tools</h3>
+    <table>${toolsTable(diff.tools)}</table>
+  </div>
+  <div class="card">
+    <h3>Inputs</h3>
+    <table>${inputsTable(diff.inputs)}</table>
   </div>
 </div>`;
 
-  const inputsBlock = `
-<div class="card" style="margin-bottom:12px;">
-  <h3>Inputs</h3>
-  ${kvTable(inputs)}
+  const branches = `
+<div class="grid-2">
+  ${branchTable('Base', diff.base)}
+  ${branchTable('Head', diff.head)}
 </div>`;
 
-  return `${narrative}
-${totalsBlock}
-${bySevBlock}
-${toolsEnv}
-${inputsBlock}`;
-};
+  const sev = `
+<div class="card">
+  <h3>Totals by Severity and State</h3>
+  ${sevStateTable(diff.summary.by_severity_and_state)}
+</div>`;
+
+  return [intro, env, branches, sev].join('\n');
+}
+
+module.exports = { renderSummary };
