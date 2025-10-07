@@ -89,7 +89,6 @@ async function phase1() {
 
   core.setOutput('base_sha', baseSha);
   core.setOutput('head_sha', headSha);
-  core.info(`Phase 1 complete. Artifact: ${result.artifactName}`);
 }
 
 module.exports = { phase1 };
