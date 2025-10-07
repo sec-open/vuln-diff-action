@@ -6,16 +6,16 @@ const { uploadDistAsSingleArtifact } = require('./utils/artifact');
 
 let normalization;
 try {
-  ({ normalization } = require('./normalization/normalization')); // phase 2 may not exist in early builds
+  ({ normalization } = require('./normalization/normalization')); // Normalization may not exist in early builds
 } catch (e) {
-  core.warning(`[vuln-diff] Phase 2 not available in this build: ${e?.message || e}`);
+  core.warning(`[vuln-diff] Normalization not available in this build: ${e?.message || e}`);
 }
 
 let render;
 try {
-  ({ render } = require('./render/render')); // new: render orchestrator (Phase 3 entrypoint)
+  ({ render } = require('./render/render')); // new: render orchestrator (Render entrypoint)
 } catch (e) {
-  core.warning(`[vuln-diff] Phase 3 not available in this build: ${e?.message || e}`);
+  core.warning(`[vuln-diff] Render not available in this build: ${e?.message || e}`);
 }
 
 module.exports = {
@@ -28,40 +28,40 @@ async function runMain() {
   const distDir = './dist';
   const absDist = path.resolve(distDir);
 
-  // Phase 1
+  // Analysis
   try {
-    core.info('[vuln-diff] Phase 1: start');
+    core.info('[vuln-diff] Analysis: start');
     await analysis();
-    core.info('[vuln-diff] Phase 1: done');
+    core.info('[vuln-diff] Analysis: done');
   } catch (e) {
-    core.setFailed(`[vuln-diff] Phase 1 failed: ${e?.message || e}`);
+    core.setFailed(`[vuln-diff] Analysis failed: ${e?.message || e}`);
     return;
   }
 
-  // Phase 2
+  // Normalization
   if (!normalization) {
-    core.info('[vuln-diff] Phase 2: skipped (not available in this build)');
+    core.info('[vuln-diff] Normalization: skipped (not available in this build)');
   } else {
     try {
-      core.info('[vuln-diff] Phase 2: start');
+      core.info('[vuln-diff] Normalization: start');
       await normalization();
-      core.info('[vuln-diff] Phase 2: done');
+      core.info('[vuln-diff] Normalization: done');
     } catch (e) {
-      core.setFailed(`[vuln-diff] Phase 2 failed: ${e?.message || e}`);
+      core.setFailed(`[vuln-diff] Normalization failed: ${e?.message || e}`);
       return;
     }
   }
 
-  // Phase 3 (Render) — always attempt if available
+  // Render (Render) — always attempt if available
   if (!render) {
-    core.info('[vuln-diff] Phase 3: skipped (not available in this build)');
+    core.info('[vuln-diff] Render: skipped (not available in this build)');
   } else {
     try {
-      core.info('[vuln-diff] Phase 3: start');
+      core.info('[vuln-diff] Render: start');
       await render({ distDir });
-      core.info('[vuln-diff] Phase 3: done');
+      core.info('[vuln-diff] Render: done');
     } catch (e) {
-      core.setFailed(`[vuln-diff] Phase 3 failed: ${e?.message || e}`);
+      core.setFailed(`[vuln-diff] Render failed: ${e?.message || e}`);
       return;
     }
   }
@@ -80,7 +80,7 @@ async function runMain() {
   await countFiles(absDist);
   core.info(`[vuln-diff][upload] files to upload in artifact: ${fileCount}`);
 
-  // Upload single artifact with the entire ./dist (includes Phase 1 + 2 + 3 outputs)
+  // Upload single artifact with the entire ./dist (includes Analysis + 2 + 3 outputs)
   try {
     core.info('[vuln-diff][upload] uploading single artifact…');
     const response = await uploadDistAsSingleArtifact({

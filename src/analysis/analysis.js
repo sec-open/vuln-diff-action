@@ -31,7 +31,7 @@ async function analysis() {
     return;
   }
 
-  core.startGroup('[phase1] Inputs');
+  core.startGroup('[analysis] Inputs');
   try {
     const base_ref = core.getInput('base_ref', { required: true });
     const head_ref = core.getInput('head_ref', { required: true });
@@ -48,7 +48,7 @@ async function analysis() {
 
     // 1) Tools detection
     core.endGroup();
-    core.startGroup('[phase1] Tools detection');
+    core.startGroup('[analysis] Tools detection');
     let stop = time();
     const tools = await detectTools();
     core.info(`tools detected in ${stop()}`);
@@ -56,7 +56,7 @@ async function analysis() {
 
     // 2) Resolve refs & worktrees
     core.endGroup();
-    core.startGroup('[phase1] Resolve refs & prepare worktrees');
+    core.startGroup('[analysis] Resolve refs & prepare worktrees');
     stop = time();
     await gitFetchAll(repoRoot);
     const baseSha = await resolveRefToSha(base_ref, repoRoot);
@@ -96,7 +96,7 @@ async function analysis() {
 
     // 3) SBOM generation
     core.endGroup();
-    core.startGroup('[phase1] SBOM generation');
+    core.startGroup('[analysis] SBOM generation');
     stop = time();
     await ensureDir(path.dirname(l.sbom.base));
     await ensureDir(path.dirname(l.sbom.head));
@@ -114,7 +114,7 @@ async function analysis() {
 
     // 4) Grype scans
     core.endGroup();
-    core.startGroup('[phase1] Vulnerability scanning (Grype)');
+    core.startGroup('[analysis] Vulnerability scanning (Grype)');
     stop = time();
     await ensureDir(path.dirname(l.grype.base));
     await ensureDir(path.dirname(l.grype.head));
@@ -130,7 +130,7 @@ async function analysis() {
 
     // 5) Meta
     core.endGroup();
-    core.startGroup('[phase1] Metadata');
+    core.startGroup('[analysis] Metadata');
     stop = time();
     const repoFull = `${github.context.repo.owner}/${github.context.repo.repo}`;
     const meta = makeMeta({
@@ -146,7 +146,7 @@ async function analysis() {
 
     // 6) Cleanup worktrees (best-effort)
     core.endGroup();
-    core.startGroup('[phase1] Cleanup worktrees');
+    core.startGroup('[analysis] Cleanup worktrees');
     stop = time();
     await Promise.all([
       cleanupWorktree(baseCheckout, repoRoot),
@@ -156,12 +156,12 @@ async function analysis() {
 
     // 7) Outputs
     core.endGroup();
-    core.startGroup('[phase1] Outputs');
+    core.startGroup('[analysis] Outputs');
     core.setOutput('base_sha', baseSha);
     core.setOutput('head_sha', headSha);
     core.info(`outputs: base_sha=${baseSha}, head_sha=${headSha}`);
   } catch (err) {
-    core.setFailed(`[phase1] failed: ${err?.message || err}`);
+    core.setFailed(`[analysis] failed: ${err?.message || err}`);
   } finally {
     core.endGroup();
   }

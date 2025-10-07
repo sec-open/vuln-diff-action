@@ -1,21 +1,21 @@
 // src/render/orchestrator.js
-// Phase 3 Orchestrator: kicks off Phase 3.1 (Markdown) and will later drive 3.2 (HTML) and 3.3 (PDF)
+// Markdown Orchestrator: kicks off Markdown.1 (Markdown) and will later drive 3.2 (HTML) and 3.3 (PDF)
 const core = require('@actions/core');
 const path = require('path');
 
 /**
- * Phase 3.1 (Markdown) init:
+ * Markdown.1 (Markdown) init:
  * - Calls the markdown orchestrator (three outputs: summary.md, pr-comment.md, slack.md).
  * - summary.md should always be generated and appended to $GITHUB_STEP_SUMMARY.
  * - pr-comment.md is generated/used only if NEW > 0 (upsert one reusable PR comment).
  * - slack.md is always generated, and delivered ONLY if slack_webhook_url input is provided.
  */
 async function markdown_init({ distDir = './dist' } = {}) {
-  core.startGroup('[render] Phase 3.1 (Markdown)');
+  core.startGroup('[render] Markdown');
   try {
-    // This module should export the three functions as per the Phase 3.1 prompt:
+    // This module should export the three functions as per the Markdown.1 prompt:
     // renderSummaryMarkdown(ctx), renderPrCommentMarkdown(ctx), renderSlackMarkdown(ctx)
-    const markdown = require('./markdown');
+    const markdown = require('./markdown/markdown');
 
     const ctx = {
       distDir: path.resolve(distDir),
@@ -45,9 +45,9 @@ async function markdown_init({ distDir = './dist' } = {}) {
       core.info('[render/markdown] renderSlackMarkdown() not present; skipping');
     }
 
-    core.info('[render] Phase 3.1 (Markdown) completed');
+    core.info('[render] Markdown completed');
   } catch (e) {
-    core.setFailed(`[render] Phase 3.1 (Markdown) failed: ${e?.message || e}`);
+    core.setFailed(`[render] Markdown.1 (Markdown) failed: ${e?.message || e}`);
     throw e;
   } finally {
     core.endGroup();
@@ -55,20 +55,20 @@ async function markdown_init({ distDir = './dist' } = {}) {
 }
 
 /**
- * Phase 3 entrypoint:
- * - For now, runs only Phase 3.1 (Markdown).
- * - Later, this function will also call Phase 3.2 (HTML) and Phase 3.3 (PDF).
+ * Markdown entrypoint:
+ * - For now, runs only Markdown.1 (Markdown).
+ * - Later, this function will also call Markdown.2 (HTML) and Markdown.3 (PDF).
  */
 async function render(options = {}) {
   const distDir = options.distDir || './dist';
 
-  core.info('[render] Phase 3: start');
+  core.info('[render] Markdown: start');
   await markdown_init({ distDir });
 
-  // TODO (Phase 3.2): call HTML builder here, e.g., await html_init({ distDir });
-  // TODO (Phase 3.3): call PDF builder here, e.g., await pdf_init({ distDir });
+  // TODO HTML: call HTML builder here, e.g., await html_init({ distDir });
+  // TODO PDF: call PDF builder here, e.g., await pdf_init({ distDir });
 
-  core.info('[render] Phase 3: done');
+  core.info('[render] Markdown: done');
 }
 
 module.exports = {
