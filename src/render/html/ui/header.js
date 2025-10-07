@@ -1,6 +1,6 @@
 // src/render/html/ui/header.js
 // Builds header.html: logo (optional), repo, base->sha, head->sha, generated date.
-// Reads values from Phase-2 docs passed by caller.
+// Values come from Phase-2 docs passed by caller (diff/base/head).
 
 function safe(obj, path, fallback) {
   return path.split('.').reduce((o,k)=> (o && o[k] !== undefined) ? o[k] : undefined, obj) ?? fallback;
@@ -9,10 +9,17 @@ function shortSha(sha) {
   return typeof sha === 'string' && sha.length >= 7 ? sha.slice(0,7) : (sha || '-');
 }
 
+function repoDisplay(diff, base) {
+  // Prefer structured meta.repo: { owner, name } or { full }
+  const full = safe(diff, 'meta.repo.full', '') || safe(base, 'meta.repo.full', '');
+  if (full) return full;
+  const owner = safe(diff, 'meta.repo.owner', '') || safe(base, 'meta.repo.owner', 'owner');
+  const name  = safe(diff, 'meta.repo.name', '')  || safe(base, 'meta.repo.name', 'repo');
+  return `${owner}/${name}`;
+}
+
 module.exports = function makeHeader({ logoUrl = '', diff = {}, base = {}, head = {} } = {}) {
-  // Try to extract repo, refs, shas, generated
-  const owner = safe(diff, 'meta.repo.owner', 'owner') || safe(base, 'meta.repo.owner', '') || 'owner';
-  const repo = safe(diff, 'meta.repo.name', 'repo') || safe(base, 'meta.repo.name', '') || 'repo';
+  const repoFull = repoDisplay(diff, base);
 
   const baseRef = safe(diff, 'meta.inputs.base_ref', '') || safe(base, 'git.ref', '') || 'base';
   const headRef = safe(diff, 'meta.inputs.head_ref', '') || safe(head, 'git.ref', '') || 'head';
@@ -30,7 +37,7 @@ module.exports = function makeHeader({ logoUrl = '', diff = {}, base = {}, head 
     ${logoImg}
     <div>
       <h1>Vulnerability Diff Report</h1>
-      <div class="small">${owner}/${repo}</div>
+      <div class="small">${repoFull}</div>
     </div>
   </div>
   <div class="grid-2" style="margin-top:10px;">
