@@ -1,5 +1,6 @@
 // src/index.js
 const core = require('@actions/core');
+const fs = require('fs/promises');
 const { phase1 } = require('./analysis/orchestrator');
 const path = require('path');
 const { uploadDistAsSingleArtifact } = require('./utils/artifact');
