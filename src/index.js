@@ -87,7 +87,7 @@ async function runMain() {
     core.info('[vuln-diff][upload] uploading single artifact…');
     const response = await uploadDistAsSingleArtifact({
       distDir,
-      nameOverride: 'report-files', // ensure fixed artifact name
+      name: 'report-files', // ensure fixed artifact name
     });
     core.info(`[vuln-diff][upload] artifact upload OK: ${JSON.stringify(response)}`);
   } catch (e) {
