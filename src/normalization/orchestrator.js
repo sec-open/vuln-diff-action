@@ -15,7 +15,7 @@ const { writeJSON } = require('./utils');
  * - Uploads a SINGLE artifact containing the entire ./dist directory (Phase 1 + Phase 2)
  */
 async function phase2(options = {}) {
-  const distDir = options.distDir || './dist';
+  const distDir = options.distDir || '../dist';
   const absDist = path.resolve(distDir);
 
   core.info(`[vuln-diff][phase2] dist directory: ${absDist}`);

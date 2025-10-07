@@ -14,6 +14,9 @@ try {
 module.exports = { phase1, ...(phase2 ? { phase2 } : {}) };
 
 async function runMain() {
+    const distDir = './dist';
+    const absDist = path.resolve(distDir);
+
   try {
     core.info('[vuln-diff] Phase 1: start');
     await phase1();
@@ -30,15 +33,12 @@ async function runMain() {
 
   try {
     core.info('[vuln-diff] Phase 2: start');
-    await phase2(); // lee ./dist, genera base.json/head.json/diff.json y sube TODO ./dist
+    await phase2();
     core.info('[vuln-diff] Phase 2: done');
   } catch (e) {
     core.setFailed(`[vuln-diff] Phase 2 failed: ${e?.message || e}`);
   }
 
-
-    const distDir = options.distDir || './dist';
-    const absDist = path.resolve(distDir);
     // Count files under dist (useful when diagnosing artifact uploads)
     let fileCount = 0;
     async function countFiles(dir) {
