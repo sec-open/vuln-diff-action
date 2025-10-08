@@ -66,9 +66,15 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     <nav id="app-menu"></nav>
     <main id="app-content" aria-live="polite"></main>
   </div>
-  <script src="./assets/js/vendor/chart.umd.js"></script>
-  <script src="./assets/js/vendor/chartjs-plugin-datalabels.min.js"></script>
-  <script src="./assets/js/runtime.js"></script>
+    <script src="./assets/js/vendor/chart.umd.js"></script>
+    <!-- Optional: labels plugin -->
+    <script src="./assets/js/vendor/chartjs-plugin-datalabels.min.js"></script>
+
+    <!-- Mermaid for dependency graphs -->
+    <script src="./assets/js/vendor/mermaid.min.js"></script>
+    <script src="./assets/js/dep-graph.js"></script>
+
+    <script src="./assets/js/runtime.js"></script>
 </body>
 </html>`;
     await writeText(path.join(outDir, 'index.html'), indexHtml);
