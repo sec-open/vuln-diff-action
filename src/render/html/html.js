@@ -83,7 +83,6 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     // --- sections: overview + summary (delegated) ---
     const { renderOverview } = require('./sections/overview');
     const { renderSummary } = require('./sections/summary');
-    const { renderSummary } = require('./sections/summary');
     const { renderVulnTable } = require('./sections/vuln-table');
     const { renderDepPathsBase, renderDepPathsHead } = require('./sections/dep-paths');
 
