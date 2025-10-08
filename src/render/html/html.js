@@ -1,7 +1,7 @@
 // src/render/html/html.js
-// Phase 3.2 (HTML) — bundle with Header + Menu + Summary, using a single strict view.
+// Phase 3.2 (HTML) — bundle with Header + Menu + Overview + Summary, using a single strict view.
 // Reads ONLY ./dist/ (Phase-2 outputs). No schema fallbacks.
-// Writes ./dist/html/{index.html, header.html, menu.html, sections/summary.html, assets/...}
+// Writes ./dist/html/{index.html, header.html, menu.html, sections/*.html, assets/**}
 
 const core = require('@actions/core');
 const fsp = require('fs/promises');
@@ -44,12 +44,12 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
 
     // Build strict view once; pass it down to sections.
     const view = buildView(absDist);
-    core.info(`[render/html] repo=${view.repo} base=${view.base.ref}@${view.base.shaShort} head=${view.head.ref}@${view.head.shaShort}`);
+    core.info(
+      `[render/html] repo=${view.repo} base=${view.base.ref}@${view.base.shaShort} head=${view.head.ref}@${view.head.shaShort}`
+    );
 
     const outDir = path.join(absDist, 'html');
     const assetsDir = path.join(outDir, 'assets');
-    const assetsJs = path.join(assetsDir, 'js');
-    const assetsCss = path.join(assetsDir, 'css');
 
     // --- write index.html (shell with 3 zones) ---
     const indexHtml = `<!doctype html>
@@ -80,69 +80,43 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     const menuHtml = makeMenu();
     await writeText(path.join(outDir, 'menu.html'), menuHtml);
 
-    // --- summary section HTML (delegated) ---
-    const { renderSummary } = require('./sections/summary');
+    // --- sections: overview + summary (delegated) ---
     const { renderOverview } = require('./sections/overview');
-    const summaryHtml = renderSummary({ view });
-    await writeText(path.join(outDir, 'sections', 'summary.html'), summaryHtml);
+    const { renderSummary } = require('./sections/summary');
+    const { renderSummary } = require('./sections/summary');
+    const { renderVulnTable } = require('./sections/vuln-table');
+    const { renderDepPathsBase, renderDepPathsHead } = require('./sections/dep-paths');
+
     const overviewHtml = renderOverview({ view });
     await writeText(path.join(outDir, 'sections', 'overview.html'), overviewHtml);
-    // --- runtime.js (inline small router; you can externalize and copy if preferred) ---
-    const runtimeJs = `/* [render/html] runtime router (no frameworks) */
-(function(){
-  async function loadInto(selector, url) {
-    const el = document.querySelector(selector);
-    if (!el) return;
-    try {
-      const res = await fetch(url, { cache: 'no-store' });
-      el.innerHTML = await res.text();
-      el.setAttribute('data-loaded', url);
-      document.title = (document.querySelector('#section-title')?.textContent || 'Vulnerability Diff Report');
-    } catch(e) {
-      el.innerHTML = '<p class="error">Failed to load: ' + url + '</p>';
-      console.error('[render/html] loadInto error', e);
-    }
-  }
-  function wireMenu() {
-    const menu = document.getElementById('app-menu');
-    menu.addEventListener('click', (ev) => {
-      const a = ev.target.closest('[data-section]');
-      if (!a) return;
-      ev.preventDefault();
-      const name = a.getAttribute('data-section');
-    if (name === 'overview') {
-      loadInto('#app-content', './sections/overview.html');
-    } else if (name === 'summary') {
-      loadInto('#app-content', './sections/summary.html');
-    } else {
-        const el = document.querySelector('#app-content');
-        if (el) el.innerHTML = '<h2 id="section-title">' + a.textContent.trim() + '</h2>';
-      }
-      menu.querySelectorAll('[data-section].active').forEach(n => n.classList.remove('active'));
-      a.classList.add('active');
-    });
-  }
-  async function boot() {
-    await loadInto('#app-header', './header.html');
-    await loadInto('#app-menu', './menu.html');
-    wireMenu();
-    const def = document.querySelector('#app-menu [data-section="overview"]');
-    if (def) def.click();
-  }
-  document.addEventListener('DOMContentLoaded', boot);
-})();`;
-    await writeText(path.join(assetsJs, 'runtime.js'), runtimeJs);
 
-    // --- COPY STATIC ASSETS (CSS and everything under assets/) ---
-    // Source: your repo under src/render/html/assets
+    const summaryHtml = renderSummary({ view });
+    await writeText(path.join(outDir, 'sections', 'summary.html'), summaryHtml);
+
+    const vulnTableHtml = renderVulnTable({ view });
+    await writeText(path.join(outDir, 'sections', 'vuln-table.html'), vulnTableHtml);
+
+    const depBaseHtml = renderDepPathsBase({ view });
+    await writeText(path.join(outDir, 'sections', 'dep-paths-base.html'), depBaseHtml);
+
+    const depHeadHtml = renderDepPathsHead({ view });
+    await writeText(path.join(outDir, 'sections', 'dep-paths-head.html'), depHeadHtml);
+
+    // --- COPY STATIC ASSETS (CSS + JS + images, etc.) FROM REPO ---
+    // Source expected at src/render/html/assets/**
     const srcAssets = path.resolve('src/render/html/assets');
     if (fs.existsSync(srcAssets)) {
       await copyTree(srcAssets, assetsDir);
-      core.info(`[render/html] assets copied from ${srcAssets} -> ${assetsDir}`);
+      core.info(
+        `[render/html] assets copied from ${srcAssets} -> ${assetsDir}`
+      );
     } else {
-      core.warning('[render/html] no static assets found at src/render/html/assets (skipping copy)');
-      // Ensure at least CSS dir exists to avoid 404 in link tag
-      await ensureDir(assetsCss);
+      core.warning(
+        '[render/html] no static assets found at src/render/html/assets (skipping copy)'
+      );
+      // Ensure directories exist to avoid 404s
+      await ensureDir(path.join(assetsDir, 'css'));
+      await ensureDir(path.join(assetsDir, 'js'));
     }
 
     core.info('[render/html] bundle written to ' + outDir);
