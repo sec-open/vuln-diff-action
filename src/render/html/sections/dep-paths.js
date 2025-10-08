@@ -1,6 +1,7 @@
 // src/render/html/sections/dep-paths.js
 // Renders dependency path tables for Base and Head using the Phase-2 view.
 // No JSON reads here; paths come from view.items[].paths (array of arrays).
+// Adds client-side filter + sort (tables.js).
 
 function hyperlinkId(id) {
   if (!id) return 'UNKNOWN';
@@ -17,67 +18,72 @@ function asGav(v) {
   return `${g}:${a}:${ver}`;
 }
 function formatPath(chain) {
-  // chain is an array like [rootPurl, 'module:artifact:ver', 'group:artifact:ver', ...]
-  // We display with arrows, wrapping each element in <code>
   if (!Array.isArray(chain) || !chain.length) return '<code>n/a</code>';
   return chain.map((seg) => `<code>${String(seg)}</code>`).join(' &rarr; ');
 }
 
-function tableFor(items, title) {
-  const rows = items.map((v) => {
+function rowsFor(items) {
+  return items.map((v) => {
     const id = v.id || v.ids?.ghsa || v.ids?.cve || 'UNKNOWN';
     const pkg = asGav(v);
-    const paths = Array.isArray(v.paths) && v.paths.length
-      ? `<ul>${v.paths.map((p) => `<li>${formatPath(p)}</li>`).join('')}</ul>`
-      : '<span class="small">No paths available</span>';
     const sev = String(v.severity || 'UNKNOWN').toUpperCase();
+    const paths = Array.isArray(v.paths) ? v.paths : [];
+    const count = paths.length;
+    const pathsHtml = count
+      ? `<ul>${paths.map((p) => `<li>${formatPath(p)}</li>`).join('')}</ul>`
+      : '<span class="small">No paths available</span>';
     return `<tr>
-      <td>${sev}</td>
-      <td>${hyperlinkId(id)}</td>
-      <td><code>${pkg}</code></td>
-      <td>${paths}</td>
+      <td data-key="severity">${sev}</td>
+      <td data-key="id">${hyperlinkId(id)}</td>
+      <td data-key="package"><code>${pkg}</code></td>
+      <td data-key="paths" data-num="${count}">${count}</td>
+      <td>${pathsHtml}</td>
     </tr>`;
   }).join('');
+}
 
+function renderTable(title, id, items) {
   return `
 <div class="card">
-  <h2 id="section-title">${title}</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Severity</th>
-        <th>Vulnerability</th>
-        <th>Package</th>
-        <th>Dependency Path(s)</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+    <h2 id="section-title" style="margin:0">${title}</h2>
+    <input type="search" class="tbl-filter" data-target="#${id}" placeholder="Filter…" />
+  </div>
+  <div class="tbl-wrap" style="overflow:auto; margin-top:8px;">
+    <table id="${id}" class="tbl sortable filterable">
+      <thead>
+        <tr>
+          <th data-sort="severity">Severity</th>
+          <th data-sort="id">Vulnerability</th>
+          <th data-sort="package">Package</th>
+          <th data-sort="paths">#Paths</th>
+          <th>Dependency Path(s)</th>
+        </tr>
+      </thead>
+      <tbody>${rowsFor(items)}</tbody>
+    </table>
+  </div>
 </div>`;
 }
 
-/**
- * Base view: show vulnerabilities present in BASE (REMOVED or UNCHANGED).
- */
+/** Base: show vulnerabilities present in BASE (REMOVED or UNCHANGED). */
 function renderDepPathsBase({ view } = {}) {
   if (!view) throw new Error('[render/html/dep-paths] Missing view');
   const items = (view.items || []).filter((v) => {
     const s = String(v.state || '').toUpperCase();
     return s === 'REMOVED' || s === 'UNCHANGED';
   });
-  return tableFor(items, 'Dependency Paths — Base');
+  return renderTable('Dependency Paths — Base', 'dep-paths-base-tbl', items);
 }
 
-/**
- * Head view: show vulnerabilities present in HEAD (NEW or UNCHANGED).
- */
+/** Head: show vulnerabilities present in HEAD (NEW or UNCHANGED). */
 function renderDepPathsHead({ view } = {}) {
   if (!view) throw new Error('[render/html/dep-paths] Missing view');
   const items = (view.items || []).filter((v) => {
     const s = String(v.state || '').toUpperCase();
     return s === 'NEW' || s === 'UNCHANGED';
   });
-  return tableFor(items, 'Dependency Paths — Head');
+  return renderTable('Dependency Paths — Head', 'dep-paths-head-tbl', items);
 }
 
 module.exports = { renderDepPathsBase, renderDepPathsHead };

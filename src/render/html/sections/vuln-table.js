@@ -1,5 +1,6 @@
 // src/render/html/sections/vuln-table.js
 // Renders sections/vuln-table.html using the Phase-2 view (strict). No JSON reads here.
+// Adds client-side filter + sort (tables.js).
 
 const SEV_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, UNKNOWN: 4 };
 
@@ -41,29 +42,34 @@ function renderVulnTable({ view } = {}) {
     const state = String(v.state || 'UNKNOWN').toUpperCase();
     const branch = branchFromState(state);
     return `<tr>
-      <td>${sev}</td>
-      <td>${hyperlinkId(id)}</td>
-      <td><code>${pkg}</code></td>
-      <td>${branch}</td>
-      <td>${state}</td>
+      <td data-key="severity" data-num="${SEV_ORDER[sev] ?? 999}">${sev}</td>
+      <td data-key="id">${hyperlinkId(id)}</td>
+      <td data-key="package"><code>${pkg}</code></td>
+      <td data-key="branch">${branch}</td>
+      <td data-key="state">${state}</td>
     </tr>`;
   }).join('');
 
   return `
 <div class="card">
-  <h2 id="section-title">Vulnerability Diff Table</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Severity</th>
-        <th>Vulnerability</th>
-        <th>Package</th>
-        <th>Branch</th>
-        <th>State</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+    <h2 id="section-title" style="margin:0">Vulnerability Diff Table</h2>
+    <input type="search" class="tbl-filter" data-target="#vuln-table" placeholder="Filter…" />
+  </div>
+  <div class="tbl-wrap" style="overflow:auto; margin-top:8px;">
+    <table id="vuln-table" class="tbl sortable filterable">
+      <thead>
+        <tr>
+          <th data-sort="severity">Severity</th>
+          <th data-sort="id">Vulnerability</th>
+          <th data-sort="package">Package</th>
+          <th data-sort="branch">Branch</th>
+          <th data-sort="state">State</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
 </div>`;
 }
 

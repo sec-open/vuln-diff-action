@@ -2,35 +2,42 @@
 // Minimal sort + filter for tables with class "sortable filterable".
 // - Click a <th data-sort="key"> to sort asc/desc.
 // - Typing in <input.tbl-filter data-target="#tableId"> filters rows by text.
+// Supports numeric sort if the target <td> has data-num="123".
 
 (function () {
-  function textContent(node) {
-    return (node.textContent || '').trim().toLowerCase();
+  function cellValue(td) {
+    if (td && td.dataset && td.dataset.num !== undefined) {
+      const n = Number(td.dataset.num);
+      return Number.isNaN(n) ? 0 : n;
+    }
+    return (td.textContent || '').trim().toLowerCase();
   }
 
   function sortTable(table, key, asc) {
     const tbody = table.tBodies[0];
     const rows = Array.from(tbody.rows);
-    const idx = Array.from(table.tHead.rows[0].cells).findIndex(th => th.dataset.sort === key);
+    const ths = Array.from(table.tHead.rows[0].cells);
+    const idx = ths.findIndex(th => th.dataset.sort === key);
     if (idx < 0) return;
 
     rows.sort((a, b) => {
-      const av = textContent(a.cells[idx]);
-      const bv = textContent(b.cells[idx]);
+      const av = cellValue(a.cells[idx]);
+      const bv = cellValue(b.cells[idx]);
+      if (typeof av === 'number' || typeof bv === 'number') {
+        return asc ? (av - bv) : (bv - av);
+      }
       if (av === bv) return 0;
       return asc ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
     });
 
-    // Paint back
     rows.forEach(r => tbody.appendChild(r));
-    // Set aria / state
-    Array.from(table.tHead.rows[0].cells).forEach(th => th.removeAttribute('aria-sort'));
-    table.tHead.rows[0].cells[idx].setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+    ths.forEach(th => th.removeAttribute('aria-sort'));
+    ths[idx].setAttribute('aria-sort', asc ? 'ascending' : 'descending');
   }
 
   function bindSorting(root) {
     root.querySelectorAll('table.sortable thead th[data-sort]').forEach(th => {
-      th.addEventListener('click', (ev) => {
+      th.addEventListener('click', () => {
         const table = th.closest('table');
         const key = th.dataset.sort;
         const current = th.getAttribute('aria-sort');
@@ -61,14 +68,12 @@
     });
   }
 
-  // Re-bind whenever a section is loaded into #app-content
   document.addEventListener('DOMContentLoaded', () => {
     const content = document.getElementById('app-content');
     if (!content) return;
 
     const enhance = () => {
       const loaded = content.getAttribute('data-loaded') || '';
-      // Improve any tables present in current section (dashboard or others)
       if (loaded.endsWith('.html')) {
         bindSorting(content);
         bindFiltering(content);
@@ -77,6 +82,6 @@
 
     const obs = new MutationObserver(enhance);
     obs.observe(content, { attributes: true });
-    enhance(); // initial
+    enhance();
   });
 })();
