@@ -1,10 +1,10 @@
 // src/render/common/view.js
-// Strict Phase-2 view builder for Phase-3 renderers (Markdown/HTML/PDF).
-// Reads ONLY ./dist/diff.json (schema fixed by Phase 2).
-// Fails fast if required fields are missing. No fallbacks.
+// Strict Phase-2 view builder + Phase-3 precompute layer.
+// Reads ONLY ./dist/diff.json, validates required schema, and attaches precomputed aggregates.
 
 const fs = require('fs');
 const path = require('path');
+const { precomputeFromDiff } = require('./precompute');
 
 function requireJson(file) {
   if (!fs.existsSync(file)) {
@@ -29,7 +29,7 @@ function buildView(distDir = './dist') {
   const diffFile = path.join(abs, 'diff.json');
   const diff = requireJson(diffFile);
 
-  // Strict schema validation (as defined by Phase 2)
+  // Strict schema validation (Phase 2 contract)
   [
     'schema_version',
     'generated_at',
@@ -54,8 +54,10 @@ function buildView(distDir = './dist') {
     'summary.totals.REMOVED',
     'summary.totals.UNCHANGED',
     'summary.by_severity_and_state',
+    'items'
   ].forEach((p) => assertPath(diff, p, 'diff.json'));
 
+  // Build view (no fallbacks; required fields only)
   const view = {
     schemaVersion: diff.schema_version,
     generatedAt: diff.generated_at,
@@ -98,6 +100,10 @@ function buildView(distDir = './dist') {
 
     items: Array.isArray(diff.items) ? diff.items : [],
   };
+
+  // Attach Phase-3 precomputed aggregates (purely derived; Phase 2 remains intact)
+  const pre = precomputeFromDiff(diff);
+  view.precomputed = pre;
 
   return view;
 }
