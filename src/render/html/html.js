@@ -67,17 +67,16 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     <main id="app-content" aria-live="polite"></main>
   </div>
     <script src="./assets/js/vendor/chart.umd.js"></script>
-    <!-- Optional -->
     <script src="./assets/js/vendor/chartjs-plugin-datalabels.min.js"></script>
 
-    <!-- Mermaid (para dep-graph) -->
     <script src="./assets/js/vendor/mermaid.min.js"></script>
     <script src="./assets/js/dep-graph.js"></script>
 
-    <!-- Dashboard renderer (global) -->
     <script src="./assets/js/dashboard.js"></script>
+    <script src="./assets/js/tables.js"></script>
 
     <script src="./assets/js/runtime.js"></script>
+
 
 </body>
 </html>`;
