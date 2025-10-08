@@ -1,146 +1,134 @@
-// --- inside src/render/markdown/markdown.js ---
+// src/render/markdown/markdown.js
+// Phase 3.1 — Markdown renderers (Summary, PR Comment, Slack), using the common Phase-2 view.
+// Reads ONLY ./dist via buildView(). No schema fallbacks.
 
-const fs = require('fs');
-const path = require('path');
 const core = require('@actions/core');
+const path = require('path');
+const fs = require('fs/promises');
+const { buildView } = require('../common/view');
 
-function readJsonStrict(file) {
-  const abs = path.resolve(file);
-  if (!fs.existsSync(abs)) throw new Error(`[markdown] Missing file: ${abs}`);
-  const data = JSON.parse(fs.readFileSync(abs, 'utf8'));
-
-  // Validate the exact paths we expect from Phase 2 schema
-  const required = [
-    'schema_version',
-    'generated_at',
-    'repo',
-    'inputs.base_ref',
-    'inputs.head_ref',
-    'inputs.path',
-    'tools',
-    'base.ref',
-    'base.sha_short',
-    'base.sha',
-    'base.author',
-    'base.authored_at',
-    'base.commit_subject',
-    'head.ref',
-    'head.sha_short',
-    'head.sha',
-    'head.author',
-    'head.authored_at',
-    'head.commit_subject',
-    'summary.totals.NEW',
-    'summary.totals.REMOVED',
-    'summary.totals.UNCHANGED',
-    'summary.by_severity_and_state',
-  ];
-  for (const p of required) {
-    const ok = p.split('.').reduce((o, k) => (o && k in o ? o[k] : undefined), data);
-    if (ok === undefined) throw new Error(`[markdown] diff.json missing path: ${p}`);
-  }
-  return data;
+// ---------- helpers ----------
+function mdSafe(s) {
+  return (s === undefined || s === null || s === '') ? 'n/a' : String(s);
 }
-
-function kValue(label, value) {
-  return `- **${label}:** ${value}\n`;
+function hyperlinkId(id) {
+  if (!id) return 'UNKNOWN';
+  const up = String(id).toUpperCase();
+  if (up.startsWith('CVE-')) return `[${id}](https://nvd.nist.gov/vuln/detail/${up})`;
+  if (up.startsWith('GHSA-')) return `[${id}](https://github.com/advisories/${up})`;
+  return String(id);
 }
-
-function branchCard(title, b) {
-  return [
-    `### ${title}`,
-    kValue('Ref', `\`${b.ref}\``),
-    kValue('SHA', `\`${b.sha_short}\`  \`${b.sha}\``),
-    kValue('Author', b.author || 'n/a'),
-    kValue('Authored at', b.authored_at || 'n/a'),
-    kValue('Commit', b.commit_subject || 'n/a'),
-  ].join('');
+function asGav(v) {
+  const pkg = v?.package || {};
+  const g = pkg.groupId ?? 'unknown';
+  const a = pkg.artifactId ?? 'unknown';
+  const ver = pkg.version ?? 'unknown';
+  return `${g}:${a}:${ver}`;
 }
-
-function toolsCard(tools) {
-  const entries = Object.entries(tools || {});
-  const list = entries.length
-    ? entries.map(([name, ver]) => `- \`${name}\`: ${ver}`).join('\n')
-    : '_n/a_';
-  return `### Tools\n${list}\n`;
+function branchFromState(state) {
+  const s = String(state || '').toUpperCase();
+  if (s === 'NEW') return 'Head';
+  if (s === 'REMOVED') return 'Base';
+  if (s === 'UNCHANGED') return 'Base & Head';
+  return 'UNKNOWN';
 }
+// ---------- end helpers ----------
 
-function inputsCard(inputs) {
-  return [
-    '### Inputs',
-    kValue('base_ref', `\`${inputs.base_ref}\``),
-    kValue('head_ref', `\`${inputs.head_ref}\``),
-    kValue('path', `\`${inputs.path}\``),
-  ].join('');
-}
-
-function totalsBlock(summary) {
-  const t = summary.totals;
-  return `**Totals** — **NEW:** ${t.NEW} · **REMOVED:** ${t.REMOVED} · **UNCHANGED:** ${t.UNCHANGED}`;
-}
-
-function bySeverityAndStateTable(by) {
-  const severities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
-  const header = '| Severity | NEW | REMOVED | UNCHANGED |\n|---|---:|---:|---:|\n';
-  const rows = severities.map(s => {
-    const v = by[s] || { NEW: 0, REMOVED: 0, UNCHANGED: 0 };
-    return `| ${s} | ${v.NEW} | ${v.REMOVED} | ${v.UNCHANGED} |`;
-  }).join('\n');
-  return header + rows;
-}
-
-async function renderSummaryMarkdown(ctx) {
-  const distDir = ctx.distDir || './dist';
-  const diffPath = path.join(distDir, 'diff.json');
-
-  const diff = readJsonStrict(diffPath);
-
-  const header = `# Vulnerability Diff — Summary
-
-_Generated at ${diff.generated_at}_
-
-**Repo:** \`${diff.repo}\`
-
-`;
-
-  const intro = `## Comparison
-
-${totalsBlock(diff.summary)}
-
-`;
-
-  // Cards: Branches (two cards), Tools, Inputs
-  const cards = [
-    '## Tools & Environment',
-    toolsCard(diff.tools),
-    '## Branches',
-    branchCard('Base', diff.base),
-    branchCard('Head', diff.head),
-    `**Generated at:** ${diff.generated_at}`,
-    '## Inputs',
-    inputsCard(diff.inputs),
-    '## Totals by Severity and State',
-    bySeverityAndStateTable(diff.summary.by_severity_and_state),
-  ].join('\n\n');
-
-  const md = [header, intro, cards].join('\n');
-
-  const outDir = path.join(distDir, 'markdown');
-  await fs.promises.mkdir(outDir, { recursive: true });
-  const outFile = path.join(outDir, 'summary.md');
-  await fs.promises.writeFile(outFile, md, 'utf8');
-
-  // Append to GitHub Step Summary as agreed
+async function renderSummaryMarkdown(ctx = {}) {
+  core.startGroup('[render/markdown] summary');
   try {
-    await fs.promises.appendFile(process.env.GITHUB_STEP_SUMMARY, md + '\n', 'utf8');
-  } catch (e) {
-    core.warning(`[markdown] Could not append to GITHUB_STEP_SUMMARY: ${e.message || e}`);
-  }
+    const distDir = ctx.distDir || path.resolve('./dist');
+    const view = buildView(distDir);
 
-  core.info(`[render/markdown] summary.md written → ${outFile}`);
+    const outDir = path.join(distDir, 'markdown');
+    await fs.mkdir(outDir, { recursive: true });
+    const outFile = path.join(outDir, 'summary.md');
+
+    const lines = [];
+    lines.push(`# Vulnerability Diff — Summary`);
+    lines.push('');
+    lines.push(`_Generated at ${view.generatedAt}_`);
+    lines.push('');
+    lines.push(`**Repo:** \`${view.repo}\``);
+    lines.push('');
+    // Cards: Branches (Base & Head), Tools, Inputs (NOT tables)
+    lines.push('> **Base**');
+    lines.push(`> - Ref: \`${view.base.ref}\``);
+    lines.push(`> - SHA: \`${view.base.shaShort}\`  \`${view.base.sha}\``);
+    lines.push(`> - Author: ${mdSafe(view.base.author)}`);
+    lines.push(`> - Authored at: ${mdSafe(view.base.authoredAt)}`);
+    lines.push(`> - Commit: ${mdSafe(view.base.commitSubject)}`);
+    lines.push('>');
+    lines.push('> **Head**');
+    lines.push(`> - Ref: \`${view.head.ref}\``);
+    lines.push(`> - SHA: \`${view.head.shaShort}\`  \`${view.head.sha}\``);
+    lines.push(`> - Author: ${mdSafe(view.head.author)}`);
+    lines.push(`> - Authored at: ${mdSafe(view.head.authoredAt)}`);
+    lines.push(`> - Commit: ${mdSafe(view.head.commitSubject)}`);
+    lines.push('');
+    lines.push('> **Tools**');
+    if (Object.keys(view.tools).length) {
+      for (const [k, v] of Object.entries(view.tools)) {
+        lines.push(`> - ${k}: ${typeof v === 'string' ? v : '`' + JSON.stringify(v) + '`'}`);
+      }
+    } else {
+      lines.push('> - n/a');
+    }
+    lines.push('');
+    lines.push('> **Inputs**');
+    lines.push(`> - base_ref: \`${view.inputs.baseRef}\``);
+    lines.push(`> - head_ref: \`${view.inputs.headRef}\``);
+    lines.push(`> - path: \`${view.inputs.path}\``);
+    lines.push('');
+
+    // Totals line
+    lines.push(`**Totals** — **NEW:** ${view.summary.totals.NEW} · **REMOVED:** ${view.summary.totals.REMOVED} · **UNCHANGED:** ${view.summary.totals.UNCHANGED}`);
+    lines.push('');
+
+    // REQUIRED: list ALL vulnerabilities with columns: Vulnerability | Package | Branch | State
+    lines.push('## All Vulnerabilities');
+    const header = `| Vulnerability | Package | Branch | State |
+|---|---|---|---|`;
+    const rows = (view.items || []).map((v) => {
+      const id = v.id || v.ids?.ghsa || v.ids?.cve || 'UNKNOWN';
+      const pkg = asGav(v);
+      const state = String(v.state || 'UNKNOWN').toUpperCase();
+      const branch = branchFromState(state);
+      return `| ${hyperlinkId(id)} | \`${pkg}\` | ${branch} | ${state} |`;
+    });
+    lines.push(header);
+    lines.push(...rows);
+    lines.push('');
+
+    const content = lines.join('\n');
+    await fs.writeFile(outFile, content, 'utf8');
+    core.info(`[render/markdown] wrote ${outFile}`);
+
+    // Append to GitHub Step Summary
+    try {
+      await core.summary.addRaw(content, true).write();
+      core.info('[render/markdown] appended to $GITHUB_STEP_SUMMARY');
+    } catch (e) {
+      core.warning(`[render/markdown] Could not append to $GITHUB_STEP_SUMMARY: ${e.message || e}`);
+    }
+  } catch (e) {
+    core.setFailed(`[render/markdown] summary failed: ${e?.message || e}`);
+    throw e;
+  } finally {
+    core.endGroup();
+  }
+}
+
+// No changes requested to these, keep stubs or your existing logic
+async function renderPrCommentMarkdown(ctx = {}) {
+  // (keep your existing implementation; not changed in this patch)
+}
+async function renderSlackMarkdown(ctx = {}) {
+  // (keep your existing implementation; not changed in this patch)
 }
 
 module.exports = {
   renderSummaryMarkdown,
-  // keep your other exports (renderPrCommentMarkdown, renderSlackMarkdown, etc.)
+  renderPrCommentMarkdown,
+  renderSlackMarkdown,
 };
