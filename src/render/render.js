@@ -6,9 +6,6 @@ const path = require('path');
 /**
  * Markdown init (3.1):
  * - Calls the markdown renderer (summary.md, pr-comment.md, slack.md).
- * - summary.md should always be generated and appended to $GITHUB_STEP_SUMMARY.
- * - pr-comment.md is generated/used only if NEW > 0 (upsert one reusable PR comment).
- * - slack.md is always generated, and delivered ONLY if slack_webhook_url input is provided.
  */
 async function markdown_init({ distDir = './dist' } = {}) {
   core.startGroup('[render] Markdown');
@@ -59,7 +56,6 @@ async function html_init({ distDir = './dist', logoUrl } = {}) {
     const { buildHtmlBundle } = require('./html/html');
 
     const resolvedDist = path.resolve(distDir);
-    // Allow explicit param to override action input
     const logo = (logoUrl !== undefined ? logoUrl : (core.getInput('html_logo_url') || ''));
 
     await buildHtmlBundle({ distDir: resolvedDist, logoUrl: logo });

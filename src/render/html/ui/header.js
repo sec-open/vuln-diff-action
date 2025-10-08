@@ -1,25 +1,13 @@
 // src/render/html/sections/header.js
-const fs = require('fs');
-const path = require('path');
+// Renders header.html from a strict "view" built once by html.js (no JSON reads here).
 
-function readDiffStrict(distDir) {
-  const file = path.join(distDir, 'diff.json');
-  if (!fs.existsSync(file)) throw new Error(`[html/header] Missing file: ${file}`);
-  const d = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const req = ['repo', 'base.ref', 'base.sha_short', 'head.ref', 'head.sha_short', 'generated_at'];
-  for (const p of req) {
-    const ok = p.split('.').reduce((o, k) => (o && k in o ? o[k] : undefined), d);
-    if (ok === undefined) throw new Error(`[html/header] diff.json missing path: ${p}`);
-  }
-  return d;
-}
+function renderHeader({ view, logoUrl = '' } = {}) {
+  if (!view) throw new Error('[render/html/header] Missing view');
 
-function renderHeader(distDir, logoUrl) {
-  const diff = readDiffStrict(distDir);
-  const repo = diff.repo;
-  const base = `${diff.base.ref} <span class="small">→ ${diff.base.sha_short}</span>`;
-  const head = `${diff.head.ref} <span class="small">→ ${diff.head.sha_short}</span>`;
-  const stamped = diff.generated_at;
+  const repo = view.repo;
+  const base = `${view.base.ref} <span class="small">→ ${view.base.shaShort}</span>`;
+  const head = `${view.head.ref} <span class="small">→ ${view.head.shaShort}</span>`;
+  const stamped = view.generatedAt;
 
   return `
 <div class="grid-2">
