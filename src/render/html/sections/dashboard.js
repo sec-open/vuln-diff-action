@@ -1,79 +1,14 @@
 // src/render/html/sections/dashboard.js
-// Dashboard section — charts + three filterable/sortable tables.
-// No JSON reads; receives a strict "view" from the HTML orchestrator.
+// Dashboard section — charts only (no tables). No JSON reads here.
 
-function hyperlinkId(id) {
-  if (!id) return 'UNKNOWN';
-  const up = String(id).toUpperCase();
-  if (up.startsWith('CVE-')) return `<a href="https://nvd.nist.gov/vuln/detail/${up}" target="_blank" rel="noopener">${id}</a>`;
-  if (up.startsWith('GHSA-')) return `<a href="https://github.com/advisories/${up}" target="_blank" rel="noopener">${id}</a>`;
-  return id;
-}
-function asGav(v) {
-  const pkg = v?.package || {};
-  const g = pkg.groupId ?? 'unknown';
-  const a = pkg.artifactId ?? 'unknown';
-  const ver = pkg.version ?? 'unknown';
-  return `${g}:${a}:${ver}`;
-}
-
-function rowsFor(items) {
-  return items.map((v) => {
-    const id = v.id || v.ids?.ghsa || v.ids?.cve || 'UNKNOWN';
-    const pkg = asGav(v);
-    const sev = String(v.severity || 'UNKNOWN').toUpperCase();
-    const state = String(v.state || 'UNKNOWN').toUpperCase();
-    return `<tr>
-      <td data-key="severity">${sev}</td>
-      <td data-key="id">${hyperlinkId(id)}</td>
-      <td data-key="package"><code>${pkg}</code></td>
-      <td data-key="state">${state}</td>
-    </tr>`;
-  }).join('');
-}
-
-function renderTable(title, id, items) {
-  return `
-<div class="card">
-  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-    <h3 style="margin:0">${title}</h3>
-    <input type="search" class="tbl-filter" data-target="#${id}" placeholder="Filter…" />
-  </div>
-  <div class="tbl-wrap" style="overflow:auto; margin-top:8px;">
-    <table id="${id}" class="tbl sortable filterable">
-      <thead>
-        <tr>
-          <th data-sort="severity">Severity</th>
-          <th data-sort="id">Vulnerability</th>
-          <th data-sort="package">Package</th>
-          <th data-sort="state">State</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rowsFor(items)}
-      </tbody>
-    </table>
-  </div>
-</div>`;
-}
-
-// ... helpers intactos ...
-
-function renderDashboard({ view } = {}) {
-  if (!view) throw new Error('[render/html/dashboard] Missing view');
-
-  const items = Array.isArray(view.items) ? view.items : [];
-  const newItems = items.filter(i => String(i.state).toUpperCase() === 'NEW');
-  const removedItems = items.filter(i => String(i.state).toUpperCase() === 'REMOVED');
-  const unchangedItems = items.filter(i => String(i.state).toUpperCase() === 'UNCHANGED');
-
+function renderDashboard(/* { view } */) {
   return `
 <div class="card">
   <h2 id="section-title">Dashboard</h2>
-  <p class="small">High-level visual summary of the diff (no extra calculations; all data comes from Phase 2).</p>
+  <p class="small">High-level visual summary of the diff (no extra calculations; all data comes from Phase 2 + Phase 3 precompute).</p>
 </div>
 
-<!-- 3 charts in a single row -->
+<!-- Row 1: three charts -->
 <div class="grid-3">
   <div class="card chart-card">
     <h3>Distribution by State</h3>
@@ -89,15 +24,41 @@ function renderDashboard({ view } = {}) {
   </div>
 </div>
 
-<!-- Tables with filter + sort -->
-<div class="grid-2" style="margin-top:12px;">
-  ${renderTable('NEW Vulnerabilities', 'tbl-new', newItems)}
-  ${renderTable('REMOVED Vulnerabilities', 'tbl-removed', removedItems)}
+<!-- Row 2: head vs base + top components + depth cards -->
+<div class="grid-3" style="margin-top:12px;">
+  <div class="card chart-card">
+    <h3>Head vs Base — Severity</h3>
+    <div class="chart-wrap"><canvas id="chart-head-vs-base" aria-label="Head vs Base by severity"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <h3>Top Components in Head</h3>
+    <div class="chart-wrap"><canvas id="chart-top-components" aria-label="Top components in head"></canvas></div>
+  </div>
+  <div class="card">
+    <h3>Path Depth Summary</h3>
+    <div class="grid-2">
+      <div>
+        <div class="small">HEAD</div>
+        <ul class="small">
+          <li>min: <span id="pd-head-min">n/a</span></li>
+          <li>max: <span id="pd-head-max">n/a</span></li>
+          <li>avg: <span id="pd-head-avg">n/a</span></li>
+          <li>p95: <span id="pd-head-p95">n/a</span></li>
+        </ul>
+      </div>
+      <div>
+        <div class="small">BASE</div>
+        <ul class="small">
+          <li>min: <span id="pd-base-min">n/a</span></li>
+          <li>max: <span id="pd-base-max">n/a</span></li>
+          <li>avg: <span id="pd-base-avg">n/a</span></li>
+          <li>p95: <span id="pd-base-p95">n/a</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
 </div>
-<div style="margin-top:12px;">
-  ${renderTable('UNCHANGED Vulnerabilities', 'tbl-unchanged', unchangedItems)}
-</div>`;
+`;
 }
 
 module.exports = { renderDashboard };
-

@@ -35,6 +35,8 @@
         loadInto('#app-content', './sections/dashboard.html');
       } else if (name === 'vuln-table') {
         loadInto('#app-content', './sections/vuln-table.html');
+      } else if (name === 'fix-insights') {
+        loadInto('#app-content', './sections/fix-insights.html');
       } else if (name === 'dep-graph-base') {
         loadInto('#app-content', './sections/dep-graph-base.html');
       } else if (name === 'dep-graph-head') {

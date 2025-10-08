@@ -8,6 +8,7 @@ module.exports = function makeMenu() {
   <a href="#" class="item" data-section="summary">Summary</a>
   <a href="#" class="item" data-section="vuln-table">Vulnerability Diff Table</a>
   <a href="#" class="item" data-section="dashboard">Dashboard</a>
+  <a href="#" class="item" data-section="fix-insights">Fix Insights</a>
 
   <div class="item" style="margin-top:8px; font-weight:600;">Dependency Graph</div>
   <div class="submenu">

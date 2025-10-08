@@ -46,13 +46,14 @@ th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border);
 
 
 /* --- Charts layout & sizing --- */
-:root { --chart-h: 320px; }         /* súbela a 400px si quieres */
+/* --- Charts layout & sizing --- */
+:root { --chart-h: 320px; }  /* set 400px if you prefer */
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 
 .chart-card { position: relative; min-height: var(--chart-h); }
 .chart-card .chart-wrap { position: relative; height: var(--chart-h); }
 .chart-card canvas { width: 100% !important; height: 100% !important; }
 
-/* Responsive: 3 → 2 → 1 columnas */
 @media (max-width: 1400px) { .grid-3 { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 900px)  { .grid-3 { grid-template-columns: 1fr; } }
+

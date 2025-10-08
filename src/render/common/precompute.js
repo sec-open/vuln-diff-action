@@ -61,7 +61,6 @@ function topComponentsHead(items = [], topN = 10) {
     const gav = `${pkg.groupId ?? 'unknown'}:${pkg.artifactId ?? 'unknown'}:${pkg.version ?? 'unknown'}`;
     const prev = map.get(gav) || { gav, componentRef: it.componentRef, count: 0 };
     prev.count += 1;
-    // prefer first non-empty componentRef
     if (!prev.componentRef && it.componentRef) prev.componentRef = it.componentRef;
     map.set(gav, prev);
   }
@@ -70,6 +69,7 @@ function topComponentsHead(items = [], topN = 10) {
     .slice(0, topN);
 }
 
+// ---- Path depth stats ----
 function collectPathDepths(items = [], includeStates = new Set()) {
   const depths = [];
   for (const it of items) {
@@ -104,6 +104,51 @@ function pathDepthStats(items = [], which /* 'head' | 'base' */) {
   return { min, max, avg: Number(avg.toFixed(2)), p95 };
 }
 
+// ---- Fix insights (best-effort inference if fields exist) ----
+function inferHasFix(item) {
+  // Accept common shapes: item.has_fix (boolean) OR arrays with fixed versions.
+  if (typeof item.has_fix === 'boolean') return item.has_fix;
+  const candidates = [
+    item.fixed_versions,
+    item.fix_versions,
+    item.fix?.versions,
+    item.fixes,
+  ];
+  for (const c of candidates) {
+    if (Array.isArray(c) && c.length > 0) return true;
+  }
+  return false;
+}
+
+function fixesHeadAggregates(items = []) {
+  // Only head-visible items: NEW or UNCHANGED
+  const bySev = {};
+  let withFix = 0, withoutFix = 0;
+
+  for (const sev of SEVERITIES) bySev[sev] = { with_fix: 0, without_fix: 0 };
+
+  for (const it of items) {
+    const s = String(it.state || '').toUpperCase();
+    if (s !== 'NEW' && s !== 'UNCHANGED') continue;
+
+    const sev = (String(it.severity || 'UNKNOWN').toUpperCase());
+    const hasFix = inferHasFix(it);
+
+    if (hasFix) {
+      bySev[sev].with_fix += 1;
+      withFix += 1;
+    } else {
+      bySev[sev].without_fix += 1;
+      withoutFix += 1;
+    }
+  }
+
+  return {
+    by_severity: bySev,
+    totals: { with_fix: withFix, without_fix: withoutFix },
+  };
+}
+
 function precomputeFromDiff(diff) {
   if (!diff || typeof diff !== 'object') {
     throw new Error('[precompute] invalid diff object');
@@ -112,7 +157,6 @@ function precomputeFromDiff(diff) {
   const items = Array.isArray(diff.items) ? diff.items : [];
 
   const out = {
-    // minimal, always useful
     summary: {
       by_severity_in_head: bySeverityInHead(bySevState),
       by_severity_in_base: bySeverityInBase(bySevState),
@@ -123,6 +167,7 @@ function precomputeFromDiff(diff) {
       top_components_head: topComponentsHead(items, 10),
       path_depth_head: pathDepthStats(items, 'head'),
       path_depth_base: pathDepthStats(items, 'base'),
+      fixes_head: fixesHeadAggregates(items),
     },
   };
   return out;
@@ -130,9 +175,9 @@ function precomputeFromDiff(diff) {
 
 module.exports = {
   precomputeFromDiff,
-  // export helpers if you want unit tests at finer granularity
   _internals: {
     bySeverityInHead, bySeverityInBase, headVsBaseBySeverity,
     severityTotalsOverall, topComponentsHead, pathDepthStats,
+    inferHasFix, fixesHeadAggregates,
   }
 };

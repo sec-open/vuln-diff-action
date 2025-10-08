@@ -57,7 +57,6 @@ function buildView(distDir = './dist') {
     'items'
   ].forEach((p) => assertPath(diff, p, 'diff.json'));
 
-  // Build view (no fallbacks; required fields only)
   const view = {
     schemaVersion: diff.schema_version,
     generatedAt: diff.generated_at,
@@ -101,9 +100,8 @@ function buildView(distDir = './dist') {
     items: Array.isArray(diff.items) ? diff.items : [],
   };
 
-  // Attach Phase-3 precomputed aggregates (purely derived; Phase 2 remains intact)
-  const pre = precomputeFromDiff(diff);
-  view.precomputed = pre;
+  // Phase-3 precomputed aggregates
+  view.precomputed = precomputeFromDiff(diff);
 
   return view;
 }

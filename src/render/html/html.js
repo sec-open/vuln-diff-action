@@ -73,11 +73,10 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     <script src="./assets/js/dep-graph.js"></script>
 
     <script src="./assets/js/dashboard.js"></script>
+    <script src="./assets/js/fix-insights.js"></script>
     <script src="./assets/js/tables.js"></script>
 
     <script src="./assets/js/runtime.js"></script>
-
-
 </body>
 </html>`;
     await writeText(path.join(outDir, 'index.html'), indexHtml);
@@ -96,6 +95,7 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     const { renderSummary } = require('./sections/summary');
     const { renderDepGraphBase, renderDepGraphHead } = require('./sections/dep-graph');
     const { renderDashboard } = require('./sections/dashboard');
+    const { renderFixInsights } = require('./sections/fix-insights');
     const { renderVulnTable } = require('./sections/vuln-table');
     const { renderDepPathsBase, renderDepPathsHead } = require('./sections/dep-paths');
 
@@ -105,14 +105,52 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     const summaryHtml = renderSummary({ view });
     await writeText(path.join(outDir, 'sections', 'summary.html'), summaryHtml);
 
+    const dashboardHtml = renderDashboard({ view });
+    await writeText(path.join(outDir, 'sections', 'dashboard.html'), dashboardHtml);
+
+    const SEVERITY_ORDER = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
+    const totals = view.summary.totals;
+    const by = view.summary.bySeverityAndState || {};
+    const sevLabels = SEVERITY_ORDER.slice();
+    const sevNew = sevLabels.map(s => (by[s]?.NEW ?? 0));
+    const sevRemoved = sevLabels.map(s => (by[s]?.REMOVED ?? 0));
+    const sevUnchanged = sevLabels.map(s => (by[s]?.UNCHANGED ?? 0));
+
+    const dashData = {
+      stateTotals: { labels: ['NEW','REMOVED','UNCHANGED'], values: [totals.NEW, totals.REMOVED, totals.UNCHANGED] },
+      severityStacked: { labels: sevLabels, NEW: sevNew, REMOVED: sevRemoved, UNCHANGED: sevUnchanged },
+      newVsRemovedBySeverity: { labels: sevLabels, NEW: sevNew, REMOVED: sevRemoved },
+      headVsBaseBySeverity: view.precomputed.aggregates.head_vs_base_by_severity,
+      topComponentsHead: view.precomputed.aggregates.top_components_head,
+      pathDepthHead: view.precomputed.aggregates.path_depth_head,
+      pathDepthBase: view.precomputed.aggregates.path_depth_base,
+    };
+    await writeText(path.join(outDir, 'sections', 'dashboard-data.json'), JSON.stringify(dashData));
+
+    // ---- Fix Insights section and data ----
+    const fixHtml = renderFixInsights({ view });
+    await writeText(path.join(outDir, 'sections', 'fix-insights.html'), fixHtml);
+
+    // Tables sources (items) — we keep only items needed here to avoid large payloads if desired
+    const newWithFix = view.items.filter(it => String(it.state).toUpperCase() === 'NEW' && (it.has_fix === true || Array.isArray(it.fixed_versions) || Array.isArray(it.fix_versions) || (it.fix && Array.isArray(it.fix.versions))));
+    const unchangedWithFix = view.items.filter(it => String(it.state).toUpperCase() === 'UNCHANGED' && (it.has_fix === true || Array.isArray(it.fixed_versions) || Array.isArray(it.fix_versions) || (it.fix && Array.isArray(it.fix.versions))));
+
+    const fixData = {
+      fixesHead: {
+        bySeverity: view.precomputed.aggregates.fixes_head.by_severity,
+        totals: view.precomputed.aggregates.fixes_head.totals,
+      },
+      newWithFix: newWithFix,
+      unchangedWithFix: unchangedWithFix,
+    };
+    await writeText(path.join(outDir, 'sections', 'fix-insights-data.json'), JSON.stringify(fixData));
+
     const depGraphBaseHtml = renderDepGraphBase({ view });
     await writeText(path.join(outDir, 'sections', 'dep-graph-base.html'), depGraphBaseHtml);
 
     const depGraphHeadHtml = renderDepGraphHead({ view });
     await writeText(path.join(outDir, 'sections', 'dep-graph-head.html'), depGraphHeadHtml);
 
-    const dashboardHtml = renderDashboard({ view });
-    await writeText(path.join(outDir, 'sections', 'dashboard.html'), dashboardHtml);
 
     const vulnTableHtml = renderVulnTable({ view });
     await writeText(path.join(outDir, 'sections', 'vuln-table.html'), vulnTableHtml);
@@ -122,23 +160,6 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
 
     const depHeadHtml = renderDepPathsHead({ view });
     await writeText(path.join(outDir, 'sections', 'dep-paths-head.html'), depHeadHtml);
-
-    // --- COPY STATIC ASSETS (CSS + JS + images, etc.) FROM REPO ---
-
-    // Build data blob for dashboard (from Phase-2 summary only)
-    const SEVERITY_ORDER = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
-    const totals = view.summary.totals;
-    const by = view.summary.bySeverityAndState || {};
-    const sevLabels = SEVERITY_ORDER.slice();
-    const sevNew = sevLabels.map(s => (by[s]?.NEW ?? 0));
-    const sevRemoved = sevLabels.map(s => (by[s]?.REMOVED ?? 0));
-    const sevUnchanged = sevLabels.map(s => (by[s]?.UNCHANGED ?? 0));
-    const dashData = {
-      stateTotals: { labels: ['NEW','REMOVED','UNCHANGED'], values: [totals.NEW, totals.REMOVED, totals.UNCHANGED] },
-      severityStacked: { labels: sevLabels, NEW: sevNew, REMOVED: sevRemoved, UNCHANGED: sevUnchanged },
-      newVsRemovedBySeverity: { labels: sevLabels, NEW: sevNew, REMOVED: sevRemoved }
-    };
-    await writeText(path.join(outDir, 'sections', 'dashboard-data.json'), JSON.stringify(dashData));
 
     // Source expected at src/render/html/assets/**
     const srcAssets = path.resolve('src/render/html/assets');
