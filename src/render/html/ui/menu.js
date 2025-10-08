@@ -1,12 +1,13 @@
 // src/render/html/ui/menu.js
-// Builds menu.html with working buttons and submenus.
-// Overview added; Dependency Graph and Dependency Paths have Base/Head subitems.
+// Builds the left menu. "Overview" is the first item and the default view.
 
 module.exports = function makeMenu() {
   return `
 <div class="card" role="navigation" aria-label="Report Menu">
-  <a href="#" class="item active" data-section="summary">Summary</a>
-  <a href="#" class="item" data-section="overview">Overview</a>
+  <a href="#" class="item active" data-section="overview">Overview</a>
+  <a href="#" class="item" data-section="summary">Summary</a>
+  <a href="#" class="item" data-section="vuln-table">Vulnerability Diff Table</a>
+  <a href="#" class="item" data-section="dashboard">Dashboard</a>
 
   <div class="item" style="margin-top:8px; font-weight:600;">Dependency Graph</div>
   <div class="submenu">

@@ -82,9 +82,11 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
 
     // --- summary section HTML (delegated) ---
     const { renderSummary } = require('./sections/summary');
+    const { renderOverview } = require('./sections/overview');
     const summaryHtml = renderSummary({ view });
     await writeText(path.join(outDir, 'sections', 'summary.html'), summaryHtml);
-
+    const overviewHtml = renderOverview({ view });
+    await writeText(path.join(outDir, 'sections', 'overview.html'), overviewHtml);
     // --- runtime.js (inline small router; you can externalize and copy if preferred) ---
     const runtimeJs = `/* [render/html] runtime router (no frameworks) */
 (function(){
@@ -108,9 +110,11 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
       if (!a) return;
       ev.preventDefault();
       const name = a.getAttribute('data-section');
-      if (name === 'summary') {
-        loadInto('#app-content', './sections/summary.html');
-      } else {
+    if (name === 'overview') {
+      loadInto('#app-content', './sections/overview.html');
+    } else if (name === 'summary') {
+      loadInto('#app-content', './sections/summary.html');
+    } else {
         const el = document.querySelector('#app-content');
         if (el) el.innerHTML = '<h2 id="section-title">' + a.textContent.trim() + '</h2>';
       }
@@ -122,7 +126,7 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     await loadInto('#app-header', './header.html');
     await loadInto('#app-menu', './menu.html');
     wireMenu();
-    const def = document.querySelector('#app-menu [data-section="summary"]');
+    const def = document.querySelector('#app-menu [data-section="overview"]');
     if (def) def.click();
   }
   document.addEventListener('DOMContentLoaded', boot);
