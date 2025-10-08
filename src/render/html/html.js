@@ -66,6 +66,8 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     <nav id="app-menu"></nav>
     <main id="app-content" aria-live="polite"></main>
   </div>
+  <script src="./assets/js/vendor/chart.umd.js"></script>
+  <script src="./assets/js/vendor/chartjs-plugin-datalabels.min.js"></script>
   <script src="./assets/js/runtime.js"></script>
 </body>
 </html>`;
@@ -83,6 +85,7 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     // --- sections: overview + summary (delegated) ---
     const { renderOverview } = require('./sections/overview');
     const { renderSummary } = require('./sections/summary');
+    const { renderDashboard } = require('./sections/dashboard');
     const { renderVulnTable } = require('./sections/vuln-table');
     const { renderDepPathsBase, renderDepPathsHead } = require('./sections/dep-paths');
 
@@ -91,6 +94,9 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
 
     const summaryHtml = renderSummary({ view });
     await writeText(path.join(outDir, 'sections', 'summary.html'), summaryHtml);
+
+    const dashboardHtml = renderDashboard({ view });
+    await writeText(path.join(outDir, 'sections', 'dashboard.html'), dashboardHtml);
 
     const vulnTableHtml = renderVulnTable({ view });
     await writeText(path.join(outDir, 'sections', 'vuln-table.html'), vulnTableHtml);
