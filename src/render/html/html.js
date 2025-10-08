@@ -51,7 +51,7 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
 
     // --- header and menu HTML (delegated) ---
     // NOTE: we pass "view" (strict) so sections don't read JSON again.
-    const { renderHeader } = require('./sections/header');
+    const { renderHeader } = require('./ui/header');
     const headerHtml = renderHeader({ view, logoUrl });
     await writeText(path.join(outDir, 'header.html'), headerHtml);
 
