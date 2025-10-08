@@ -85,6 +85,7 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     // --- sections: overview + summary (delegated) ---
     const { renderOverview } = require('./sections/overview');
     const { renderSummary } = require('./sections/summary');
+    const { renderDepGraphBase, renderDepGraphHead } = require('./sections/dep-graph');
     const { renderDashboard } = require('./sections/dashboard');
     const { renderVulnTable } = require('./sections/vuln-table');
     const { renderDepPathsBase, renderDepPathsHead } = require('./sections/dep-paths');
@@ -94,6 +95,12 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
 
     const summaryHtml = renderSummary({ view });
     await writeText(path.join(outDir, 'sections', 'summary.html'), summaryHtml);
+
+    const depGraphBaseHtml = renderDepGraphBase({ view });
+    await writeText(path.join(outDir, 'sections', 'dep-graph-base.html'), depGraphBaseHtml);
+
+    const depGraphHeadHtml = renderDepGraphHead({ view });
+    await writeText(path.join(outDir, 'sections', 'dep-graph-head.html'), depGraphHeadHtml);
 
     const dashboardHtml = renderDashboard({ view });
     await writeText(path.join(outDir, 'sections', 'dashboard.html'), dashboardHtml);

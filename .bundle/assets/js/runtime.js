@@ -35,6 +35,10 @@
         loadInto('#app-content', './sections/dashboard.html');
       } else if (name === 'vuln-table') {
         loadInto('#app-content', './sections/vuln-table.html');
+      } else if (name === 'dep-graph-base') {
+        loadInto('#app-content', './sections/dep-graph-base.html');
+      } else if (name === 'dep-graph-head') {
+        loadInto('#app-content', './sections/dep-graph-head.html');
       } else if (name === 'dep-paths-base') {
         loadInto('#app-content', './sections/dep-paths-base.html');
       } else if (name === 'dep-paths-head') {
