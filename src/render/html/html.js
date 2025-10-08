@@ -72,7 +72,7 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     await writeText(path.join(outDir, 'index.html'), indexHtml);
 
     // --- header and menu HTML (delegated) ---
-    const { renderHeader } = require('./sections/header');
+    const { renderHeader } = require('./ui/header');
     const headerHtml = renderHeader({ view, logoUrl });
     await writeText(path.join(outDir, 'header.html'), headerHtml);
 
