@@ -1,38 +1,24 @@
 // src/render/pdf/pdf.js
-// Phase 3.3 (PDF) — skeleton with PDF export:
-// - Writes ./dist/pdf/print.html (Cover + TOC + Introduction)
-// - Exports ./dist/pdf/report.pdf with Puppeteer
-// - Reuses the same html_logo_url input as the HTML bundle
+// Phase 3.3 (PDF) — Cover + TOC + Intro, export to PDF using puppeteer-core.
+// Self-contained: downloads a portable Chrome-for-Testing (stable) with @puppeteer/browsers if no browser is found.
 
 const actionsCore = require('@actions/core');
 const fsp = require('fs/promises');
 const pth = require('path');
+const os = require('os');
 const { buildView } = require('../common/view');
 
-async function ensureDir(p) {
-  await fsp.mkdir(p, { recursive: true });
-}
-async function writeText(file, text) {
-  await ensureDir(pth.dirname(file));
-  await fsp.writeFile(file, text, 'utf8');
-}
+async function ensureDir(p) { await fsp.mkdir(p, { recursive: true }); }
+async function writeText(file, text) { await ensureDir(pth.dirname(file)); await fsp.writeFile(file, text, 'utf8'); }
+function fileExistsSync(p) { try { require('fs').accessSync(p); return true; } catch { return false; } }
 
 function rewriteLogoForPdf(logoUrl) {
   if (!logoUrl) return '';
   const u = String(logoUrl).trim();
-
-  // Absolute HTTP(S) — leave as is (Puppeteer will fetch it)
-  if (/^https?:\/\//i.test(u)) return u;
-
-  // If caller passed a path inside the HTML bundle like "html/assets/img/logo.png"
-  // or "./html/assets/img/logo.png", adjust relative to the pdf directory.
+  if (/^https?:\/\//i.test(u)) return u;          // absolute URL
   const htmlRel = u.replace(/^\.\//, '');
-  if (htmlRel.startsWith('html/')) {
-    return '../' + htmlRel; // from dist/pdf -> dist/html/...
-  }
-
-  // If caller passed a path already relative to pdf (rare), keep it.
-  return u;
+  if (htmlRel.startsWith('html/')) return '../' + htmlRel; // from dist/pdf -> dist/html/...
+  return u; // relative to dist/pdf
 }
 
 function makeCss() {
@@ -44,7 +30,6 @@ main { padding: 0; }
 h1, h2, h3 { margin: 0 0 12px 0; }
 p { margin: 0 0 10px 0; }
 .small { color: #6b7280; font-size: 12px; }
-
 .section { page-break-inside: avoid; margin-bottom: 18mm; }
 .cover { page-break-after: always; display:flex; flex-direction:column; gap:16px; }
 .cover .header { display:flex; align-items:center; justify-content:space-between; }
@@ -53,11 +38,9 @@ p { margin: 0 0 10px 0; }
 .cover h1 { font-size: 28px; margin: 18px 0 6px; }
 .kv { display:grid; grid-template-columns: 140px 1fr; gap: 4px 12px; margin: 4px 0; }
 .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
-
 .columns-2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .toc ol { margin: 0 0 0 18px; padding: 0; }
 .toc li { margin: 6px 0; }
-
 hr.sep { border: 0; border-top: 1px solid #e5e7eb; margin: 12px 0; }
   `.trim();
 }
@@ -73,7 +56,6 @@ function makeIntroductionHtml({ repo, base, head }) {
   It highlights how known vulnerabilities differ across these two references so reviewers can quickly
   assess newly introduced risks, confirm improvements, and verify areas that remain unchanged.
 </p>
-
 <p class="small">How it was produced</p>
 <ol>
   <li><strong>SBOM generation</strong> — via CycloneDX Maven (when a Maven reactor is detected) or Syft fallback.</li>
@@ -81,7 +63,6 @@ function makeIntroductionHtml({ repo, base, head }) {
   <li><strong>Normalization &amp; diff</strong> — findings normalized into a unified schema and compared using <code>vulnerability_id::groupId:artifactId:version</code>. Final states are: <em>NEW</em> (head only), <em>REMOVED</em> (base only), <em>UNCHANGED</em> (in both).</li>
   <li><strong>Rendering</strong> — interactive HTML dashboard plus a printable PDF and Markdown summary for CI/PR reviews.</li>
 </ol>
-
 <p class="small">Why this matters</p>
 <p>
   The goal is to provide a transparent, reproducible view of changes in known vulnerabilities as the code evolves—supporting risk assessment,
@@ -93,31 +74,21 @@ function makeIntroductionHtml({ repo, base, head }) {
 function makePrintHtml({ repo, base, head, generatedAt, logoUrl }) {
   const intro = makeIntroductionHtml({ repo, base, head });
   const srcLogo = rewriteLogoForPdf(logoUrl);
-
   return `<!doctype html>
-<html lang="en">
-<head>
+<html lang="en"><head>
 <meta charset="utf-8" />
 <title>Vulnerability Diff Report — ${repo}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="stylesheet" href="./assets/print.css" />
-</head>
-<body>
-<main>
-
-<!-- COVER -->
+</head><body><main>
 <section class="section cover" id="cover">
   <div class="header">
     <div class="brand">
       ${srcLogo ? `<img src="${srcLogo}" alt="Logo" />` : ``}
-      <div>
-        <div class="small">Vulnerability Diff Report</div>
-        <h1>${repo}</h1>
-      </div>
+      <div><div class="small">Vulnerability Diff Report</div><h1>${repo}</h1></div>
     </div>
     <div class="small">Generated at<br/><strong>${generatedAt}</strong></div>
   </div>
-
   <div class="columns-2">
     <div class="card">
       <h3>Base</h3>
@@ -127,7 +98,6 @@ function makePrintHtml({ repo, base, head, generatedAt, logoUrl }) {
       <div class="kv"><div>Authored at</div><div>${base.authoredAt}</div></div>
       <div class="kv"><div>Subject</div><div>${base.commitSubject}</div></div>
     </div>
-
     <div class="card">
       <h3>Head</h3>
       <div class="kv"><div>Ref</div><div><code>${head.ref}</code></div></div>
@@ -138,8 +108,6 @@ function makePrintHtml({ repo, base, head, generatedAt, logoUrl }) {
     </div>
   </div>
 </section>
-
-<!-- TABLE OF CONTENTS -->
 <section class="section toc" id="table-of-contents">
   <h2>Table of Contents</h2>
   <ol>
@@ -149,17 +117,69 @@ function makePrintHtml({ repo, base, head, generatedAt, logoUrl }) {
   </ol>
   <hr class="sep"/>
 </section>
-
-<!-- INTRODUCTION -->
-<section class="section">
-  ${intro}
-</section>
-
-</main>
-</body>
-</html>`;
+<section class="section">${intro}</section>
+</main></body></html>`;
 }
 
+// ------------- Portable browser resolution / download (no sudo) -------------
+function knownBrowserCandidates() {
+  return [
+    process.env.CHROMIUM_PATH || '',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/snap/bin/chromium',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome',
+  ].filter(Boolean);
+}
+
+async function ensurePortableChrome(cacheDir) {
+  // Downloads Chrome for Testing (stable channel) to cacheDir using @puppeteer/browsers
+  const { install, computeExecutablePath } = require('@puppeteer/browsers');
+  // Map Node platform/arch to @puppeteer/browsers platform string
+  const platformMap = {
+    linux: 'linux',
+    darwin: (os.arch() === 'arm64' ? 'mac-arm' : 'mac'),
+    win32: 'win64'
+  };
+  const platform = platformMap[os.platform()];
+  if (!platform) throw new Error(`Unsupported platform for portable Chrome: ${os.platform()}`);
+
+  const buildId = 'stable'; // Chrome for Testing (stable channel)
+  await install({
+    browser: 'chrome',
+    buildId,
+    cacheDir,
+    platform,
+  });
+
+  const execPath = computeExecutablePath({
+    browser: 'chrome',
+    cacheDir,
+    platform,
+    buildId,
+  });
+  if (!execPath || !fileExistsSync(execPath)) {
+    throw new Error('Downloaded Chrome executable not found after install.');
+  }
+  return execPath;
+}
+
+async function resolveBrowserExecutable(outDir) {
+  // 1) env / system
+  for (const p of knownBrowserCandidates()) {
+    if (fileExistsSync(p)) return p;
+  }
+  // 2) portable download into dist/pdf/.browsers
+  const cacheDir = pth.join(outDir, '.browsers');
+  await ensureDir(cacheDir);
+  actionsCore.info('[render/pdf] no system browser found; downloading Chrome (stable) locally…');
+  const execPath = await ensurePortableChrome(cacheDir);
+  actionsCore.info(`[render/pdf] portable Chrome ready at: ${execPath}`);
+  return execPath;
+}
+
+// ---------------------------- Main entrypoint -------------------------------
 async function pdf_init({ distDir = './dist' } = {}) {
   actionsCore.startGroup('[render] PDF');
   try {
@@ -167,38 +187,29 @@ async function pdf_init({ distDir = './dist' } = {}) {
 
     const outDir = pth.join(pth.resolve(distDir), 'pdf');
     const assetsDir = pth.join(outDir, 'assets');
-
     await ensureDir(outDir);
     await ensureDir(assetsDir);
 
-    // CSS
+    // CSS + HTML
     await writeText(pth.join(assetsDir, 'print.css'), makeCss());
-
-    // Use same logo as HTML (input html_logo_url)
     const logo = actionsCore.getInput('html_logo_url') || '';
-
-    // HTML
     const html = makePrintHtml({
-      repo: view.repo,
-      generatedAt: view.generatedAt,
-      base: view.base,
-      head: view.head,
-      logoUrl: logo,
+      repo: view.repo, generatedAt: view.generatedAt, base: view.base, head: view.head, logoUrl: logo,
     });
     const htmlPath = pth.join(outDir, 'print.html');
     await writeText(htmlPath, html);
     actionsCore.info(`[render/pdf] written: ${htmlPath}`);
 
-    // PDF export with Puppeteer
-    let puppeteer;
-    try {
-      puppeteer = require('puppeteer');
-    } catch (e) {
-      throw new Error('Puppeteer is not installed. Please add "puppeteer" to your dependencies.');
-    }
+    // puppeteer-core + browser (system or portable)
+    let pptr;
+    try { pptr = require('puppeteer-core'); }
+    catch { throw new Error('puppeteer-core is not installed. Please add "puppeteer-core" to your dependencies.'); }
 
-    const browser = await puppeteer.launch({
+    const executablePath = await resolveBrowserExecutable(outDir);
+
+    const browser = await pptr.launch({
       headless: 'new',
+      executablePath,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
     const page = await browser.newPage();
@@ -219,6 +230,9 @@ async function pdf_init({ distDir = './dist' } = {}) {
     actionsCore.setFailed(`[render] PDF failed: ${e?.message || e}`);
     throw e;
   } finally {
+    try { await fsp.rm(pth.join(outDir, '.browsers'), { recursive: true, force: true }); }
+    catch (e) { actionsCore.warning(`[render/pdf] cannot remove portable browser: ${e.message}`); }
+
     actionsCore.endGroup();
   }
 }

@@ -15,11 +15,15 @@
     "phase1": "node src/index.js",
     "test": "echo \"No tests yet for Phase 1\""
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@actions/artifact": "^2.2.1",
     "@actions/core": "^1.11.1",
-    "@actions/github": "^6.0.0"
+    "@actions/github": "^6.0.0",
+    "puppeteer-core": "^22.7.0",
+    "@puppeteer/browsers": "^2.2.3"
   },
   "devDependencies": {
     "@vercel/ncc": "^0.38.3"
