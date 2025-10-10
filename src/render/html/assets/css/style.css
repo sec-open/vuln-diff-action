@@ -57,3 +57,41 @@ th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border);
 @media (max-width: 1400px) { .grid-3 { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 900px)  { .grid-3 { grid-template-columns: 1fr; } }
 
+/* --- Info badge & tooltip --- */
+.info-badge {
+  display:inline-flex; align-items:center; justify-content:center;
+  width:18px; height:18px; border-radius:50%;
+  background:#223154; color:#cbd5e1; font-size:12px; font-weight:700;
+  margin-left:8px; cursor:pointer; border:1px solid var(--border);
+}
+.tooltip {
+  position:absolute; z-index:50; width:min(520px, calc(100vw - 40px));
+  background: #0f1726; border:1px solid var(--border); border-radius:10px;
+  padding:12px; box-shadow: 0 10px 25px rgba(0,0,0,0.35);
+  display:none;
+}
+.tooltip.show { display:block; }
+.tooltip h4 { margin:0 0 8px 0; font-size:14px; }
+.tooltip .small { color:var(--muted); }
+
+/* Weighted legend bar */
+.weight-bar { display:flex; width:100%; height:12px; border-radius:999px; overflow:hidden; border:1px solid var(--border); }
+.weight-bar .seg { height:100%; }
+.dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+
+/* Severity colors (kept consistent with charts) */
+.sev-critical { background:#ef4444; }  /* red */
+.sev-high     { background:#f59e0b; }  /* amber */
+.sev-medium   { background:#10b981; }  /* green */
+.sev-low      { background:#3b82f6; }  /* blue */
+.sev-unknown  { background:#9ca3af; }  /* gray */
+
+/* Tooltip layout */
+.tooltip-grid { display:grid; grid-template-columns: 1fr; gap:10px; }
+@media (min-width: 520px) {
+  .tooltip-grid { grid-template-columns: 1fr 1fr; }
+}
+.tooltip table { width:100%; border-collapse:collapse; font-size:13px; }
+.tooltip th, .tooltip td { padding:6px 8px; border-bottom:1px solid var(--border); text-align:left; }
+.tooltip .close { float:right; background:transparent; color:var(--muted); border:0; cursor:pointer; font-size:18px; }
+

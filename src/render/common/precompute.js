@@ -157,30 +157,42 @@ function weightedSumBySeverity(mapSevCount = {}) {
 }
 
 function netRiskKpis(bySevState = {}) {
-  // NEW weighted minus REMOVED weighted; and HEAD stock weighted (NEW+UNCHANGED)
+  // NEW weighted minus REMOVED weighted; and stock weighted for HEAD and BASE
   const newBySev = {};
   const removedBySev = {};
   const headBySev = {};
+  const baseBySev = {};
 
   for (const sev of SEVERITIES) {
     const row = bySevState[sev] || {};
-    newBySev[sev] = safeNum(row.NEW);
-    removedBySev[sev] = safeNum(row.REMOVED);
-    headBySev[sev] = safeNum(row.NEW) + safeNum(row.UNCHANGED);
+    const NEW = safeNum(row.NEW);
+    const REMOVED = safeNum(row.REMOVED);
+    const UNCHANGED = safeNum(row.UNCHANGED);
+
+    newBySev[sev] = NEW;
+    removedBySev[sev] = REMOVED;
+    headBySev[sev] = NEW + UNCHANGED;       // HEAD stock
+    baseBySev[sev] = REMOVED + UNCHANGED;   // BASE stock
   }
 
   const newWeighted = weightedSumBySeverity(newBySev);
   const removedWeighted = weightedSumBySeverity(removedBySev);
   const headStockWeighted = weightedSumBySeverity(headBySev);
+  const baseStockWeighted = weightedSumBySeverity(baseBySev);
 
   const netRisk = newWeighted - removedWeighted;
 
   return {
     weights: { ...RISK_WEIGHTS },
     components: { newWeighted, removedWeighted },
-    kpis: { netRisk, headStockRisk: headStockWeighted }
+    kpis: {
+      netRisk,
+      baseStockRisk: baseStockWeighted,  // ← NEW
+      headStockRisk: headStockWeighted
+    }
   };
 }
+
 
 function precomputeFromDiff(diff) {
   if (!diff || typeof diff !== 'object') {

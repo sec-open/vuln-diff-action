@@ -12,6 +12,62 @@
     if (!res.ok) throw new Error(`Failed to load ${DATA_URL}: ${res.status}`);
     return res.json();
   }
+  function sevKeyToClass(sev) {
+    const s = String(sev || '').toUpperCase();
+    if (s === 'CRITICAL') return 'sev-critical';
+    if (s === 'HIGH') return 'sev-high';
+    if (s === 'MEDIUM') return 'sev-medium';
+    if (s === 'LOW') return 'sev-low';
+    return 'sev-unknown';
+  }
+
+  function renderWeightsTable(weights) {
+    const order = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
+    return order.map(sev => {
+      const w = weights?.[sev] ?? 0;
+      const dot = `<span class="dot ${sevKeyToClass(sev)}"></span>`;
+      return `<tr><td>${dot}${sev}</td><td>${w}</td></tr>`;
+    }).join('');
+  }
+
+  function renderWeightsBar(weights) {
+    const order = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
+    const total = order.reduce((acc, sev) => acc + (weights?.[sev] ?? 0), 0) || 1;
+    return order.map(sev => {
+      const w = weights?.[sev] ?? 0;
+      const pct = Math.max(6, Math.round((w / total) * 100)); // mínimo 6% para visibilidad
+      return `<span class="seg ${sevKeyToClass(sev)}" style="width:${pct}%;" title="${sev}: ${w}"></span>`;
+    }).join('');
+  }
+
+  // Tooltip toggle logic
+  function bindRiskTooltip() {
+    const btn = document.getElementById('risk-help');
+    const tip = document.getElementById('risk-tooltip');
+    const close = document.getElementById('risk-tooltip-close');
+    if (!btn || !tip) return;
+
+    function open(e) {
+      e.preventDefault();
+      // place tooltip near the badge
+      const rect = btn.getBoundingClientRect();
+      const parentRect = btn.closest('.card').getBoundingClientRect();
+      const top = rect.bottom - parentRect.top + 8;
+      const left = Math.max(8, rect.left - parentRect.left - 220);
+      tip.style.top = `${top}px`;
+      tip.style.left = `${left}px`;
+      tip.classList.add('show');
+    }
+    function closeTip() { tip.classList.remove('show'); }
+
+    btn.addEventListener('click', open);
+    if (close) close.addEventListener('click', closeTip);
+    document.addEventListener('click', (ev) => {
+      if (!tip.classList.contains('show')) return;
+      if (ev.target === btn || tip.contains(ev.target)) return;
+      tip.classList.remove('show');
+    });
+  }
 
   function mkPie(ctx, data) {
     return new Chart(ctx, {
@@ -129,8 +185,20 @@
     // ---- KPIs (net risk) ----
     if (data.riskKpis?.kpis) {
       setKpi('kpi-net-risk', data.riskKpis.kpis.netRisk ?? '—');
+      setKpi('kpi-base-stock', data.riskKpis.kpis.baseStockRisk ?? '—'); // ← NEW
       setKpi('kpi-head-stock', data.riskKpis.kpis.headStockRisk ?? '—');
+
+        // Fill tooltip content (weights table + bar)
+        const weights = data.riskKpis.weights || null;
+        const rowsEl = document.getElementById('risk-weights-rows');
+        const barEl = document.getElementById('risk-weight-bar');
+        if (weights && rowsEl) rowsEl.innerHTML = renderWeightsTable(weights);
+        if (weights && barEl)  barEl.innerHTML  = renderWeightsBar(weights);
+
+        // Bind tooltip events
+        bindRiskTooltip();
     }
+
 
     // ---- NEW Fixability (bars by severity) ----
     if (data.fixesNew?.by_severity) {

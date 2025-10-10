@@ -34,14 +34,52 @@ function renderDashboard(/* { view } */) {
     <h3>Top Components in Head</h3>
     <div class="chart-wrap"><canvas id="chart-top-components" aria-label="Top components in head"></canvas></div>
   </div>
-  <div class="card">
-    <h3>Risk &amp; Fixability</h3>
-    <div class="grid-2">
+  <div class="card" style="position:relative;">
+    <h3>
+      Risk &amp; Fixability
+      <span id="risk-help" class="info-badge" title="How is risk calculated?">i</span>
+    </h3>
+
+    <!-- Tooltip (hidden by default) -->
+    <div id="risk-tooltip" class="tooltip">
+      <button class="close" id="risk-tooltip-close" aria-label="Close">&times;</button>
+      <h4>Weighted Risk — How it is computed</h4>
+      <div class="tooltip-grid">
+        <div>
+          <div class="small" style="margin-bottom:6px;">Formula</div>
+          <code>Net Risk = Σ(weight × NEW) − Σ(weight × REMOVED)</code>
+          <div class="small" style="margin-top:6px;">
+            Head Stock Risk = Σ(weight × (NEW + UNCHANGED))<br/>
+            Base Stock Risk = Σ(weight × (REMOVED + UNCHANGED))
+          </div>
+          <div style="margin-top:8px;">
+            <div class="small">Weights by severity (visual)</div>
+            <div id="risk-weight-bar" class="weight-bar" style="margin-top:6px;"></div>
+          </div>
+        </div>
+        <div>
+          <div class="small" style="margin-bottom:6px;">Weights table</div>
+          <table>
+            <thead><tr><th>Severity</th><th>Weight</th></tr></thead>
+            <tbody id="risk-weights-rows">
+              <!-- rows injected by dashboard.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-top:10px;">
       <div>
         <div class="kpi">
           <div class="kpi-label">Net Risk</div>
           <div id="kpi-net-risk" class="kpi-value">—</div>
           <div class="small">Weighted NEW − REMOVED</div>
+        </div>
+        <div class="kpi" style="margin-top:8px;">
+          <div class="kpi-label">Base Stock Risk</div>
+          <div id="kpi-base-stock" class="kpi-value">—</div>
+          <div class="small">Weighted (REMOVED + UNCHANGED)</div>
         </div>
         <div class="kpi" style="margin-top:8px;">
           <div class="kpi-label">Head Stock Risk</div>
