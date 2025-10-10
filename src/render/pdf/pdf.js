@@ -3,7 +3,7 @@
 // No scanning, no Phase-2 changes. Outputs under ./dist/pdf.
 // This file does NOT export to PDF yet (HTML only). Puppeteer/export can be added later.
 
-const core = require('@actions/core');
+const actionsCore = require('@actions/core');
 const fs = require('fs/promises');
 const path = require('path');
 const { buildView } = require('../common/view');
@@ -160,7 +160,7 @@ function makePrintHtml({ repo, base, head, generatedAt, logoUrl }) {
 }
 
 async function pdf_init({ distDir = './dist' } = {}) {
-  core.startGroup('[render] PDF (skeleton)');
+  actionsCore.startGroup('[render] PDF (skeleton)');
   try {
     const view = buildView(distDir);
     const outDir = path.join(path.resolve(distDir), 'pdf');
@@ -185,12 +185,12 @@ async function pdf_init({ distDir = './dist' } = {}) {
     });
     await writeText(path.join(outDir, 'print.html'), html);
 
-    core.info(`[render/pdf] skeleton written to ${path.join(outDir, 'print.html')}`);
+    actionsCore.info(`[render/pdf] skeleton written to ${path.join(outDir, 'print.html')}`);
   } catch (e) {
-    core.setFailed(`[render] PDF skeleton failed: ${e?.message || e}`);
+    actionsCore.setFailed(`[render] PDF skeleton failed: ${e?.message || e}`);
     throw e;
   } finally {
-    core.endGroup();
+    actionsCore.endGroup();
   }
 }
 
@@ -358,7 +358,7 @@ function makePrintHtml({ repo, base, head, generatedAt, logoUrl }) {
 }
 
 async function pdf_init({ distDir = './dist' } = {}) {
-  core.startGroup('[render] PDF');
+  actionsCore.startGroup('[render] PDF');
   try {
     const view = buildView(distDir);
 
@@ -384,7 +384,7 @@ async function pdf_init({ distDir = './dist' } = {}) {
     });
     const htmlPath = path.join(outDir, 'print.html');
     await writeText(htmlPath, html);
-    core.info(`[render/pdf] written: ${htmlPath}`);
+    actionsCore.info(`[render/pdf] written: ${htmlPath}`);
 
     // PDF export with Puppeteer
     let puppeteer;
@@ -411,12 +411,12 @@ async function pdf_init({ distDir = './dist' } = {}) {
     });
     await browser.close();
 
-    core.info(`[render/pdf] exported: ${pdfPath}`);
+    actionsCore.info(`[render/pdf] exported: ${pdfPath}`);
   } catch (e) {
-    core.setFailed(`[render] PDF failed: ${e?.message || e}`);
+    actionsCore.setFailed(`[render] PDF failed: ${e?.message || e}`);
     throw e;
   } finally {
-    core.endGroup();
+    actionsCore.endGroup();
   }
 }
 
