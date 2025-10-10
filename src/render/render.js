@@ -1,5 +1,5 @@
 // src/render/render.js
-// Render Orchestrator: kicks off 3.1 (Markdown) and 3.2 (HTML). 3.3 (PDF) will be added later.
+// Render Orchestrator: kicks off 3.1 (Markdown), 3.2 (HTML) and now 3.3 (PDF).
 const core = require('@actions/core');
 const path = require('path');
 
@@ -70,15 +70,36 @@ async function html_init({ distDir = './dist', logoUrl } = {}) {
 }
 
 /**
+ * PDF init (3.3) — skeleton:
+ * - Generates a minimal printable bundle under ./dist/pdf (cover, TOC, introduction).
+ * - Uses the same html_logo_url input for the cover logo.
+ * - Does NOT export to .pdf yet (HTML skeleton only). Export can be added later.
+ */
+async function pdf_init({ distDir = './dist' } = {}) {
+  core.startGroup('[render] PDF');
+  try {
+    const { pdf_init: runPdf } = require('./pdf/pdf'); // uses the skeleton module you created
+    await runPdf({ distDir: path.resolve(distDir) });
+    core.info('[render/pdf] PDF skeleton generated under ./dist/pdf');
+  } catch (e) {
+    core.setFailed(`[render] PDF failed: ${e?.message || e}`);
+    throw e;
+  } finally {
+    core.endGroup();
+  }
+}
+
+/**
  * Render entrypoint (Phase 3):
- * - Runs Markdown (3.1) and HTML (3.2). PDF (3.3) will be added later.
+ * - Runs Markdown (3.1), then HTML (3.2), then PDF (3.3).
  */
 async function render(options = {}) {
   const distDir = options.distDir || './dist';
 
   core.info('[render] start');
   await markdown_init({ distDir });
-  await html_init({ distDir }); // HTML always attempted after Markdown
+  await html_init({ distDir }); // HTML after Markdown
+  await pdf_init({ distDir });  // PDF after HTML
   core.info('[render] done');
 }
 
@@ -86,4 +107,5 @@ module.exports = {
   render,
   markdown_init,
   html_init,
+  pdf_init,
 };
