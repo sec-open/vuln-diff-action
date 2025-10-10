@@ -3,7 +3,6 @@
 // Loaded globally from index.html (not injected per section).
 
 (function () {
-  const SECT_URL = './sections/dashboard.html';
   const DATA_URL = './sections/dashboard-data.json';
 
   function hasChartJs() { return !!window.Chart; }
@@ -62,17 +61,31 @@
       }
     });
   }
+  function mkBarFixNew(ctx, labels, withFix, withoutFix) {
+    return new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'with fix', data: withFix }, { label: 'without fix', data: withoutFix }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' }, title: { display: false } },
+        scales: { x: { stacked: false }, y: { beginAtZero: true, stacked: false, ticks: { precision: 0 } } }
+      }
+    });
+  }
 
-  function fillText(id, v) {
+  function setKpi(id, value) {
     const el = document.getElementById(id);
-    if (el) el.textContent = (v ?? 'n/a');
+    if (!el) return;
+    el.textContent = String(value);
+    // color hint: red if positive net risk (worse), green if <= 0
+    if (id === 'kpi-net-risk') {
+      const v = Number(value);
+      el.style.color = Number.isFinite(v) && v > 0 ? '#f87171' : '#34d399';
+    }
   }
 
   async function render() {
-    if (!hasChartJs()) {
-      console.error('[dashboard] Chart.js not found (assets/js/vendor/chart.umd.js)');
-      return;
-    }
     const content = document.getElementById('app-content');
     if (!content) return;
     const loaded = content.getAttribute('data-loaded') || '';
@@ -82,6 +95,12 @@
     try { data = await fetchData(); }
     catch (e) { console.error('[dashboard] data fetch error:', e); return; }
 
+    if (!hasChartJs()) {
+      console.error('[dashboard] Chart.js not found (assets/js/vendor/chart.umd.js)');
+      return;
+    }
+
+    // ---- existing charts ----
     const pieEl = document.getElementById('chart-state-pie');
     const nrEl = document.getElementById('chart-new-removed');
     const stkEl = document.getElementById('chart-severity-stacked');
@@ -107,18 +126,19 @@
       mkBarTopComponents(topEl, labels, counts);
     }
 
-    // Path depth cards
-    if (data.pathDepthHead) {
-      fillText('pd-head-min', data.pathDepthHead.min);
-      fillText('pd-head-max', data.pathDepthHead.max);
-      fillText('pd-head-avg', data.pathDepthHead.avg);
-      fillText('pd-head-p95', data.pathDepthHead.p95);
+    // ---- KPIs (net risk) ----
+    if (data.riskKpis?.kpis) {
+      setKpi('kpi-net-risk', data.riskKpis.kpis.netRisk ?? '—');
+      setKpi('kpi-head-stock', data.riskKpis.kpis.headStockRisk ?? '—');
     }
-    if (data.pathDepthBase) {
-      fillText('pd-base-min', data.pathDepthBase.min);
-      fillText('pd-base-max', data.pathDepthBase.max);
-      fillText('pd-base-avg', data.pathDepthBase.avg);
-      fillText('pd-base-p95', data.pathDepthBase.p95);
+
+    // ---- NEW Fixability (bars by severity) ----
+    if (data.fixesNew?.by_severity) {
+      const sev = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
+      const withFix = sev.map(s => data.fixesNew.by_severity[s]?.with_fix ?? 0);
+      const withoutFix = sev.map(s => data.fixesNew.by_severity[s]?.without_fix ?? 0);
+      const fxEl = document.getElementById('chart-fix-new');
+      if (fxEl) mkBarFixNew(fxEl, sev, withFix, withoutFix);
     }
   }
 

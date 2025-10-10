@@ -108,6 +108,7 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     const dashboardHtml = renderDashboard({ view });
     await writeText(path.join(outDir, 'sections', 'dashboard.html'), dashboardHtml);
 
+    // ... after writing dashboard.html
     const SEVERITY_ORDER = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
     const totals = view.summary.totals;
     const by = view.summary.bySeverityAndState || {};
@@ -116,16 +117,26 @@ async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
     const sevRemoved = sevLabels.map(s => (by[s]?.REMOVED ?? 0));
     const sevUnchanged = sevLabels.map(s => (by[s]?.UNCHANGED ?? 0));
 
+    // NEW blocks from precompute
+    const hvb = view.precomputed.aggregates.head_vs_base_by_severity || null;
+    const topHead = view.precomputed.aggregates.top_components_head || [];
+    const risk = view.precomputed.aggregates.risk || null;
+    const fixesNew = view.precomputed.aggregates.fixes_new || null;
+
     const dashData = {
       stateTotals: { labels: ['NEW','REMOVED','UNCHANGED'], values: [totals.NEW, totals.REMOVED, totals.UNCHANGED] },
       severityStacked: { labels: sevLabels, NEW: sevNew, REMOVED: sevRemoved, UNCHANGED: sevUnchanged },
       newVsRemovedBySeverity: { labels: sevLabels, NEW: sevNew, REMOVED: sevRemoved },
-      headVsBaseBySeverity: view.precomputed.aggregates.head_vs_base_by_severity,
-      topComponentsHead: view.precomputed.aggregates.top_components_head,
-      pathDepthHead: view.precomputed.aggregates.path_depth_head,
-      pathDepthBase: view.precomputed.aggregates.path_depth_base,
+      headVsBaseBySeverity: hvb,
+      topComponentsHead: topHead,
+      // KPIs (net risk)
+      riskKpis: risk, // { weights, components:{newWeighted,removedWeighted}, kpis:{netRisk,headStockRisk} }
+      // NEW-only fixability
+      fixesNew: fixesNew, // { by_severity:{...}, totals:{with_fix,without_fix} }
     };
+
     await writeText(path.join(outDir, 'sections', 'dashboard-data.json'), JSON.stringify(dashData));
+
 
     // ---- Fix Insights section and data ----
     const fixHtml = renderFixInsights({ view });

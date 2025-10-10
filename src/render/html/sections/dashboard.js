@@ -24,7 +24,7 @@ function renderDashboard(/* { view } */) {
   </div>
 </div>
 
-<!-- Row 2: head vs base + top components + depth cards -->
+<!-- Row 2: head vs base + top components + KPIs -->
 <div class="grid-3" style="margin-top:12px;">
   <div class="card chart-card">
     <h3>Head vs Base — Severity</h3>
@@ -35,25 +35,23 @@ function renderDashboard(/* { view } */) {
     <div class="chart-wrap"><canvas id="chart-top-components" aria-label="Top components in head"></canvas></div>
   </div>
   <div class="card">
-    <h3>Path Depth Summary</h3>
+    <h3>Risk &amp; Fixability</h3>
     <div class="grid-2">
       <div>
-        <div class="small">HEAD</div>
-        <ul class="small">
-          <li>min: <span id="pd-head-min">n/a</span></li>
-          <li>max: <span id="pd-head-max">n/a</span></li>
-          <li>avg: <span id="pd-head-avg">n/a</span></li>
-          <li>p95: <span id="pd-head-p95">n/a</span></li>
-        </ul>
+        <div class="kpi">
+          <div class="kpi-label">Net Risk</div>
+          <div id="kpi-net-risk" class="kpi-value">—</div>
+          <div class="small">Weighted NEW − REMOVED</div>
+        </div>
+        <div class="kpi" style="margin-top:8px;">
+          <div class="kpi-label">Head Stock Risk</div>
+          <div id="kpi-head-stock" class="kpi-value">—</div>
+          <div class="small">Weighted (NEW + UNCHANGED)</div>
+        </div>
       </div>
-      <div>
-        <div class="small">BASE</div>
-        <ul class="small">
-          <li>min: <span id="pd-base-min">n/a</span></li>
-          <li>max: <span id="pd-base-max">n/a</span></li>
-          <li>avg: <span id="pd-base-avg">n/a</span></li>
-          <li>p95: <span id="pd-base-p95">n/a</span></li>
-        </ul>
+      <div class="chart-card" style="min-height:200px;">
+        <h3 class="small" style="margin-bottom:6px;">NEW Fixability</h3>
+        <div class="chart-wrap" style="height:200px;"><canvas id="chart-fix-new" aria-label="NEW fixability by severity"></canvas></div>
       </div>
     </div>
   </div>

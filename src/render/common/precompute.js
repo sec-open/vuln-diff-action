@@ -3,6 +3,7 @@
 // Do not read files here; accept the parsed diff object and return derived aggregates.
 
 const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
+const RISK_WEIGHTS = { CRITICAL: 5, HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0 };
 
 function safeNum(n) {
   const x = Number(n);
@@ -69,41 +70,6 @@ function topComponentsHead(items = [], topN = 10) {
     .slice(0, topN);
 }
 
-// ---- Path depth stats ----
-function collectPathDepths(items = [], includeStates = new Set()) {
-  const depths = [];
-  for (const it of items) {
-    const s = String(it.state || '').toUpperCase();
-    if (!includeStates.has(s)) continue;
-    const paths = Array.isArray(it.paths) ? it.paths : [];
-    for (const p of paths) {
-      const d = Array.isArray(p) ? p.length : 0;
-      if (d > 0) depths.push(d);
-    }
-  }
-  return depths;
-}
-
-function percentile(arr, p) {
-  if (!arr.length) return 0;
-  const sorted = arr.slice().sort((a, b) => a - b);
-  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
-  return sorted[idx];
-}
-
-function pathDepthStats(items = [], which /* 'head' | 'base' */) {
-  const include = which === 'head'
-    ? new Set(['NEW', 'UNCHANGED'])
-    : new Set(['REMOVED', 'UNCHANGED']);
-  const arr = collectPathDepths(items, include);
-  if (arr.length === 0) return null;
-  const min = Math.min(...arr);
-  const max = Math.max(...arr);
-  const avg = arr.reduce(sum, 0) / arr.length;
-  const p95 = percentile(arr, 95);
-  return { min, max, avg: Number(avg.toFixed(2)), p95 };
-}
-
 // ---- Fix insights (best-effort inference if fields exist) ----
 function inferHasFix(item) {
   // Accept common shapes: item.has_fix (boolean) OR arrays with fixed versions.
@@ -149,6 +115,73 @@ function fixesHeadAggregates(items = []) {
   };
 }
 
+function fixesNewAggregates(items = []) {
+  // Focus only on NEW (for PR-review actionability)
+  const bySev = {};
+  let withFix = 0, withoutFix = 0;
+
+  for (const sev of SEVERITIES) bySev[sev] = { with_fix: 0, without_fix: 0 };
+
+  for (const it of items) {
+    const s = String(it.state || '').toUpperCase();
+    if (s !== 'NEW') continue;
+
+    const sev = (String(it.severity || 'UNKNOWN').toUpperCase());
+    const hasFix = inferHasFix(it);
+
+    if (hasFix) {
+      bySev[sev].with_fix += 1;
+      withFix += 1;
+    } else {
+      bySev[sev].without_fix += 1;
+      withoutFix += 1;
+    }
+  }
+
+  return {
+    by_severity: bySev,
+    totals: { with_fix: withFix, without_fix: withoutFix },
+  };
+}
+
+// ---- Weighted risk KPIs ----
+function weightedSumBySeverity(mapSevCount = {}) {
+  // mapSevCount: { SEV: count }
+  let total = 0;
+  for (const sev of SEVERITIES) {
+    const w = RISK_WEIGHTS[sev] || 0;
+    const c = safeNum(mapSevCount[sev]);
+    total += w * c;
+  }
+  return total;
+}
+
+function netRiskKpis(bySevState = {}) {
+  // NEW weighted minus REMOVED weighted; and HEAD stock weighted (NEW+UNCHANGED)
+  const newBySev = {};
+  const removedBySev = {};
+  const headBySev = {};
+
+  for (const sev of SEVERITIES) {
+    const row = bySevState[sev] || {};
+    newBySev[sev] = safeNum(row.NEW);
+    removedBySev[sev] = safeNum(row.REMOVED);
+    headBySev[sev] = safeNum(row.NEW) + safeNum(row.UNCHANGED);
+  }
+
+  const newWeighted = weightedSumBySeverity(newBySev);
+  const removedWeighted = weightedSumBySeverity(removedBySev);
+  const headStockWeighted = weightedSumBySeverity(headBySev);
+
+  const netRisk = newWeighted - removedWeighted;
+
+  return {
+    weights: { ...RISK_WEIGHTS },
+    components: { newWeighted, removedWeighted },
+    kpis: { netRisk, headStockRisk: headStockWeighted }
+  };
+}
+
 function precomputeFromDiff(diff) {
   if (!diff || typeof diff !== 'object') {
     throw new Error('[precompute] invalid diff object');
@@ -165,9 +198,11 @@ function precomputeFromDiff(diff) {
     aggregates: {
       head_vs_base_by_severity: headVsBaseBySeverity(bySevState),
       top_components_head: topComponentsHead(items, 10),
-      path_depth_head: pathDepthStats(items, 'head'),
-      path_depth_base: pathDepthStats(items, 'base'),
+      // Fix insights
       fixes_head: fixesHeadAggregates(items),
+      fixes_new: fixesNewAggregates(items),
+      // Risk KPIs
+      risk: netRiskKpis(bySevState),
     },
   };
   return out;
@@ -177,7 +212,8 @@ module.exports = {
   precomputeFromDiff,
   _internals: {
     bySeverityInHead, bySeverityInBase, headVsBaseBySeverity,
-    severityTotalsOverall, topComponentsHead, pathDepthStats,
-    inferHasFix, fixesHeadAggregates,
+    severityTotalsOverall, topComponentsHead,
+    inferHasFix, fixesHeadAggregates, fixesNewAggregates,
+    weightedSumBySeverity, netRiskKpis,
   }
 };
