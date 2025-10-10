@@ -173,7 +173,7 @@ async function pdf_init({ distDir = './dist' } = {}) {
     await writeText(path.join(assetsDir, 'print.css'), makeCss());
 
     // Use same logo as HTML (input html_logo_url)
-    const logo = core.getInput('html_logo_url') || '';
+    const logo = actionsCore.getInput('html_logo_url') || '';
 
     // HTML (skeleton only)
     const html = makePrintHtml({
@@ -372,7 +372,7 @@ async function pdf_init({ distDir = './dist' } = {}) {
     await writeText(path.join(assetsDir, 'print.css'), makeCss());
 
     // Use same logo as HTML (input html_logo_url)
-    const logo = core.getInput('html_logo_url') || '';
+    const logo = actionsCore.getInput('html_logo_url') || '';
 
     // HTML
     const html = makePrintHtml({
