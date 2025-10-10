@@ -1,6 +1,10 @@
 // src/render/pdf/pdf.js
-// Phase 3.3 (PDF) — Cover + TOC + Intro, export to PDF using puppeteer-core.
-// Self-contained: downloads a portable Chrome-for-Testing (stable) with @puppeteer/browsers if no browser is found.
+// Phase 3.3 (PDF) — Assemble PDF from existing HTML bundle (NO changes to HTML).
+// - Builds dist/pdf/print.html using dist/html/sections/*.html fragments
+// - Fixed, hardcoded ToC numbering; each section starts on a new page
+// - Dark cover; light pages for the rest
+// - Page header/footer (except cover) with logo, repo, refs, timestamp
+// - Uses puppeteer-core; downloads a portable Chrome if none is present
 
 const actionsCore = require('@actions/core');
 const fsp = require('fs/promises');
@@ -9,119 +13,257 @@ const os = require('os');
 const { buildView } = require('../common/view');
 
 async function ensureDir(p) { await fsp.mkdir(p, { recursive: true }); }
+async function readTextSafe(file) { try { return await fsp.readFile(file, 'utf8'); } catch { return ''; } }
 async function writeText(file, text) { await ensureDir(pth.dirname(file)); await fsp.writeFile(file, text, 'utf8'); }
 function fileExistsSync(p) { try { require('fs').accessSync(p); return true; } catch { return false; } }
+
+function nowIsoLocal() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
 
 function rewriteLogoForPdf(logoUrl) {
   if (!logoUrl) return '';
   const u = String(logoUrl).trim();
-  if (/^https?:\/\//i.test(u)) return u;          // absolute URL
+  if (/^https?:\/\//i.test(u)) return u; // absolute URL
   const htmlRel = u.replace(/^\.\//, '');
   if (htmlRel.startsWith('html/')) return '../' + htmlRel; // from dist/pdf -> dist/html/...
   return u; // relative to dist/pdf
 }
 
-function makeCss() {
+function makePrintCss() {
   return `
-@page { size: A4; margin: 18mm 14mm; }
+@page { size: A4; margin: 14mm 14mm 16mm 14mm; }
 * { box-sizing: border-box; }
-html, body { margin:0; padding:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #0b0f16; }
-main { padding: 0; }
-h1, h2, h3 { margin: 0 0 12px 0; }
-p { margin: 0 0 10px 0; }
-.small { color: #6b7280; font-size: 12px; }
-.section { page-break-inside: avoid; margin-bottom: 18mm; }
-.cover { page-break-after: always; display:flex; flex-direction:column; gap:16px; }
-.cover .header { display:flex; align-items:center; justify-content:space-between; }
-.cover .brand { display:flex; align-items:center; gap:12px; }
-.cover .brand img { max-height: 40px; }
-.cover h1 { font-size: 28px; margin: 18px 0 6px; }
-.kv { display:grid; grid-template-columns: 140px 1fr; gap: 4px 12px; margin: 4px 0; }
-.card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+html, body { margin:0; padding:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#0b0f16; background:#fff; }
+h1,h2,h3 { margin:0 0 10px 0; }
+p { margin:0 0 8px 0; }
+small, .small { color:#6b7280; font-size:12px; }
+code { background:#eef2ff; padding:2px 6px; border-radius:6px; }
+a { color:#1d4ed8; text-decoration:none; }
+a:hover { text-decoration:underline; }
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:left; padding:6px 8px; border-bottom:1px solid #e5e7eb; }
+
+/* Cover (dark) */
+.cover-page { page-break-after: always; color:#e5e7eb; background:#0b0f16; min-height: 100vh; padding: 24mm 18mm; }
+.cover-header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 16mm; }
+.cover-brand { display:flex; align-items:center; gap:12px; }
+.cover-brand img { max-height: 40px; }
+.cover-title { font-size: 28px; margin: 8px 0 0; }
 .columns-2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.card { border:1px solid #1f2937; border-radius:10px; padding:10px; background:#111827; }
+.card .kv { display:grid; grid-template-columns: 120px 1fr; gap:4px 10px; font-size:13px; }
+.card h3 { margin-bottom:6px; }
+
+/* Regular pages */
+.page { page-break-before: always; padding: 0; background:#fff; }
+.section-wrap { padding: 6mm 0; }
+.section-title { font-size: 20px; margin-bottom: 6px; }
+
+/* TOC */
+.toc { }
 .toc ol { margin: 0 0 0 18px; padding: 0; }
 .toc li { margin: 6px 0; }
-hr.sep { border: 0; border-top: 1px solid #e5e7eb; margin: 12px 0; }
+
+/* Hide interactive-only elements possibly present in fragments */
+#app-menu, #app-header, nav, .controls, .filters, .btn, button { display: none !important; }
+
+/* Charts sizing in print */
+.chart-card, .chart-wrap, canvas { width:100% !important; height:220px !important; }
+
+/* Header/Footer placeholders (Puppeteer templates) */
+.header-space, .footer-space { height: 0; }
   `.trim();
 }
 
-function makeIntroductionHtml({ repo, base, head }) {
-  return `
-<h2 id="introduction">Introduction</h2>
-<p class="small">What you’re looking at</p>
-<p>
-  This report compares the security posture of <strong>${repo}</strong> between
-  <strong>HEAD</strong> (<code>${head.ref}</code>, ${head.shaShort}) and
-  <strong>BASE</strong> (<code>${base.ref}</code>, ${base.shaShort}).
-  It highlights how known vulnerabilities differ across these two references so reviewers can quickly
-  assess newly introduced risks, confirm improvements, and verify areas that remain unchanged.
-</p>
-<p class="small">How it was produced</p>
-<ol>
-  <li><strong>SBOM generation</strong> — via CycloneDX Maven (when a Maven reactor is detected) or Syft fallback.</li>
-  <li><strong>Vulnerability scanning</strong> — SBOM analyzed with Grype to produce machine-readable findings (IDs, severities, CVSS, affected packages, locations, and fix data).</li>
-  <li><strong>Normalization &amp; diff</strong> — findings normalized into a unified schema and compared using <code>vulnerability_id::groupId:artifactId:version</code>. Final states are: <em>NEW</em> (head only), <em>REMOVED</em> (base only), <em>UNCHANGED</em> (in both).</li>
-  <li><strong>Rendering</strong> — interactive HTML dashboard plus a printable PDF and Markdown summary for CI/PR reviews.</li>
-</ol>
-<p class="small">Why this matters</p>
-<p>
-  The goal is to provide a transparent, reproducible view of changes in known vulnerabilities as the code evolves—supporting risk assessment,
-  remediation prioritization, and merge decisions.
-</p>
-`.trim();
+// Fixed ToC (hardcoded numbers & order)
+function sectionPlan() {
+  // Map: id, title, source file (under dist/html/sections/)
+  return [
+    { num: 1, id: 'introduction', title: 'Introduction', file: 'overview.html' },
+    { num: 2, id: 'summary', title: 'Summary', file: 'summary.html' },
+    { num: 3, id: 'vuln-diff-table', title: 'Vulnerability Diff Table', file: 'vuln-diff-table.html' },
+    { num: 4, id: 'dashboard', title: 'Dashboard', file: 'dashboard.html' },
+    { num: 5, id: 'dep-graph-base', title: 'Dependency Graph — Base', file: 'dep-graph-base.html' },
+    { num: 6, id: 'dep-graph-head', title: 'Dependency Graph — Head', file: 'dep-graph-head.html' },
+    { num: 7, id: 'dep-paths-base', title: 'Dependency Paths — Base', file: 'dep-paths-base.html' },
+    { num: 8, id: 'dep-paths-head', title: 'Dependency Paths — Head', file: 'dep-paths-head.html' },
+  ];
 }
 
-function makePrintHtml({ repo, base, head, generatedAt, logoUrl }) {
-  const intro = makeIntroductionHtml({ repo, base, head });
-  const srcLogo = rewriteLogoForPdf(logoUrl);
-  return `<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8" />
-<title>Vulnerability Diff Report — ${repo}</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="stylesheet" href="./assets/print.css" />
-</head><body><main>
-<section class="section cover" id="cover">
-  <div class="header">
-    <div class="brand">
-      ${srcLogo ? `<img src="${srcLogo}" alt="Logo" />` : ``}
-      <div><div class="small">Vulnerability Diff Report</div><h1>${repo}</h1></div>
+function coverHtml({ repo, base, head, generatedAt, logoUrl }) {
+  const lg = rewriteLogoForPdf(logoUrl);
+  return `
+<section class="cover-page" id="cover">
+  <div class="cover-header">
+    <div class="cover-brand">
+      ${lg ? `<img src="${lg}" alt="Logo"/>` : ''}
+      <div>
+        <div class="small">Vulnerability Diff Report</div>
+        <div class="cover-title">${repo}</div>
+      </div>
     </div>
     <div class="small">Generated at<br/><strong>${generatedAt}</strong></div>
   </div>
   <div class="columns-2">
     <div class="card">
       <h3>Base</h3>
-      <div class="kv"><div>Ref</div><div><code>${base.ref}</code></div></div>
-      <div class="kv"><div>Commit</div><div><code>${base.shaShort}</code> (${base.sha})</div></div>
-      <div class="kv"><div>Author</div><div>${base.author}</div></div>
-      <div class="kv"><div>Authored at</div><div>${base.authoredAt}</div></div>
-      <div class="kv"><div>Subject</div><div>${base.commitSubject}</div></div>
+      <div class="kv">
+        <div>Ref</div><div><code>${base.ref}</code></div>
+        <div>Commit</div><div><code>${base.shaShort}</code> (${base.sha})</div>
+        <div>Author</div><div>${base.author}</div>
+        <div>Authored at</div><div>${base.authoredAt}</div>
+        <div>Subject</div><div>${base.commitSubject}</div>
+      </div>
     </div>
     <div class="card">
       <h3>Head</h3>
-      <div class="kv"><div>Ref</div><div><code>${head.ref}</code></div></div>
-      <div class="kv"><div>Commit</div><div><code>${head.shaShort}</code> (${head.sha})</div></div>
-      <div class="kv"><div>Author</div><div>${head.author}</div></div>
-      <div class="kv"><div>Authored at</div><div>${head.authoredAt}</div></div>
-      <div class="kv"><div>Subject</div><div>${head.commitSubject}</div></div>
+      <div class="kv">
+        <div>Ref</div><div><code>${head.ref}</code></div>
+        <div>Commit</div><div><code>${head.shaShort}</code> (${head.sha})</div>
+        <div>Author</div><div>${head.author}</div>
+        <div>Authored at</div><div>${head.authoredAt}</div>
+        <div>Subject</div><div>${head.commitSubject}</div>
+      </div>
     </div>
   </div>
 </section>
-<section class="section toc" id="table-of-contents">
-  <h2>Table of Contents</h2>
-  <ol>
-    <li><a href="#cover">Cover</a></li>
-    <li><a href="#table-of-contents">Table of Contents</a></li>
-    <li><a href="#introduction">Introduction</a></li>
-  </ol>
-  <hr class="sep"/>
-</section>
-<section class="section">${intro}</section>
-</main></body></html>`;
+`.trim();
 }
 
-// ------------- Portable browser resolution / download (no sudo) -------------
+function tocHtml(repo) {
+  const plan = sectionPlan();
+  const items = plan.map(s => `<li>${s.num}. <a href="#${s.id}">${s.title}</a></li>`).join('');
+  return `
+<section class="page toc" id="table-of-contents">
+  <div class="section-wrap">
+    <h2 class="section-title">Table of Contents — ${repo}</h2>
+    <ol>${items}</ol>
+  </div>
+</section>
+`.trim();
+}
+
+function sectionWrapperHtml({ id, title, num, innerHtml }) {
+  return `
+<section class="page" id="${id}">
+  <div class="section-wrap">
+    <h2 class="section-title">${num}. ${title}</h2>
+    ${innerHtml || '<div class="small">[empty]</div>'}
+  </div>
+</section>
+`.trim();
+}
+
+async function buildPrintHtml({ distDir, view, logoUrl }) {
+  const htmlRoot = pth.join(distDir, 'html');
+  const sectionsDir = pth.join(htmlRoot, 'sections');
+  const assetsVendor = pth.join(htmlRoot, 'assets', 'js', 'vendor');
+
+  // Try to load dashboard data and embed as JS (avoids file:// fetch issues)
+  const dashDataPath = pth.join(sectionsDir, 'dashboard-data.json');
+  let dashPayloadJs = '';
+  try {
+    const dashJson = JSON.parse(await fsp.readFile(dashDataPath, 'utf8'));
+    dashPayloadJs = `<script>window.__DASHBOARD_DATA__=${JSON.stringify(dashJson)};</script>`;
+  } catch {
+    dashPayloadJs = '';
+  }
+
+  // Load vendor libs if present
+  const haveChart = fileExistsSync(pth.join(assetsVendor, 'chart.umd.js'));
+  const haveMermaid = fileExistsSync(pth.join(assetsVendor, 'mermaid.min.js'));
+  const chartTag = haveChart ? `<script src="../html/assets/js/vendor/chart.umd.js"></script>` : '';
+  const mermaidTag = haveMermaid ? `<script src="../html/assets/js/vendor/mermaid.min.js"></script>` : '';
+
+  // Load section fragments
+  const plan = sectionPlan();
+  const renderedSections = [];
+  for (const s of plan) {
+    const file = pth.join(sectionsDir, s.file);
+    const inner = await readTextSafe(file); // empty if missing
+    renderedSections.push(sectionWrapperHtml({ id: s.id, title: s.title, num: s.num, innerHtml: inner }));
+  }
+
+  // Minimal runtime to re-render charts/mermaid if present
+  const runtime = `
+<script>
+(function(){
+  // Mermaid: render any <pre class="mermaid"> found in fragments
+  if (window.mermaid) {
+    try { mermaid.initialize({ startOnLoad: true, theme: 'default' }); } catch (e) {}
+  }
+  // Charts: if dashboard provides known canvases and we have data
+  if (window.Chart && window.__DASHBOARD_DATA__) {
+    try {
+      var d = window.__DASHBOARD_DATA__;
+      function mk(id, cfg){ var el=document.getElementById(id); if(!el) return; try{ new Chart(el, cfg); }catch(e){} }
+      if (d.stateTotals && document.getElementById('chart-state-pie')) {
+        mk('chart-state-pie', { type:'pie', data:{ labels:d.stateTotals.labels, datasets:[{ data:d.stateTotals.values }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom' } } } });
+      }
+      if (d.newVsRemovedBySeverity && document.getElementById('chart-new-removed')) {
+        mk('chart-new-removed', { type:'bar', data:{ labels:d.newVsRemovedBySeverity.labels, datasets:[{ label:'NEW', data:d.newVsRemovedBySeverity.NEW },{ label:'REMOVED', data:d.newVsRemovedBySeverity.REMOVED }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'top' } }, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 }}} } });
+      }
+      if (d.severityStacked && document.getElementById('chart-severity-stacked')) {
+        mk('chart-severity-stacked', { type:'bar', data:{ labels:d.severityStacked.labels, datasets:[{ label:'NEW', data:d.severityStacked.NEW },{ label:'REMOVED', data:d.severityStacked.REMOVED },{ label:'UNCHANGED', data:d.severityStacked.UNCHANGED }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'top' } }, scales:{ x:{ stacked:true }, y:{ stacked:true, beginAtZero:true, ticks:{ precision:0 }}} } });
+      }
+      if (d.fixability && document.getElementById('chart-fix-new')) {
+        mk('chart-fix-new', { type:'doughnut', data:{ labels:d.fixability.labels, datasets:[{ data:d.fixability.NEW }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom' } } } });
+      }
+      if (d.riskKpis && document.getElementById('kpi-net-risk')) {
+        var set = function(id,v){ var el=document.getElementById(id); if(el) el.textContent=String(v); };
+        set('kpi-net-risk', d.riskKpis.kpis?.netRisk ?? '—');
+        set('kpi-base-stock', d.riskKpis.kpis?.baseStockRisk ?? '—');
+        set('kpi-head-stock', d.riskKpis.kpis?.headStockRisk ?? '—');
+      }
+    } catch(e){}
+  }
+})();
+</script>
+`.trim();
+
+  const cssLink = `<link rel="stylesheet" href="./assets/print.css" />`;
+  const cover = coverHtml({
+    repo: view.repo, base: view.base, head: view.head,
+    generatedAt: view.generatedAt, logoUrl,
+  });
+  const toc = tocHtml(view.repo);
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Vulnerability Diff Report — ${view.repo}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+${cssLink}
+</head>
+<body>
+${cover}
+${toc}
+${renderedSections.join('\n')}
+${dashPayloadJs}
+${chartTag}
+${mermaidTag}
+${runtime}
+</body>
+</html>`;
+}
+
+// ---------------- Portable browser (no sudo) ----------------
+async function ensurePortableChrome(cacheDir) {
+  const { install, computeExecutablePath } = require('@puppeteer/browsers');
+  const platformMap = { linux:'linux', darwin:(os.arch()==='arm64'?'mac-arm':'mac'), win32:'win64' };
+  const platform = platformMap[os.platform()];
+  if (!platform) throw new Error(`Unsupported platform: ${os.platform()}`);
+  const buildId = 'stable';
+  await install({ browser:'chrome', buildId, cacheDir, platform });
+  const execPath = computeExecutablePath({ browser:'chrome', cacheDir, platform, buildId });
+  if (!execPath || !fileExistsSync(execPath)) throw new Error('Chrome executable not found after download.');
+  return execPath;
+}
+
 function knownBrowserCandidates() {
   return [
     process.env.CHROMIUM_PATH || '',
@@ -133,68 +275,83 @@ function knownBrowserCandidates() {
   ].filter(Boolean);
 }
 
-async function ensurePortableChrome(cacheDir) {
-  // Downloads Chrome for Testing (stable channel) to cacheDir using @puppeteer/browsers
-  const { install, computeExecutablePath } = require('@puppeteer/browsers');
-  // Map Node platform/arch to @puppeteer/browsers platform string
-  const platformMap = {
-    linux: 'linux',
-    darwin: (os.arch() === 'arm64' ? 'mac-arm' : 'mac'),
-    win32: 'win64'
-  };
-  const platform = platformMap[os.platform()];
-  if (!platform) throw new Error(`Unsupported platform for portable Chrome: ${os.platform()}`);
-
-  const buildId = 'stable'; // Chrome for Testing (stable channel)
-  await install({
-    browser: 'chrome',
-    buildId,
-    cacheDir,
-    platform,
-  });
-
-  const execPath = computeExecutablePath({
-    browser: 'chrome',
-    cacheDir,
-    platform,
-    buildId,
-  });
-  if (!execPath || !fileExistsSync(execPath)) {
-    throw new Error('Downloaded Chrome executable not found after install.');
-  }
-  return execPath;
-}
-
 async function resolveBrowserExecutable(outDir) {
-  // 1) env / system
-  for (const p of knownBrowserCandidates()) {
-    if (fileExistsSync(p)) return p;
-  }
-  // 2) portable download into dist/pdf/.browsers
+  for (const p of knownBrowserCandidates()) { if (fileExistsSync(p)) return { path:p, portableDir:null }; }
   const cacheDir = pth.join(outDir, '.browsers');
   await ensureDir(cacheDir);
   actionsCore.info('[render/pdf] no system browser found; downloading Chrome (stable) locally…');
   const execPath = await ensurePortableChrome(cacheDir);
   actionsCore.info(`[render/pdf] portable Chrome ready at: ${execPath}`);
-  return execPath;
+  return { path: execPath, portableDir: cacheDir };
 }
 
-// ---------------------------- Main entrypoint -------------------------------
+// --------------- Header/Footer templates (Puppeteer) ---------------
+function headerTemplate({ logoUrl, repo, generatedAt }) {
+  const lg = rewriteLogoForPdf(logoUrl);
+  return `
+<style>
+  .hdr { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:10px; width:100%; padding:4px 10px; color:#111; }
+  .hdr .row { display:flex; align-items:center; justify-content:space-between; }
+  .hdr .brand { display:flex; align-items:center; gap:6px; font-weight:600; }
+  .hdr img { height:14px; }
+  .muted { color:#6b7280; font-weight:500; }
+</style>
+<div class="hdr">
+  <div class="row">
+    <div class="brand">
+      ${lg ? `<img src="${lg}" />` : ''}
+      <span>Vulnerability Diff Report</span>
+      <span class="muted">— ${repo}</span>
+    </div>
+    <div class="muted">${generatedAt}</div>
+  </div>
+</div>
+`.trim();
+}
+
+function footerTemplate({ logoUrl, baseRef, headRef, generatedAt }) {
+  const lg = rewriteLogoForPdf(logoUrl);
+  return `
+<style>
+  .ftr { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:10px; width:100%; padding:4px 10px; color:#111; }
+  .ftr .row { display:flex; align-items:center; justify-content:space-between; }
+  .brand { display:flex; align-items:center; gap:6px; font-weight:600; }
+  .ftr img { height:14px; }
+  .muted { color:#6b7280; font-weight:500; }
+  .page { color:#6b7280; }
+</style>
+<div class="ftr">
+  <div class="row">
+    <div class="brand">
+      ${lg ? `<img src="${lg}" />` : ''}
+      <span>Vulnerability Diff Report</span>
+      <span class="muted">— BASE: ${baseRef} → HEAD: ${headRef}</span>
+    </div>
+    <div class="muted">${generatedAt} — <span class="page"><span class="pageNumber"></span>/<span class="totalPages"></span></span></div>
+  </div>
+</div>
+`.trim();
+}
+
+// ----------------------------- Main -----------------------------
 async function pdf_init({ distDir = './dist' } = {}) {
   actionsCore.startGroup('[render] PDF');
   try {
+    // View model (repo, base, head, generatedAt, etc.)
     const view = buildView(distDir);
-
     const outDir = pth.join(pth.resolve(distDir), 'pdf');
     const assetsDir = pth.join(outDir, 'assets');
     await ensureDir(outDir);
     await ensureDir(assetsDir);
 
-    // CSS + HTML
-    await writeText(pth.join(assetsDir, 'print.css'), makeCss());
-    const logo = actionsCore.getInput('html_logo_url') || '';
-    const html = makePrintHtml({
-      repo: view.repo, generatedAt: view.generatedAt, base: view.base, head: view.head, logoUrl: logo,
+    // Write print.css
+    await writeText(pth.join(assetsDir, 'print.css'), makePrintCss());
+
+    // Build print.html by assembling fragments from dist/html/sections
+    const html = await buildPrintHtml({
+      distDir: pth.resolve(distDir),
+      view,
+      logoUrl: (actionsCore.getInput('html_logo_url') || ''),
     });
     const htmlPath = pth.join(outDir, 'print.html');
     await writeText(htmlPath, html);
@@ -205,7 +362,8 @@ async function pdf_init({ distDir = './dist' } = {}) {
     try { pptr = require('puppeteer-core'); }
     catch { throw new Error('puppeteer-core is not installed. Please add "puppeteer-core" to your dependencies.'); }
 
-    const executablePath = await resolveBrowserExecutable(outDir);
+    const resolved = await resolveBrowserExecutable(outDir);
+    const executablePath = resolved.path;
 
     const browser = await pptr.launch({
       headless: 'new',
@@ -215,24 +373,30 @@ async function pdf_init({ distDir = './dist' } = {}) {
     const page = await browser.newPage();
     await page.goto('file://' + htmlPath, { waitUntil: 'networkidle0' });
 
+    // Export to PDF with header/footer (cover excluded by CSS background only)
     const pdfPath = pth.join(outDir, 'report.pdf');
+    const logoForTpl = (actionsCore.getInput('html_logo_url') || '');
     await page.pdf({
       path: pdfPath,
       printBackground: true,
+      displayHeaderFooter: true,
+      headerTemplate: headerTemplate({ logoUrl: logoForTpl, repo: view.repo, generatedAt: view.generatedAt }),
+      footerTemplate: footerTemplate({ logoUrl: logoForTpl, baseRef: view.base.ref, headRef: view.head.ref, generatedAt: view.generatedAt }),
+      margin: { top: '20mm', right: '14mm', bottom: '16mm', left: '14mm' },
       format: 'A4',
-      margin: { top: '18mm', right: '14mm', bottom: '18mm', left: '14mm' },
       preferCSSPageSize: false,
+      pageRanges: '', // all
     });
     await browser.close();
 
     actionsCore.info(`[render/pdf] exported: ${pdfPath}`);
+
+    // OPTIONAL: remove portable browser to keep artifact small
+    // if (resolved.portableDir) { await fsp.rm(resolved.portableDir, { recursive:true, force:true }); }
   } catch (e) {
     actionsCore.setFailed(`[render] PDF failed: ${e?.message || e}`);
     throw e;
   } finally {
-    try { await fsp.rm(pth.join(outDir, '.browsers'), { recursive: true, force: true }); }
-    catch (e) { actionsCore.warning(`[render/pdf] cannot remove portable browser: ${e.message}`); }
-
     actionsCore.endGroup();
   }
 }
