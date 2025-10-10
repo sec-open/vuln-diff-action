@@ -20,6 +20,29 @@ async function readTextSafe(p){ try { return await fsp.readFile(p,'utf8'); } cat
 async function writeText(p, t){ await ensureDir(path.dirname(p)); await fsp.writeFile(p, t, 'utf8'); }
 
 // ---------- logo as data-uri ----------
+async function waitForCharts(page, { timeout = 45000 } = {}) {
+  // Espera a que Chart.js esté cargado y haya instancias activas en los canvas del dashboard PDF
+  try {
+    await page.waitForFunction(() => {
+      const hasChart = !!window.Chart;
+      if (!hasChart) return false;
+      const ids = ['pdf-dash-state','pdf-dash-nr','pdf-dash-stacked'];
+      let ok = true;
+      for (const id of ids) {
+        const c = document.getElementById(id);
+        if (!c) { ok = false; break; }
+        const inst = (Chart.getChart ? Chart.getChart(c) : (c._chartjs ? true : null));
+        if (!inst || c.width === 0 || c.height === 0) { ok = false; break; }
+      }
+      return ok;
+    }, { timeout });
+    // pequeña pausa para completar render
+    await page.waitForTimeout(400);
+  } catch {
+    // No rompas el PDF si tarda demasiado; continúa y deja las tarjetas en blanco
+  }
+}
+
 async function logoToDataUri(logoInput, distDir) {
   if (!logoInput) return '';
   const u = String(logoInput).trim();
@@ -55,22 +78,31 @@ html, body {
 body, .card, .panel, .box, .bg, .bg-slate-900, .bg-slate-800, .bg-slate-700, .chart-card {
   background:#ffffff !important; color:#0b0f16 !important;
 }
-
 /* COVER (dark) */
 .cover-page {
   page-break-after: always !important;
   background:#0b0f16 !important; color:#e5e7eb !important;
   min-height:100vh; padding:24mm 18mm !important;
+  position: relative;
 }
-.cover-title-block { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:16mm !important; }
-.cover-logo-line img{ max-height:48px; }
-.cover-line-1{ font-size:28px !important; font-weight:700 !important; }
-.cover-line-2{ font-size:22px !important; color:#cbd5e1 !important; margin-top:6px !important; }
-.cover-side{ color:#9ca3af !important; font-size:12px !important; }
-.columns-2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-.card-dark{ border:1px solid #1f2937; border-radius:10px; padding:10px; background:#111827; }
+.cover-top{ display:flex; justify-content:space-between; align-items:flex-start; }
+.cover-brand img{ max-height:52px; }
+.cover-meta{ text-align:right; color:#9ca3af; font-size:12px; }
+.cover-meta-ts{ font-weight:600; }
+
+.cover-title{ margin-top:40mm; }
+.cover-title .line1{ font-size:22px; font-weight:700; margin:0 0 6px 0; }
+.cover-title .line2{ font-size:18px; color:#cbd5e1; }
+
+.cover-cards{
+  position:absolute; left:18mm; right:18mm; bottom:18mm;
+  display:grid; grid-template-columns:1fr 1fr; gap:12px;
+}
+.card-dark{
+  border:1px solid #1f2937; border-radius:10px; padding:10px; background:#111827;
+}
+.card-dark .card-title{ font-weight:700; margin-bottom:6px; color:#e5e7eb; }
 .card-dark .kv{ display:grid; grid-template-columns:110px 1fr; gap:4px 10px; font-size:13px; line-height:1.35; }
-.card-dark h3{ margin-bottom:6px; color:#e5e7eb !important; }
 
 /* PAGES */
 .page { page-break-before: always !important; background:#fff !important; }
@@ -124,30 +156,37 @@ function sectionPlan() {
 function coverHtml({ repo, base, head, generatedAt, logoDataUri }) {
   return `
 <section class="cover-page" id="cover">
-  <div class="cover-title-block">
-    <div>
-      <div class="cover-logo-line">${logoDataUri ? `<img src="${logoDataUri}" alt="Logo"/>` : ''}</div>
-      <div class="cover-line-1">Vulnerability Diff Report</div>
-      <div class="cover-line-2">${repo}</div>
+  <div class="cover-top">
+    <div class="cover-brand">
+      ${logoDataUri ? `<img src="${logoDataUri}" alt="Logo"/>` : ''}
     </div>
-    <div class="cover-side">Generated at<br/><strong>${generatedAt}</strong></div>
+    <div class="cover-meta">
+      <div>Generated at</div>
+      <div class="cover-meta-ts">${generatedAt}</div>
+    </div>
   </div>
-  <div class="columns-2">
+
+  <div class="cover-title">
+    <div class="line1">Vulnerability Diff Report</div>
+    <div class="line2">${repo}</div>
+  </div>
+
+  <div class="cover-cards">
     <div class="card-dark">
-      <h3>Base</h3>
+      <div class="card-title">Base</div>
       <div class="kv">
         <div>Ref</div><div>${base.ref}</div>
-        <div>Commit</div><div>${base.shaShort} (${base.sha})</div>
+        <div>Commit</div><div>${base.shaShort}<br/>(${base.sha})</div>
         <div>Author</div><div>${base.author}</div>
         <div>Authored at</div><div>${base.authoredAt}</div>
         <div>Subject</div><div>${base.commitSubject}</div>
       </div>
     </div>
     <div class="card-dark">
-      <h3>Head</h3>
+      <div class="card-title">Head</div>
       <div class="kv">
         <div>Ref</div><div>${head.ref}</div>
-        <div>Commit</div><div>${head.shaShort} (${head.sha})</div>
+        <div>Commit</div><div>${head.shaShort}<br/>(${head.sha})</div>
         <div>Author</div><div>${head.author}</div>
         <div>Authored at</div><div>${head.authoredAt}</div>
         <div>Subject</div><div>${head.commitSubject}</div>
@@ -157,6 +196,7 @@ function coverHtml({ repo, base, head, generatedAt, logoDataUri }) {
 </section>
 `.trim();
 }
+
 function tocHtml(repo) {
   const items = sectionPlan().map(s => `<li><a href="#${s.id}">${s.title}</a></li>`).join('');
   return `
@@ -280,32 +320,35 @@ function buildPdfDashboardHtml(dash) {
 async function buildFixInsightsFromJson(distDir) {
   const diff = await loadDiff(distDir);
   if (!diff || !Array.isArray(diff.items)) return '<div class="small">[diff.json not found or empty]</div>';
-  const NEW = diff.items.filter(x => x.state==='NEW');
-  const withFix = NEW.filter(x => x.fix && x.fix.state==='fixed');
-  const withoutFix = NEW.filter(x => !x.fix || x.fix.state!=='fixed');
 
-  const mkRows = (arr) => arr.slice(0,80).map(o=>{
+  const withFixAll = diff.items.filter(x => x.fix && x.fix.state === 'fixed');
+
+  const groupByState = (arr) => {
+    const g = { NEW:[], REMOVED:[], UNCHANGED:[] };
+    for (const o of arr) (g[o.state] || (g[o.state]=[])).push(o);
+    return g;
+  };
+  const G = groupByState(withFixAll);
+
+  const mkRows = (arr) => arr.map(o=>{
     const url = o.urls && o.urls[0] ? o.urls[0] : '';
     const id = url ? `<a href="${url}">${o.id}</a>` : o.id;
     const tgt = o.fix && o.fix.versions && o.fix.versions[0] ? o.fix.versions[0] : '—';
-    return `<tr><td>${o.severity||'UNKNOWN'}</td><td>${id}</td><td>${pkgStr(o.package)}</td><td>${tgt}</td></tr>`;
+    return `<tr><td>${o.severity||'UNKNOWN'}</td><td>${id}</td><td>${pkgStr(o.package)}</td><td>${o.state}</td><td>${tgt}</td></tr>`;
   }).join('');
+
+  const section = (title, arr) => `
+  <div class="subsection-title">${title}</div>
+  <table>
+    <thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>State</th><th>Target Version</th></tr></thead>
+    <tbody>${mkRows(arr)}</tbody>
+  </table>`.trim();
 
   return `
 <div class="subsection-title">Overview</div>
-<p class="small">NEW: <strong>${NEW.length}</strong> — with fix: <strong>${withFix.length}</strong> · without fix: <strong>${withoutFix.length}</strong></p>
+<p class="small">Vulnerabilities with available fixes: <strong>${withFixAll.length}</strong> (NEW: ${G.NEW.length} · REMOVED: ${G.REMOVED.length} · UNCHANGED: ${G.UNCHANGED.length})</p>
 
-<div class="subsection-title">NEW with available fix (top 80)</div>
-<table>
-  <thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Target Version</th></tr></thead>
-  <tbody>${mkRows(withFix)}</tbody>
-</table>
-
-<div class="subsection-title">NEW without fix (top 80)</div>
-<table>
-  <thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Target Version</th></tr></thead>
-  <tbody>${mkRows(withoutFix)}</tbody>
-</table>
+${section('All with fix', withFixAll)}
 `.trim();
 }
 
@@ -395,12 +438,16 @@ async function resolveBrowserExecutable(outDir){
 function headerTemplate({ logoDataUri, repo, generatedAt }) {
   return `
 <style>
-  .hdrbar{ background:#f8fafc; border-bottom:1px solid #e5e7eb; width:100%; padding:6px 10px;
-           font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:10px; color:#111; }
+  .hdrbar{
+    background:#0b0f16; color:#e5e7eb; width:100%;
+    padding:6px 10px; border-bottom:1px solid #111827;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    font-size:10px;
+  }
   .row{ display:flex; align-items:center; justify-content:space-between; }
   .brand{ display:flex; align-items:center; gap:6px; font-weight:600; }
-  .brand img{ height:14px; }
-  .muted{ color:#6b7280; font-weight:500; }
+  .brand img{ height:14px; display:inline-block; }
+  .muted{ color:#cbd5e1; font-weight:500; }
 </style>
 <div class="hdrbar">
   <div class="row">
@@ -412,13 +459,17 @@ function headerTemplate({ logoDataUri, repo, generatedAt }) {
 function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
   return `
 <style>
-  .ftrbar{ background:#f8fafc; border-top:1px solid #e5e7eb; width:100%; padding:6px 10px;
-           font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:10px; color:#111; }
+  .ftrbar{
+    background:#0b0f16; color:#e5e7eb; width:100%;
+    padding:6px 10px; border-top:1px solid #111827;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    font-size:10px;
+  }
   .row{ display:flex; align-items:center; justify-content:space-between; }
   .brand{ display:flex; align-items:center; gap:6px; font-weight:600; }
-  .brand img{ height:14px; }
-  .muted{ color:#6b7280; font-weight:500; }
-  .page{ color:#6b7280; }
+  .brand img{ height:14px; display:inline-block; }
+  .muted{ color:#cbd5e1; font-weight:500; }
+  .page{ color:#cbd5e1; }
 </style>
 <div class="ftrbar">
   <div class="row">
@@ -459,6 +510,7 @@ async function pdf_init({ distDir = './dist' } = {}) {
 
     // Export cover only (no header/footer)
     const coverPdf = path.join(outDir, 'cover.pdf');
+    await waitForCharts(page);
     await page.pdf({ path: coverPdf, printBackground: true, displayHeaderFooter: false, margin:{top:'0mm',right:'0mm',bottom:'0mm',left:'0mm'}, format:'A4', pageRanges:'1' });
 
     // Export rest with header/footer (band + border; logo in data-uri)
