@@ -19,29 +19,16 @@ async function ensureDir(p){ await fsp.mkdir(p, { recursive: true }); }
 async function readTextSafe(p){ try { return await fsp.readFile(p,'utf8'); } catch { return ''; } }
 async function writeText(p, t){ await ensureDir(path.dirname(p)); await fsp.writeFile(p, t, 'utf8'); }
 
-// ---------- logo as data-uri ----------
-async function waitForCharts(page, { timeout = 45000 } = {}) {
-  // Espera a que Chart.js esté cargado y haya instancias activas en los canvas del dashboard PDF
+async function waitForCharts(page, { timeout = 60000 } = {}) {
   try {
-    await page.waitForFunction(() => {
-      const hasChart = !!window.Chart;
-      if (!hasChart) return false;
-      const ids = ['pdf-dash-state','pdf-dash-nr','pdf-dash-stacked'];
-      let ok = true;
-      for (const id of ids) {
-        const c = document.getElementById(id);
-        if (!c) { ok = false; break; }
-        const inst = (Chart.getChart ? Chart.getChart(c) : (c._chartjs ? true : null));
-        if (!inst || c.width === 0 || c.height === 0) { ok = false; break; }
-      }
-      return ok;
-    }, { timeout });
-    // pequeña pausa para completar render
-    await page.waitForTimeout(400);
-  } catch {
-    // No rompas el PDF si tarda demasiado; continúa y deja las tarjetas en blanco
+    await page.waitForFunction(() => window.__chartsReady === true, { timeout });
+    // small settle time for paint
+    await page.waitForTimeout(250);
+  } catch (e) {
+    // Do not fail the PDF if charts are slow; continue gracefully.
   }
 }
+
 
 async function logoToDataUri(logoInput, distDir) {
   if (!logoInput) return '';
@@ -228,21 +215,35 @@ const pkgStr = (p) => p ? `${p.groupId ? p.groupId + ':' : ''}${p.artifactId || 
 
 // ---------- Fallback: Vulnerability Diff Table ----------
 async function buildVulnTableFromJson(distDir) {
-  const diff = await loadDiff(distDir);
-  if (!diff || !Array.isArray(diff.items)) return '<div class="small">[diff.json not found or empty]</div>';
-  const rows = diff.items.map(o => {
+  const diffPath = path.join(distDir, 'diff.json');
+  let diff;
+  try {
+    diff = JSON.parse(await fs.readFile(diffPath, 'utf8'));
+  } catch {
+    return '<p><em>[diff.json not found or invalid]</em></p>';
+  }
+  const items = Array.isArray(diff.items) ? diff.items : [];
+  if (!items.length) return '<p><em>No vulnerabilities to display.</em></p>';
+
+  const rows = items.map(o => {
     const sev = o.severity || 'UNKNOWN';
-    const url = o.urls && o.urls[0] ? o.urls[0] : '';
-    const id = url ? `<a href="${url}">${o.id}</a>` : o.id;
-    return `<tr><td>${sev}</td><td>${id}</td><td>${pkgStr(o.package)}</td><td>${o.state || '—'}</td></tr>`;
+    const url = (o.urls && o.urls[0]) ? o.urls[0] : '';
+    const id  = url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${o.id}</a>` : o.id;
+    const pkg = (o.package ? ((o.package.group || o.package.namespace || o.package.org || '') + (o.package.group || o.package.namespace || o.package.org ? '.' : '') + (o.package.name || o.package.artifact || '') + (o.package.version ? (':' + o.package.version) : '')) : '');
+    const st  = o.state || '—';
+    return `<tr><td>${sev}</td><td>${id}</td><td>${pkg}</td><td>${st}</td></tr>`;
   }).join('');
+
   return `
-<table>
-  <thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Status</th></tr></thead>
-  <tbody>${rows}</tbody>
-</table>
-`.trim();
+    <table>
+      <thead>
+        <tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Status</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `.trim();
 }
+
 
 // ---------- PDF-only Dashboard ----------
 function computeDashData(items) {
@@ -263,58 +264,84 @@ function computeDashData(items) {
   return { states, severities, stateTotals, newVsRemoved, stacked };
 }
 function buildPdfDashboardHtml(dash) {
+  // PDF-only dashboard: fixed canvases + inline render (no external loads)
   return `
-<div class="print-dash-grid">
-  <div class="print-dash-card">
-    <h4>Distribution by State</h4>
-    <canvas id="pdf-dash-state"></canvas>
-  </div>
-  <div class="print-dash-card">
-    <h4>NEW vs REMOVED by Severity</h4>
-    <canvas id="pdf-dash-nr"></canvas>
-  </div>
-  <div class="print-dash-card print-dash-span2">
-    <h4>By Severity & State (stacked)</h4>
-    <canvas id="pdf-dash-stacked"></canvas>
-  </div>
-</div>
-<script>
-(function(){
-  if (!window.Chart) return;
-  var d = ${JSON.stringify(dash)};
-  function mk(id, cfg){ var el=document.getElementById(id); if(!el) return; try{ new Chart(el, cfg); }catch(e){} }
-  mk('pdf-dash-state', {
-    type:'pie',
-    data:{ labels:d.states, datasets:[{ data:d.stateTotals }] },
-    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom' } } }
-  });
-  mk('pdf-dash-nr', {
-    type:'bar',
-    data:{
-      labels:d.severities,
-      datasets:[
-        { label:'NEW', data:d.newVsRemoved.map(x=>x.NEW) },
-        { label:'REMOVED', data:d.newVsRemoved.map(x=>x.REMOVED) }
-      ]
-    },
-    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'top' } }, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 }}} }
-  });
-  mk('pdf-dash-stacked', {
-    type:'bar',
-    data:{
-      labels:d.severities,
-      datasets:[
-        { label:'NEW', data:d.stacked.map(x=>x.NEW) },
-        { label:'REMOVED', data:d.stacked.map(x=>x.REMOVED) },
-        { label:'UNCHANGED', data:d.stacked.map(x=>x.UNCHANGED) }
-      ]
-    },
-    options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'top' } }, scales:{ x:{ stacked:true }, y:{ stacked:true, beginAtZero:true, ticks:{ precision:0 }}} }
-  });
-})();
-</script>
-`.trim();
+    <div class="print-dash-grid">
+      <div class="print-dash-card">
+        <h4>Distribution by State</h4>
+        <canvas id="pdf-dash-state" width="720" height="220"></canvas>
+      </div>
+      <div class="print-dash-card">
+        <h4>NEW vs REMOVED by Severity</h4>
+        <canvas id="pdf-dash-nr" width="720" height="220"></canvas>
+      </div>
+      <div class="print-dash-card print-dash-span2">
+        <h4>By Severity & State (stacked)</h4>
+        <canvas id="pdf-dash-stacked" width="1480" height="260"></canvas>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var d = ${JSON.stringify(dash)};
+        function render() {
+          if (!window.Chart) { return; }
+
+          // Pie: states
+          var c1 = document.getElementById('pdf-dash-state');
+          if (c1) new Chart(c1.getContext('2d'), {
+            type: 'pie',
+            data: { labels: d.states, datasets: [{ data: d.stateTotals }] },
+            options: { animation: false, responsive: false, plugins: { legend: { position: 'bottom' } } }
+          });
+
+          // Bars: NEW vs REMOVED by severity
+          var c2 = document.getElementById('pdf-dash-nr');
+          if (c2) new Chart(c2.getContext('2d'), {
+            type: 'bar',
+            data: {
+              labels: d.severities,
+              datasets: [
+                { label: 'NEW',     data: d.newVsRemoved.map(function(x){return x.NEW;}) },
+                { label: 'REMOVED', data: d.newVsRemoved.map(function(x){return x.REMOVED;}) }
+              ]
+            },
+            options: {
+              animation: false, responsive: false,
+              scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+              plugins: { legend: { position: 'bottom' } }
+            }
+          });
+
+          // Stacked bars: by severity & state
+          var c3 = document.getElementById('pdf-dash-stacked');
+          if (c3) new Chart(c3.getContext('2d'), {
+            type: 'bar',
+            data: {
+              labels: d.severities,
+              datasets: [
+                { label: 'NEW',       data: d.stacked.map(function(x){return x.NEW;}) },
+                { label: 'REMOVED',   data: d.stacked.map(function(x){return x.REMOVED;}) },
+                { label: 'UNCHANGED', data: d.stacked.map(function(x){return x.UNCHANGED;}) }
+              ]
+            },
+            options: {
+              animation: false, responsive: false,
+              scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } },
+              plugins: { legend: { position: 'bottom' } }
+            }
+          });
+
+          // Flag for puppeteer wait
+          setTimeout(function(){ window.__chartsReady = true; }, 200);
+        }
+
+        if (document.readyState === 'complete') render();
+        else window.addEventListener('load', render);
+      })();
+    </script>
+  `.trim();
 }
+
 
 // ---------- Fix Insights (always built) ----------
 async function buildFixInsightsFromJson(distDir) {
@@ -436,48 +463,32 @@ async function resolveBrowserExecutable(outDir){
 
 // ---------- Header/Footer (with band + border) ----------
 function headerTemplate({ logoDataUri, repo, generatedAt }) {
+  const img = logoDataUri ? `<img src="${logoDataUri}" style="height:14px;margin-right:8px;vertical-align:middle;"/>` : '';
   return `
-<style>
-  .hdrbar{
-    background:#0b0f16; color:#e5e7eb; width:100%;
-    padding:6px 10px; border-bottom:1px solid #111827;
-    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    font-size:10px;
-  }
-  .row{ display:flex; align-items:center; justify-content:space-between; }
-  .brand{ display:flex; align-items:center; gap:6px; font-weight:600; }
-  .brand img{ height:14px; display:inline-block; }
-  .muted{ color:#cbd5e1; font-weight:500; }
-</style>
-<div class="hdrbar">
-  <div class="row">
-    <div class="brand">${logoDataUri ? `<img src="${logoDataUri}" />` : ''}<span>Vulnerability Diff Report</span><span class="muted">— ${repo}</span></div>
-    <div class="muted">${generatedAt}</div>
-  </div>
-</div>`.trim();
+    <div style="
+      width:100%; font-size:9px; padding:6px 10px;
+      background:#0b0f16; color:#e5e7eb; border-bottom:1px solid #222;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;">
+      <span>${img}Vulnerability Diff Report — ${repo}</span>
+      <span style="float:right">${generatedAt}</span>
+    </div>
+  `.trim();
 }
+
+
 function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
+  const img = logoDataUri ? `<img src="${logoDataUri}" style="height:14px;margin-right:8px;vertical-align:middle;"/>` : '';
   return `
-<style>
-  .ftrbar{
-    background:#0b0f16; color:#e5e7eb; width:100%;
-    padding:6px 10px; border-top:1px solid #111827;
-    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    font-size:10px;
-  }
-  .row{ display:flex; align-items:center; justify-content:space-between; }
-  .brand{ display:flex; align-items:center; gap:6px; font-weight:600; }
-  .brand img{ height:14px; display:inline-block; }
-  .muted{ color:#cbd5e1; font-weight:500; }
-  .page{ color:#cbd5e1; }
-</style>
-<div class="ftrbar">
-  <div class="row">
-    <div class="brand">${logoDataUri ? `<img src="${logoDataUri}" />` : ''}<span>Vulnerability Diff Report</span><span class="muted">— BASE: ${baseRef} → HEAD: ${headRef}</span></div>
-    <div class="muted">${generatedAt} — <span class="page"><span class="pageNumber"></span>/<span class="totalPages"></span></span></div>
-  </div>
-</div>`.trim();
+    <div style="
+      width:100%; font-size:9px; padding:6px 10px;
+      background:#0b0f16; color:#e5e7eb; border-top:1px solid #222;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;">
+      <span>${img}Vulnerability Diff Report — BASE: ${baseRef} → HEAD: ${headRef}</span>
+      <span style="float:right">${generatedAt} — <span class="pageNumber"></span>/<span class="totalPages"></span></span>
+    </div>
+  `.trim();
 }
+
 
 // ---------- Entry ----------
 async function pdf_init({ distDir = './dist' } = {}) {
