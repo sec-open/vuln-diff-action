@@ -1,19 +1,15 @@
 // src/render/common/precompute.js
-// Phase-3-only pre-aggregations computed from Phase-2 diff.json.
-// Do not read files here; accept the parsed diff object and return derived aggregates.
+// Phase-3 pre-aggregations computed from Phase-2 diff.json.
+// SOLO lee el objeto diff (ya parseado) y devuelve agregados.
+// Añade agregados por módulo (según paths) y lista de vulnerabilidades multi-módulo.
 
 const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
 const RISK_WEIGHTS = { CRITICAL: 5, HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0 };
 
-function safeNum(n) {
-  const x = Number(n);
-  return Number.isFinite(x) ? x : 0;
-}
+function safeNum(n) { const x = Number(n); return Number.isFinite(x) ? x : 0; }
 
-function sum(a, b) { return a + b; }
-
+// --------------------- utilidades existentes ---------------------
 function bySeverityInHead(bySevState = {}) {
-  // head = NEW + UNCHANGED per severity
   const out = {};
   for (const sev of SEVERITIES) {
     const row = bySevState[sev] || {};
@@ -21,9 +17,7 @@ function bySeverityInHead(bySevState = {}) {
   }
   return out;
 }
-
 function bySeverityInBase(bySevState = {}) {
-  // base = REMOVED + UNCHANGED per severity
   const out = {};
   for (const sev of SEVERITIES) {
     const row = bySevState[sev] || {};
@@ -31,19 +25,14 @@ function bySeverityInBase(bySevState = {}) {
   }
   return out;
 }
-
 function headVsBaseBySeverity(bySevState = {}) {
   const head = bySeverityInHead(bySevState);
   const base = bySeverityInBase(bySevState);
   const out = {};
-  for (const sev of SEVERITIES) {
-    out[sev] = { head: safeNum(head[sev]), base: safeNum(base[sev]) };
-  }
+  for (const sev of SEVERITIES) out[sev] = { head: safeNum(head[sev]), base: safeNum(base[sev]) };
   return out;
 }
-
 function severityTotalsOverall(bySevState = {}) {
-  // overall = NEW + REMOVED + UNCHANGED per severity
   const out = {};
   for (const sev of SEVERITIES) {
     const row = bySevState[sev] || {};
@@ -51,13 +40,11 @@ function severityTotalsOverall(bySevState = {}) {
   }
   return out;
 }
-
 function topComponentsHead(items = [], topN = 10) {
-  // Count by GAV for items in HEAD (NEW or UNCHANGED)
-  const map = new Map(); // key=gav -> { gav, componentRef?, count }
+  const map = new Map(); // key=gav
   for (const it of items) {
-    const s = String(it.state || '').toUpperCase();
-    if (s !== 'NEW' && s !== 'UNCHANGED') continue;
+    const state = String(it.state || '').toUpperCase();
+    if (state !== 'NEW' && state !== 'UNCHANGED') continue;
     const pkg = it.package || {};
     const gav = `${pkg.groupId ?? 'unknown'}:${pkg.artifactId ?? 'unknown'}:${pkg.version ?? 'unknown'}`;
     const prev = map.get(gav) || { gav, componentRef: it.componentRef, count: 0 };
@@ -65,143 +52,176 @@ function topComponentsHead(items = [], topN = 10) {
     if (!prev.componentRef && it.componentRef) prev.componentRef = it.componentRef;
     map.set(gav, prev);
   }
-  return Array.from(map.values())
-    .sort((a, b) => b.count - a.count)
-    .slice(0, topN);
+  return Array.from(map.values()).sort((a, b) => b.count - a.count).slice(0, topN);
 }
 
-// ---- Fix insights (best-effort inference if fields exist) ----
+// ---- Fix insights (best-effort) ----
 function inferHasFix(item) {
-  // Accept common shapes: item.has_fix (boolean) OR arrays with fixed versions.
   if (typeof item.has_fix === 'boolean') return item.has_fix;
-  const candidates = [
-    item.fixed_versions,
-    item.fix_versions,
-    item.fix?.versions,
-    item.fixes,
-  ];
-  for (const c of candidates) {
-    if (Array.isArray(c) && c.length > 0) return true;
-  }
+  const candidates = [ item.fixed_versions, item.fix_versions, item.fix?.versions, item.fixes ];
+  for (const c of candidates) if (Array.isArray(c) && c.length) return true;
   return false;
 }
-
 function fixesHeadAggregates(items = []) {
-  // Only head-visible items: NEW or UNCHANGED
-  const bySev = {};
-  let withFix = 0, withoutFix = 0;
-
+  const bySev = {}; let withFix = 0, withoutFix = 0;
   for (const sev of SEVERITIES) bySev[sev] = { with_fix: 0, without_fix: 0 };
-
   for (const it of items) {
     const s = String(it.state || '').toUpperCase();
     if (s !== 'NEW' && s !== 'UNCHANGED') continue;
-
-    const sev = (String(it.severity || 'UNKNOWN').toUpperCase());
+    const sev = String(it.severity || 'UNKNOWN').toUpperCase();
     const hasFix = inferHasFix(it);
-
-    if (hasFix) {
-      bySev[sev].with_fix += 1;
-      withFix += 1;
-    } else {
-      bySev[sev].without_fix += 1;
-      withoutFix += 1;
-    }
+    if (hasFix) { bySev[sev].with_fix++; withFix++; } else { bySev[sev].without_fix++; withoutFix++; }
   }
-
-  return {
-    by_severity: bySev,
-    totals: { with_fix: withFix, without_fix: withoutFix },
-  };
+  return { by_severity: bySev, totals: { with_fix: withFix, without_fix: withoutFix } };
 }
-
 function fixesNewAggregates(items = []) {
-  // Focus only on NEW (for PR-review actionability)
-  const bySev = {};
-  let withFix = 0, withoutFix = 0;
-
+  const bySev = {}; let withFix = 0, withoutFix = 0;
   for (const sev of SEVERITIES) bySev[sev] = { with_fix: 0, without_fix: 0 };
-
   for (const it of items) {
     const s = String(it.state || '').toUpperCase();
     if (s !== 'NEW') continue;
-
-    const sev = (String(it.severity || 'UNKNOWN').toUpperCase());
+    const sev = String(it.severity || 'UNKNOWN').toUpperCase();
     const hasFix = inferHasFix(it);
-
-    if (hasFix) {
-      bySev[sev].with_fix += 1;
-      withFix += 1;
-    } else {
-      bySev[sev].without_fix += 1;
-      withoutFix += 1;
-    }
+    if (hasFix) { bySev[sev].with_fix++; withFix++; } else { bySev[sev].without_fix++; withoutFix++; }
   }
-
-  return {
-    by_severity: bySev,
-    totals: { with_fix: withFix, without_fix: withoutFix },
-  };
+  return { by_severity: bySev, totals: { with_fix: withFix, without_fix: withoutFix } };
 }
 
-// ---- Weighted risk KPIs ----
+// ---- Risk KPIs ponderados ----
 function weightedSumBySeverity(mapSevCount = {}) {
-  // mapSevCount: { SEV: count }
   let total = 0;
-  for (const sev of SEVERITIES) {
-    const w = RISK_WEIGHTS[sev] || 0;
-    const c = safeNum(mapSevCount[sev]);
-    total += w * c;
-  }
+  for (const sev of SEVERITIES) total += (RISK_WEIGHTS[sev] || 0) * safeNum(mapSevCount[sev]);
   return total;
 }
-
 function netRiskKpis(bySevState = {}) {
-  // NEW weighted minus REMOVED weighted; and stock weighted for HEAD and BASE
-  const newBySev = {};
-  const removedBySev = {};
-  const headBySev = {};
-  const baseBySev = {};
-
+  const newBySev = {}, removedBySev = {}, headBySev = {}, baseBySev = {};
   for (const sev of SEVERITIES) {
     const row = bySevState[sev] || {};
-    const NEW = safeNum(row.NEW);
-    const REMOVED = safeNum(row.REMOVED);
-    const UNCHANGED = safeNum(row.UNCHANGED);
-
+    const NEW = safeNum(row.NEW), REMOVED = safeNum(row.REMOVED), UNCHANGED = safeNum(row.UNCHANGED);
     newBySev[sev] = NEW;
     removedBySev[sev] = REMOVED;
-    headBySev[sev] = NEW + UNCHANGED;       // HEAD stock
-    baseBySev[sev] = REMOVED + UNCHANGED;   // BASE stock
+    headBySev[sev] = NEW + UNCHANGED;
+    baseBySev[sev] = REMOVED + UNCHANGED;
   }
-
-  const newWeighted = weightedSumBySeverity(newBySev);
-  const removedWeighted = weightedSumBySeverity(removedBySev);
-  const headStockWeighted = weightedSumBySeverity(headBySev);
-  const baseStockWeighted = weightedSumBySeverity(baseBySev);
-
-  const netRisk = newWeighted - removedWeighted;
-
   return {
     weights: { ...RISK_WEIGHTS },
-    components: { newWeighted, removedWeighted },
+    components: {
+      newWeighted: weightedSumBySeverity(newBySev),
+      removedWeighted: weightedSumBySeverity(removedBySev),
+    },
     kpis: {
-      netRisk,
-      baseStockRisk: baseStockWeighted,  // ← NEW
-      headStockRisk: headStockWeighted
-    }
+      netRisk: weightedSumBySeverity(newBySev) - weightedSumBySeverity(removedBySev),
+      baseStockRisk: weightedSumBySeverity(baseBySev),
+      headStockRisk: weightedSumBySeverity(headBySev),
+    },
   };
 }
 
+// --------------------- NUEVO: módulos & module_paths desde paths ---------------------
+// Primer hop pURL Maven -> "pkg:maven/<groupId>/<artifact>@version?..."
+// Devuelve groupId raíz.
+function extractRootGroupIdFromFirstHop(firstHop) {
+  if (!firstHop || typeof firstHop !== 'string') return '';
+  const m = firstHop.match(/^pkg:maven\/([^\/]+)\/([^@\/]+)@/);
+  if (m) return m[1] || '';
+  // Fallback GAV
+  const g = firstHop.match(/^([^:]+):([^:]+):([^:]+)$/);
+  if (g) return g[1] || '';
+  return '';
+}
+// Hop GAV -> { groupId, artifactId, version } o null
+function parseGav(hop) {
+  if (!hop || typeof hop !== 'string') return null;
+  const m = hop.match(/^([^:]+):([^:]+):([^:]+)$/);
+  if (!m) return null;
+  return { groupId: m[1], artifactId: m[2], version: m[3] };
+}
 
-function precomputeFromDiff(diff) {
-  if (!diff || typeof diff !== 'object') {
-    throw new Error('[precompute] invalid diff object');
+// De un path (array de hops), devuelve:
+//  - module: artifactId del ÚLTIMO hop cuyo groupId == rootGroupId
+//  - tail: array con los hops posteriores a ese módulo (puede estar vacío)
+function extractModuleAndTailFromSinglePath(pathArr) {
+  if (!Array.isArray(pathArr) || pathArr.length < 2) return { module: '', tail: [] };
+  const rootGroupId = extractRootGroupIdFromFirstHop(pathArr[0]);
+  if (!rootGroupId) return { module: '', tail: [] };
+  let lastIdx = -1, module = '';
+  for (let i = 1; i < pathArr.length; i++) {
+    const gav = parseGav(pathArr[i]);
+    if (gav && gav.groupId === rootGroupId) {
+      lastIdx = i;
+      module = gav.artifactId || module;
+    }
   }
+  if (!module) return { module: '', tail: [] };
+  const tail = pathArr.slice(lastIdx + 1);
+  return { module, tail };
+}
+
+// Para un item con múltiples paths:
+//  - modules: lista única de módulos
+//  - module_paths: { [module]: string[] } con tails únicos (join con " -> ")
+function deriveModulesAndModulePaths(item) {
+  const modSet = new Set();
+  const map = new Map(); // module -> Set<string tail>
+  try {
+    const paths = Array.isArray(item?.paths) ? item.paths : [];
+    for (const p of paths) {
+      const { module, tail } = extractModuleAndTailFromSinglePath(p);
+      if (!module) continue;
+      modSet.add(module);
+      const key = module;
+      const tailStr = tail.join(' -> ');
+      if (!map.has(key)) map.set(key, new Set());
+      // Deduplicar tails iguales
+      map.get(key).add(tailStr);
+    }
+  } catch (_) {}
+  const modules = Array.from(modSet);
+  const module_paths = {};
+  for (const [mod, set] of map.entries()) module_paths[mod] = Array.from(set);
+  return { modules, module_paths };
+}
+
+// Agregados por módulo × severidad × estado (para cuadros por módulo)
+function aggregatesByModuleSeverityState(items = []) {
+  const out = {};
+  for (const it of items) {
+    const { modules } = deriveModulesAndModulePaths(it);
+    const sev = String(it.severity || 'UNKNOWN').toUpperCase();
+    const st  = String(it.state || '').toUpperCase();
+    for (const m of modules) {
+      out[m] = out[m] || {};
+      out[m][sev] = out[m][sev] || { NEW: 0, REMOVED: 0, UNCHANGED: 0 };
+      if (st === 'NEW' || st === 'REMOVED' || st === 'UNCHANGED') out[m][sev][st]++;
+    }
+  }
+  return out;
+}
+// Lista de vulnerabilidades con >1 módulo
+function listMultiModuleItems(items = []) {
+  const res = [];
+  for (const it of items) {
+    const { modules } = deriveModulesAndModulePaths(it);
+    if (modules.length > 1) {
+      res.push({
+        id: it.id || it.vulnerabilityId || '',
+        severity: String(it.severity || 'UNKNOWN').toUpperCase(),
+        state: String(it.state || '').toUpperCase(),
+        modules,
+      });
+    }
+  }
+  return { total: res.length, items: res };
+}
+
+// --------------------- MAIN ---------------------
+function precomputeFromDiff(diff) {
+  if (!diff || typeof diff !== 'object') throw new Error('[precompute] invalid diff object');
+
   const bySevState = diff?.summary?.by_severity_and_state || {};
   const items = Array.isArray(diff.items) ? diff.items : [];
 
-  const out = {
+  return {
     summary: {
       by_severity_in_head: bySeverityInHead(bySevState),
       by_severity_in_base: bySeverityInBase(bySevState),
@@ -210,22 +230,43 @@ function precomputeFromDiff(diff) {
     aggregates: {
       head_vs_base_by_severity: headVsBaseBySeverity(bySevState),
       top_components_head: topComponentsHead(items, 10),
+
       // Fix insights
       fixes_head: fixesHeadAggregates(items),
       fixes_new: fixesNewAggregates(items),
+
       // Risk KPIs
       risk: netRiskKpis(bySevState),
+
+      // NEW: módulo × severidad × estado
+      by_module_severity_state: aggregatesByModuleSeverityState(items),
+
+      // NEW: vulnerabilidades que afectan a >1 módulo
+      multi_module: listMultiModuleItems(items),
     },
   };
-  return out;
 }
 
 module.exports = {
   precomputeFromDiff,
   _internals: {
-    bySeverityInHead, bySeverityInBase, headVsBaseBySeverity,
-    severityTotalsOverall, topComponentsHead,
-    inferHasFix, fixesHeadAggregates, fixesNewAggregates,
-    weightedSumBySeverity, netRiskKpis,
-  }
+    bySeverityInHead,
+    bySeverityInBase,
+    headVsBaseBySeverity,
+    severityTotalsOverall,
+    topComponentsHead,
+    inferHasFix,
+    fixesHeadAggregates,
+    fixesNewAggregates,
+    weightedSumBySeverity,
+    netRiskKpis,
+
+    // NEW helpers
+    extractRootGroupIdFromFirstHop,
+    parseGav,
+    extractModuleAndTailFromSinglePath,
+    deriveModulesAndModulePaths,
+    aggregatesByModuleSeverityState,
+    listMultiModuleItems,
+  },
 };

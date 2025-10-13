@@ -246,45 +246,76 @@ const pkgStr = (p) => p ? `${p.groupId ? p.groupId + ':' : ''}${p.artifactId || 
 
 // ---------- Fallback: Vulnerability Diff Table ----------
 async function buildVulnTableFromJson(distDir) {
-    const diffPath = path.join(distDir, 'diff.json');
-    let diff;
-    try {
-      diff = JSON.parse(await fsp.readFile(diffPath, 'utf8'));
-    } catch {
-      return '<p>[diff.json not found or invalid]</p>';
-    }
+  const diffPath = path.join(distDir, 'diff.json');
+  let diff;
+  try {
+    diff = JSON.parse(await fsp.readFile(diffPath, 'utf8'));
+  } catch {
+    return '<p>[diff.json not found or invalid]</p>';
+  }
 
   const items = Array.isArray(diff.items) ? diff.items : [];
   if (!items.length) return '<p>No vulnerabilities to display.</p>';
 
-  const rows = items.map(o => {
-    const sev = o.severity || 'UNKNOWN';
-    const url = (o.urls && o.urls[0]) ? o.urls[0] : '';
-    const id = url ? `<a href="${url}">${o.id}</a>` : o.id;
-    const pkg = (o.package
-      ? ((o.package.group || o.package.namespace || o.package.org || '') +
-        (o.package.group || o.package.namespace || o.package.org ? '.' : '') +
-        (o.package.name || o.package.artifact || '') +
-        (o.package.version ? (':' + o.package.version) : ''))
-      : '');
-    const st = o.state || '—';
-    return `<tr>
-      <td>${sev}</td>
-      <td>${id}</td>
-      <td>${pkg}</td>
-      <td>${st}</td>
-    </tr>`;
-  }).join('');
+  // Orden deseado por severidad (desc) y luego por Package (asc)
+  const sevRank = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, UNKNOWN: 1 };
+  const normSev = (s) => (s || 'UNKNOWN').toUpperCase();
+  const pkgStr = (pkg) => {
+    if (!pkg) return '';
+    const g = pkg.groupId || '';
+    const a = pkg.artifactId || pkg.name || '';
+    const v = pkg.version || '';
+    if (a && v && g) return `${g}:${a}:${v}`;
+    if (a && v) return `${a}:${v}`;
+    return a || v || '';
+  };
+
+  // Normalizamos campos que usaremos y ordenamos
+  const rowsData = items.map(it => {
+    const severity = normSev(it.severity);
+    const pkg = pkgStr(it.package);
+    const url = (Array.isArray(it.urls) && it.urls[0]) ? it.urls[0] : (it.url || '');
+    const vulnId = it.id || it.vulnerabilityId || '';
+    const status = it.state || it.status || '';
+    return {
+      severity,
+      pkg,
+      vulnHtml: url ? `<a href="${url}">${vulnId}</a>` : (vulnId || '—'),
+      status: status || '—'
+    };
+  }).sort((a, b) => {
+    const rA = sevRank[a.severity] || 0;
+    const rB = sevRank[b.severity] || 0;
+    if (rA !== rB) return rB - rA; // desc por severidad
+    return (a.pkg || '').localeCompare(b.pkg || '', 'en', { sensitivity: 'base' });
+  });
+
+  const rowsHtml = rowsData.map(r => `
+    <tr>
+      <td>${r.severity}</td>
+      <td>${r.vulnHtml}</td>
+      <td>${r.pkg || '—'}</td>
+      <td>${r.status}</td>
+    </tr>
+  `).join('');
 
   return `
 <table>
   <thead>
-    <tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Status</th></tr>
+    <tr>
+      <th>Severity</th>
+      <th>Vulnerability</th>
+      <th>Package</th>
+      <th>Status</th>
+    </tr>
   </thead>
-  <tbody>${rows}</tbody>
+  <tbody>
+    ${rowsHtml}
+  </tbody>
 </table>
 `.trim();
 }
+
 
 // ---------- PDF-only Dashboard ----------
 function computeDashData(items) {
@@ -305,22 +336,70 @@ function computeDashData(items) {
   }));
   return { states, severities, stateTotals, newVsRemoved, stacked };
 }
-
 function buildPdfDashboardHtml(dash) {
+  // PDF-only dashboard: canvases + inline render con Chart.js y bandera __chartsReady,
+  // e incluye tablas numéricas con los mismos datos justo debajo de cada gráfico.
   const dataJson = JSON.stringify(dash);
+
+  // --- Tablas numéricas (renderizadas estáticamente en el HTML) ---
+  // 1) Totales por estado
+  const states = ['NEW','REMOVED','UNCHANGED'];
+  const stateTotalsRows = states.map((s, i) => {
+    const v = (dash.stateTotals && dash.stateTotals[i]) || 0;
+    return `<tr><td>${s}</td><td>${v}</td></tr>`;
+  }).join('');
+  const stateTotalsSum = (dash.stateTotals || []).reduce((a,b)=>a+(b||0),0);
+  const stateTotalsTable = `
+    <table>
+      <thead><tr><th>State</th><th>Count</th></tr></thead>
+      <tbody>${stateTotalsRows}<tr><td><strong>Total</strong></td><td><strong>${stateTotalsSum}</strong></td></tr></tbody>
+    </table>
+  `.trim();
+
+  // 2) NEW vs REMOVED por severidad
+  const nvrHeader = `<thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>Total</th></tr></thead>`;
+  const nvrRows = (dash.newVsRemoved || []).map(row => {
+    const newV = row.NEW || 0;
+    const remV = row.REMOVED || 0;
+    return `<tr><td>${row.sev}</td><td>${newV}</td><td>${remV}</td><td>${newV + remV}</td></tr>`;
+  }).join('');
+  const nvrTable = `<table>${nvrHeader}<tbody>${nvrRows}</tbody></table>`;
+
+  // 3) Stacked por severidad y estado
+  const stkHeader = `<thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th><th>Total</th></tr></thead>`;
+  const stkRows = (dash.stacked || []).map(row => {
+    const n = row.NEW || 0, r = row.REMOVED || 0, u = row.UNCHANGED || 0;
+    return `<tr><td>${row.sev}</td><td>${n}</td><td>${r}</td><td>${u}</td><td>${n + r + u}</td></tr>`;
+  }).join('');
+  const stkTable = `<table>${stkHeader}<tbody>${stkRows}</tbody></table>`;
+
   return `
 <div class="print-dash-grid">
   <div class="print-dash-card">
     <h4>Distribution by State</h4>
     <canvas id="chart-state-totals" width="800" height="200"></canvas>
+    <div class="dash-table">
+      <h5 style="margin:8px 0 4px 0;">Data</h5>
+      ${stateTotalsTable}
+    </div>
   </div>
+
   <div class="print-dash-card">
     <h4>NEW vs REMOVED by Severity</h4>
     <canvas id="chart-new-removed" width="800" height="200"></canvas>
+    <div class="dash-table">
+      <h5 style="margin:8px 0 4px 0;">Data</h5>
+      ${nvrTable}
+    </div>
   </div>
+
   <div class="print-dash-card print-dash-span2">
     <h4>By Severity & State (stacked)</h4>
     <canvas id="chart-stacked" width="800" height="220"></canvas>
+    <div class="dash-table">
+      <h5 style="margin:8px 0 4px 0;">Data</h5>
+      ${stkTable}
+    </div>
   </div>
 </div>
 
@@ -332,6 +411,7 @@ function buildPdfDashboardHtml(dash) {
       try{
         if (typeof Chart === 'undefined') { window.__chartsReady = true; return; }
 
+        // Chart 1: state totals
         var ctx1 = document.getElementById('chart-state-totals').getContext('2d');
         new Chart(ctx1, {
           type: 'bar',
@@ -339,9 +419,10 @@ function buildPdfDashboardHtml(dash) {
           options: { responsive:false, animation:false }
         });
 
-        var labels2 = DASH.newVsRemoved.map(function(x){ return x.sev; });
-        var dataNew = DASH.newVsRemoved.map(function(x){ return x.NEW; });
-        var dataRemoved = DASH.newVsRemoved.map(function(x){ return x.REMOVED; });
+        // Chart 2: NEW vs REMOVED por severidad
+        var labels2 = (DASH.newVsRemoved || []).map(function(x){ return x.sev; });
+        var dataNew = (DASH.newVsRemoved || []).map(function(x){ return x.NEW || 0; });
+        var dataRemoved = (DASH.newVsRemoved || []).map(function(x){ return x.REMOVED || 0; });
         var ctx2 = document.getElementById('chart-new-removed').getContext('2d');
         new Chart(ctx2, {
           type: 'bar',
@@ -349,15 +430,20 @@ function buildPdfDashboardHtml(dash) {
           options: { responsive:false, animation:false }
         });
 
-        var labels3 = DASH.stacked.map(function(x){ return x.sev; });
-        var dNew = DASH.stacked.map(function(x){ return x.NEW; });
-        var dRem = DASH.stacked.map(function(x){ return x.REMOVED; });
-        var dUnc = DASH.stacked.map(function(x){ return x.UNCHANGED; });
+        // Chart 3: stacked por severidad & estado
+        var labels3 = (DASH.stacked || []).map(function(x){ return x.sev; });
+        var dNew = (DASH.stacked || []).map(function(x){ return x.NEW || 0; });
+        var dRem = (DASH.stacked || []).map(function(x){ return x.REMOVED || 0; });
+        var dUnc = (DASH.stacked || []).map(function(x){ return x.UNCHANGED || 0; });
         var ctx3 = document.getElementById('chart-stacked').getContext('2d');
         new Chart(ctx3, {
           type: 'bar',
           data: { labels: labels3, datasets: [{ label:'NEW', data:dNew }, { label:'REMOVED', data:dRem }, { label:'UNCHANGED', data:dUnc }] },
-          options: { responsive:false, animation:false, plugins:{ legend:{ position:'top' } }, scales:{ x:{ stacked:true }, y:{ stacked:true } } }
+          options: {
+            responsive:false, animation:false,
+            plugins:{ legend:{ position:'top' } },
+            scales:{ x:{ stacked:true }, y:{ stacked:true } }
+          }
         });
 
         setTimeout(function(){ window.__chartsReady = true; }, 50);
@@ -377,7 +463,6 @@ function buildPdfDashboardHtml(dash) {
 </script>
 `.trim();
 }
-
 
 
 // ---------- Fix Insights (always built) ----------
@@ -432,6 +517,92 @@ async function buildFixInsightsFromJson(distDir) {
 </div>
 `.trim();
 }
+// ---------- Dependency Paths (PDF-only) ----------
+// side: 'base' | 'head'
+function buildDependencyPathsSection(items, side) {
+  const SEV_ORDER = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, UNKNOWN:1 };
+
+  // Filtrado por lado
+  const keep = (it) => {
+    const st = String(it.state || '').toUpperCase();
+    if (side === 'base') return st === 'REMOVED' || st === 'UNCHANGED';
+    if (side === 'head') return st === 'NEW' || st === 'UNCHANGED';
+    return true;
+  };
+
+  // Expandimos a pares (sev, module, tail) a partir de item.module_paths
+  // tail es un string ya "hop1 -> hop2 -> ..."
+  const triples = [];
+  for (const it of (items || [])) {
+    if (!keep(it)) continue;
+    const sev = String(it.severity || 'UNKNOWN').toUpperCase();
+    const mp = it.module_paths || {};
+    for (const mod of Object.keys(mp)) {
+      const tails = Array.isArray(mp[mod]) ? mp[mod] : [];
+      if (!tails.length) {
+        // Si por alguna razón no hay tail, igualmente mostramos el módulo sin tail.
+        triples.push({ sev, module: mod, tail: '' });
+      } else {
+        for (const t of tails) {
+          triples.push({ sev, module: mod, tail: t || '' });
+        }
+      }
+    }
+  }
+
+  // Deduplicar: misma (sev, module, tail) solo una vez
+  const uniq = new Map(); // key -> row
+  for (const r of triples) {
+    const key = `${r.sev}||${r.module}||${r.tail}`;
+    if (!uniq.has(key)) uniq.set(key, r);
+  }
+  const rows = Array.from(uniq.values());
+
+  if (!rows.length) {
+    return `<p>No dependency paths to display for ${side === 'base' ? 'Base' : 'Head'}.</p>`;
+  }
+
+  // Orden: Severity desc, Module asc, Tail asc
+  rows.sort((a, b) => {
+    const ra = SEV_ORDER[a.sev] || 0, rb = SEV_ORDER[b.sev] || 0;
+    if (ra !== rb) return rb - ra;
+    const ma = a.module || '', mb = b.module || '';
+    if (ma !== mb) return ma.localeCompare(mb, 'en', { sensitivity: 'base' });
+    return (a.tail || '').localeCompare(b.tail || '', 'en', { sensitivity: 'base' });
+  });
+
+  // Agrupar por severidad
+  const groups = rows.reduce((acc, r) => {
+    (acc[r.sev] ||= []).push(r);
+    return acc;
+  }, {});
+
+  // Render por bloques (severidad)
+  const sevOrderArr = Object.keys(SEV_ORDER).sort((s1, s2) => (SEV_ORDER[s2] - SEV_ORDER[s1]));
+  const sections = sevOrderArr
+    .filter(sev => Array.isArray(groups[sev]) && groups[sev].length)
+    .map(sev => {
+      const trs = groups[sev].map(r => {
+        const rhs = r.tail ? ` -> ${r.tail}` : '';
+        return `<tr><td>${r.module}${rhs}</td></tr>`;
+      }).join('');
+      return `
+        <h4 class="subsection-title">${sev}</h4>
+        <table class="dep-paths-table">
+          <thead><tr><th>Module → Path tail</th></tr></thead>
+          <tbody>${trs}</tbody>
+        </table>
+      `;
+    }).join('\n');
+
+  return `
+<div class="dep-paths">
+  ${sections}
+</div>
+`.trim();
+}
+
+
 
 // ---------- Assemble print.html ----------
 async function buildPrintHtml({ distDir, view, logoDataUri }) {
@@ -466,6 +637,12 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
       inner = (raw && hasRows) ? raw : await buildVulnTableFromJson(distDir);
     } else if (s.id === 'fix-insights') {
       inner = await buildFixInsightsFromJson(distDir);
+    } else if (s.id === 'dep-paths-base') {
+      // PDF-only: construir desde view.items (sin columna "Paths", sin filtros)
+      inner = buildDependencyPathsSection(items, 'base');
+    } else if (s.id === 'dep-paths-head') {
+      // PDF-only: construir desde view.items (sin columna "Paths", sin filtros)
+      inner = buildDependencyPathsSection(items, 'head');
     } else {
       const file = s.file ? path.join(sectionsDir, s.file) : null;
       inner = file ? await readTextSafe(file) : '';
