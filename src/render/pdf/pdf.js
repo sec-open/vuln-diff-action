@@ -101,11 +101,13 @@ html, body {
   background:#ffffff !important; color:#0b0f16 !important;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif !important;
 }
-/* Neutralize dark UI from web bundle */
+
+/* Neutraliza fondos oscuros del bundle en impresión */
 body, .card, .panel, .box, .bg, .bg-slate-900, .bg-slate-800, .bg-slate-700, .chart-card {
   background:#ffffff !important; color:#0b0f16 !important;
 }
-/* COVER (dark) */
+
+/* ===== PORTADA ===== */
 .cover-page {
   page-break-after: always !important;
   background:#0b0f16 !important; color:#e5e7eb !important;
@@ -118,6 +120,8 @@ body, .card, .panel, .box, .bg, .bg-slate-900, .bg-slate-800, .bg-slate-700, .ch
 .cover-title{ margin-top:40mm; }
 .cover-title .line1{ font-size:22px; font-weight:700; margin:0 0 6px 0; }
 .cover-title .line2{ font-size:18px; color:#cbd5e1; }
+
+/* Tarjetas Base/Head: corrige márgenes para que no se corten a la derecha */
 .cover-cards{
   position:absolute; left:18mm; right:18mm; bottom:18mm;
   display:grid; grid-template-columns:1fr 1fr; gap:12px;
@@ -126,35 +130,50 @@ body, .card, .panel, .box, .bg, .bg-slate-900, .bg-slate-800, .bg-slate-700, .ch
 .card-dark .card-title{ font-weight:700; margin-bottom:6px; color:#e5e7eb; }
 .card-dark .kv{ display:grid; grid-template-columns:110px 1fr; gap:4px 10px; font-size:13px; line-height:1.35; }
 
-/* PAGES */
+/* ===== PÁGINAS ===== */
 .page { page-break-before: always !important; background:#fff !important; }
 .section-wrap{ padding:6mm 0 !important; }
 .section-title{ font-size:20px !important; margin:0 0 8px 0 !important; }
 
-/* Subsections (Summary) */
-.subsection-title{
-  font-weight:700; margin:12px 0 4px 0; padding-bottom:4px; border-bottom:2px solid #0b0f16;
-}
+/* TOC más grande y con mayor interlineado */
+.toc h2{ font-size:20px !important; margin-bottom:10px !important; }
+.toc ol{ font-size:13.5px !important; line-height:1.6 !important; padding-left:18px !important; }
 
-/* Tables */
+/* Subtítulos */
+.subsection-title{ font-weight:700; margin:12px 0 4px 0; padding-bottom:4px; border-bottom:2px solid #0b0f16; }
+
+/* Tablas */
 table{ width:100% !important; border-collapse: collapse !important; }
 th,td{ text-align:left !important; padding:6px 8px !important; border-bottom:1px solid #e5e7eb !important; }
 thead th{ background:#f3f4f6 !important; font-weight:600 !important; }
 
-/* Print Dashboard — PDF-only grid */
+/* Dashboard PDF-only */
 .print-dash-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .print-dash-card{ border:1px solid #e5e7eb; border-radius:10px; padding:8px; }
 .print-dash-card h4{ margin:0 0 6px 0; font-size:14px; }
 .print-dash-card canvas{ width:100% !important; height:200px !important; }
 .print-dash-span2{ grid-column:1 / span 2; }
 
-/* Hide interactive elements */
+/* Ocultar elementos interactivos del bundle */
 #app-menu, #app-header, nav, .controls, .filters, .btn, button{ display:none !important; }
 
-/* Links / code */
+/* Enlaces / código */
 a{ color:#1d4ed8 !important; text-decoration:none !important; }
 a:hover{ text-decoration:underline !important; }
 code{ background:#eef2ff !important; padding:2px 6px !important; border-radius:6px !important; }
+
+/* === Dependency Paths: ocultar filtro y evitar cortes de filas === */
+#Paths, .paths-filter, .filter, .filter-box, .search, .search-box, input[type="search"] {
+  display: none !important;
+}
+.dep-paths-table, .dep-paths-table thead, .dep-paths-table tbody, .dep-paths-table tr, .dep-paths-table td, .dep-paths-table th {
+  page-break-inside: avoid !important;
+}
+.dep-paths .subsection-title { margin-top: 10px; }
+.dep-paths-table th, .dep-paths-table td { font-size: 13px; }
+
+/* Fix Insights: bloque totales con bordes visibles */
+.fix-totals { border:1px solid #e5e7eb; border-radius:8px; padding:8px; margin:8px 0 12px; }
 `.trim();
 }
 
@@ -337,39 +356,34 @@ function computeDashData(items) {
   return { states, severities, stateTotals, newVsRemoved, stacked };
 }
 function buildPdfDashboardHtml(dash) {
-  // PDF-only dashboard: canvases + inline render con Chart.js y bandera __chartsReady,
-  // e incluye tablas numéricas con los mismos datos justo debajo de cada gráfico.
   const dataJson = JSON.stringify(dash);
 
-  // --- Tablas numéricas (renderizadas estáticamente en el HTML) ---
-  // 1) Totales por estado
+  // 1) Distribution by State (sin fila Total)
   const states = ['NEW','REMOVED','UNCHANGED'];
   const stateTotalsRows = states.map((s, i) => {
     const v = (dash.stateTotals && dash.stateTotals[i]) || 0;
     return `<tr><td>${s}</td><td>${v}</td></tr>`;
   }).join('');
-  const stateTotalsSum = (dash.stateTotals || []).reduce((a,b)=>a+(b||0),0);
   const stateTotalsTable = `
     <table>
       <thead><tr><th>State</th><th>Count</th></tr></thead>
-      <tbody>${stateTotalsRows}<tr><td><strong>Total</strong></td><td><strong>${stateTotalsSum}</strong></td></tr></tbody>
+      <tbody>${stateTotalsRows}</tbody>
     </table>
   `.trim();
 
-  // 2) NEW vs REMOVED por severidad
-  const nvrHeader = `<thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>Total</th></tr></thead>`;
+  // 2) NEW vs REMOVED por severidad (sin columna Total)
+  const nvrHeader = `<thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th></tr></thead>`;
   const nvrRows = (dash.newVsRemoved || []).map(row => {
-    const newV = row.NEW || 0;
-    const remV = row.REMOVED || 0;
-    return `<tr><td>${row.sev}</td><td>${newV}</td><td>${remV}</td><td>${newV + remV}</td></tr>`;
+    const n = row.NEW || 0, r = row.REMOVED || 0;
+    return `<tr><td>${row.sev}</td><td>${n}</td><td>${r}</td></tr>`;
   }).join('');
   const nvrTable = `<table>${nvrHeader}<tbody>${nvrRows}</tbody></table>`;
 
-  // 3) Stacked por severidad y estado
-  const stkHeader = `<thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th><th>Total</th></tr></thead>`;
+  // 3) Stacked por severidad & estado (sin columna Total)
+  const stkHeader = `<thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>`;
   const stkRows = (dash.stacked || []).map(row => {
     const n = row.NEW || 0, r = row.REMOVED || 0, u = row.UNCHANGED || 0;
-    return `<tr><td>${row.sev}</td><td>${n}</td><td>${r}</td><td>${u}</td><td>${n + r + u}</td></tr>`;
+    return `<tr><td>${row.sev}</td><td>${n}</td><td>${r}</td><td>${u}</td></tr>`;
   }).join('');
   const stkTable = `<table>${stkHeader}<tbody>${stkRows}</tbody></table>`;
 
@@ -406,20 +420,15 @@ function buildPdfDashboardHtml(dash) {
 <script>
   (function(){
     var DASH = ${dataJson};
-
     function ready(){
       try{
         if (typeof Chart === 'undefined') { window.__chartsReady = true; return; }
-
-        // Chart 1: state totals
         var ctx1 = document.getElementById('chart-state-totals').getContext('2d');
-        new Chart(ctx1, {
-          type: 'bar',
+        new Chart(ctx1, { type: 'bar',
           data: { labels: ['NEW','REMOVED','UNCHANGED'], datasets: [{ label: 'Count', data: DASH.stateTotals }] },
           options: { responsive:false, animation:false }
         });
 
-        // Chart 2: NEW vs REMOVED por severidad
         var labels2 = (DASH.newVsRemoved || []).map(function(x){ return x.sev; });
         var dataNew = (DASH.newVsRemoved || []).map(function(x){ return x.NEW || 0; });
         var dataRemoved = (DASH.newVsRemoved || []).map(function(x){ return x.REMOVED || 0; });
@@ -430,7 +439,6 @@ function buildPdfDashboardHtml(dash) {
           options: { responsive:false, animation:false }
         });
 
-        // Chart 3: stacked por severidad & estado
         var labels3 = (DASH.stacked || []).map(function(x){ return x.sev; });
         var dNew = (DASH.stacked || []).map(function(x){ return x.NEW || 0; });
         var dRem = (DASH.stacked || []).map(function(x){ return x.REMOVED || 0; });
@@ -439,33 +447,18 @@ function buildPdfDashboardHtml(dash) {
         new Chart(ctx3, {
           type: 'bar',
           data: { labels: labels3, datasets: [{ label:'NEW', data:dNew }, { label:'REMOVED', data:dRem }, { label:'UNCHANGED', data:dUnc }] },
-          options: {
-            responsive:false, animation:false,
-            plugins:{ legend:{ position:'top' } },
-            scales:{ x:{ stacked:true }, y:{ stacked:true } }
-          }
+          options: { responsive:false, animation:false, plugins:{ legend:{ position:'top' } }, scales:{ x:{ stacked:true }, y:{ stacked:true } } }
         });
-
         setTimeout(function(){ window.__chartsReady = true; }, 50);
       } catch(e){ window.__chartsReady = true; }
     }
-
-    function waitForChartAndRender(){
-      var tries = 0, max = 100; // ~5s
-      var t = setInterval(function(){
-        if (typeof Chart !== 'undefined') { clearInterval(t); ready(); }
-        else if (++tries >= max) { clearInterval(t); window.__chartsReady = true; }
-      }, 50);
-    }
-
-    if (typeof Chart !== 'undefined') { ready(); } else { waitForChartAndRender(); }
+    if (typeof Chart !== 'undefined') { ready(); }
+    else { var t=setInterval(function(){ if (typeof Chart !== 'undefined'){clearInterval(t); ready();}},50); setTimeout(function(){clearInterval(t); window.__chartsReady=true;},5000); }
   })();
 </script>
 `.trim();
 }
 
-
-// ---------- Fix Insights (always built) ----------
 // ---------- Fix Insights (always built) ----------
 async function buildFixInsightsFromJson(distDir) {
   const diff = await loadDiff(distDir);
@@ -473,59 +466,50 @@ async function buildFixInsightsFromJson(distDir) {
     return '<p>[diff.json not found or empty]</p>';
   }
 
-  // Definición de "with fix" (mantengo tu heurística actual)
-  const withFixAll = diff.items.filter(x => x.fix && x.fix.state === 'fixed');
+  // Estados relevantes para "Fix": solo lo que está en HEAD (NEW/UNCHANGED)
+  const headItems = diff.items.filter(x => {
+    const st = String(x.state || '').toUpperCase();
+    return st === 'NEW' || st === 'UNCHANGED';
+  });
 
-  const groupByState = (arr) => {
-    const g = { NEW: [], REMOVED: [], UNCHANGED: [] };
-    for (const o of arr) (g[o.state] || (g[o.state] = [])).push(o);
-    return g;
-  };
-  const G = groupByState(withFixAll);
+  // Heurística de "with fix" (como tenías)
+  const hasFix = (o) => Boolean(o && o.fix && (
+    (Array.isArray(o.fix.versions) && o.fix.versions.length) ||
+    o.fix.state === 'fixed'
+  ));
 
-  // -------- Tabla de Totales (lo que pediste) --------
-  const totalVulns = diff.items.length;
-  const totalWithFix = withFixAll.length;
-  const totalsTable = `
-<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin:8px 0 12px;">
-  <table>
-    <thead>
-      <tr>
-        <th>TOTAL Vulnerabilities</th>
-        <th>Total with Fix</th>
-        <th>NEW</th>
-        <th>REMOVED</th>
-        <th>UNCHANGED</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>${totalVulns}</td>
-        <td>${totalWithFix}</td>
-        <td>${G.NEW.length}</td>
-        <td>${G.REMOVED.length}</td>
-        <td>${G.UNCHANGED.length}</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
-`.trim();
+  const withFix = headItems.filter(hasFix);
+  const withoutFix = headItems.filter(x => !hasFix(x));
 
-  // -------- Tablas detalladas (se mantienen) --------
-  const mkRows = (arr) => arr.map(o => {
+  // Totales pedidos (sin REMOVED)
+  const totalVulns = headItems.length;
+  const totalWithFix = withFix.length;
+
+  // Helpers UI
+  const sev = (s) => (String(s || 'UNKNOWN').toUpperCase());
+  const mkId = (o) => {
     const url = o.urls && o.urls[0] ? o.urls[0] : '';
-    const id = url ? `<a href="${url}">${o.id}</a>` : (o.id || '—');
-    const tgt = o.fix && o.fix.versions && o.fix.versions[0] ? o.fix.versions[0] : '—';
-    return `
-      <tr>
-        <td>${(o.severity || 'UNKNOWN').toUpperCase()}</td>
-        <td>${id}</td>
-        <td>${pkgStr(o.package)}</td>
-        <td>${o.state}</td>
-        <td>${tgt}</td>
-      </tr>
-    `;
-  }).join('');
+    const id = o.id || o.vulnerabilityId || '—';
+    return url ? `<a href="${url}">${id}</a>` : id;
+  };
+  const pkg = (p) => {
+    if (!p) return '—';
+    const g = p.groupId || ''; const a = p.artifactId || ''; const v = p.version || '';
+    if (g && a && v) return `${g}:${a}:${v}`;
+    if (a && v) return `${a}:${v}`;
+    return a || v || '—';
+  };
+  const tgt = (o) => (o.fix && Array.isArray(o.fix.versions) && o.fix.versions[0]) ? o.fix.versions[0] : '—';
+
+  const mkRows = (arr) => arr.map(o => `
+    <tr>
+      <td>${sev(o.severity)}</td>
+      <td>${mkId(o)}</td>
+      <td>${pkg(o.package)}</td>
+      <td>${o.state}</td>
+      <td>${tgt(o)}</td>
+    </tr>
+  `).join('');
 
   const section = (title, arr) => `
     <h4 class="subsection-title">${title}</h4>
@@ -539,27 +523,46 @@ async function buildFixInsightsFromJson(distDir) {
           <th>Target Version</th>
         </tr>
       </thead>
-      <tbody>
-        ${mkRows(arr)}
-      </tbody>
+      <tbody>${mkRows(arr)}</tbody>
     </table>
   `.trim();
 
+  // Totales (sin REMOVED)
+  const totalsTable = `
+<div class="fix-totals">
+  <table>
+    <thead>
+      <tr>
+        <th>TOTAL Vulnerabilities</th>
+        <th>Total with Fix</th>
+        <th>NEW</th>
+        <th>UNCHANGED</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>${totalVulns}</td>
+        <td>${totalWithFix}</td>
+        <td>${withFix.filter(x => x.state === 'NEW').length}</td>
+        <td>${withFix.filter(x => x.state === 'UNCHANGED').length}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+`.trim();
+
+  // Render
   return `
     ${totalsTable}
-    ${section('All with fix', withFixAll)}
-    ${section('NEW with fix', G.NEW)}
-    ${section('REMOVED with fix', G.REMOVED)}
-    ${section('UNCHANGED with fix', G.UNCHANGED)}
+    ${section('With fix (NEW/UNCHANGED)', withFix)}
+    ${section('Without fix (NEW/UNCHANGED)', withoutFix)}
   `.trim();
 }
 
 // ---------- Dependency Paths (PDF-only) ----------
-// side: 'base' | 'head'
 function buildDependencyPathsSection(items, side) {
   const SEV_ORDER = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, UNKNOWN:1 };
 
-  // Filtrado por lado
   const keep = (it) => {
     const st = String(it.state || '').toUpperCase();
     if (side === 'base') return st === 'REMOVED' || st === 'UNCHANGED';
@@ -567,8 +570,6 @@ function buildDependencyPathsSection(items, side) {
     return true;
   };
 
-  // Expandimos a pares (sev, module, tail) a partir de item.module_paths
-  // tail es un string ya "hop1 -> hop2 -> ..."
   const triples = [];
   for (const it of (items || [])) {
     if (!keep(it)) continue;
@@ -576,30 +577,20 @@ function buildDependencyPathsSection(items, side) {
     const mp = it.module_paths || {};
     for (const mod of Object.keys(mp)) {
       const tails = Array.isArray(mp[mod]) ? mp[mod] : [];
-      if (!tails.length) {
-        // Si por alguna razón no hay tail, igualmente mostramos el módulo sin tail.
-        triples.push({ sev, module: mod, tail: '' });
-      } else {
-        for (const t of tails) {
-          triples.push({ sev, module: mod, tail: t || '' });
-        }
-      }
+      if (!tails.length) triples.push({ sev, module: mod, tail: '' });
+      else for (const t of tails) triples.push({ sev, module: mod, tail: t || '' });
     }
   }
 
-  // Deduplicar: misma (sev, module, tail) solo una vez
-  const uniq = new Map(); // key -> row
+  // dedupe
+  const uniq = new Map();
   for (const r of triples) {
     const key = `${r.sev}||${r.module}||${r.tail}`;
     if (!uniq.has(key)) uniq.set(key, r);
   }
   const rows = Array.from(uniq.values());
+  if (!rows.length) return `<p>No dependency paths to display for ${side === 'base' ? 'Base' : 'Head'}.</p>`;
 
-  if (!rows.length) {
-    return `<p>No dependency paths to display for ${side === 'base' ? 'Base' : 'Head'}.</p>`;
-  }
-
-  // Orden: Severity desc, Module asc, Tail asc
   rows.sort((a, b) => {
     const ra = SEV_ORDER[a.sev] || 0, rb = SEV_ORDER[b.sev] || 0;
     if (ra !== rb) return rb - ra;
@@ -608,13 +599,7 @@ function buildDependencyPathsSection(items, side) {
     return (a.tail || '').localeCompare(b.tail || '', 'en', { sensitivity: 'base' });
   });
 
-  // Agrupar por severidad
-  const groups = rows.reduce((acc, r) => {
-    (acc[r.sev] ||= []).push(r);
-    return acc;
-  }, {});
-
-  // Render por bloques (severidad)
+  const groups = rows.reduce((acc, r) => ((acc[r.sev] ||= []).push(r), acc), {});
   const sevOrderArr = Object.keys(SEV_ORDER).sort((s1, s2) => (SEV_ORDER[s2] - SEV_ORDER[s1]));
   const sections = sevOrderArr
     .filter(sev => Array.isArray(groups[sev]) && groups[sev].length)
@@ -632,11 +617,7 @@ function buildDependencyPathsSection(items, side) {
       `;
     }).join('\n');
 
-  return `
-<div class="dep-paths">
-  ${sections}
-</div>
-`.trim();
+  return `<div class="dep-paths">${sections}</div>`;
 }
 
 
@@ -660,7 +641,8 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
 
   // diff.json para dashboard
   const diff = await loadDiff(distDir);
-  const items = diff?.items || [];
+  const items = (view && Array.isArray(view.items)) ? view.items : (diff?.items || []);
+
 
   for (const s of sectionPlan()) {
     let inner = '';
