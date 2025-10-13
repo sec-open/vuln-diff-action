@@ -121,23 +121,25 @@ body, .card, .panel, .box, .bg, .bg-slate-900, .bg-slate-800, .bg-slate-700, .ch
 .cover-title .line1{ font-size:22px; font-weight:700; margin:0 0 6px 0; }
 .cover-title .line2{ font-size:18px; color:#cbd5e1; }
 
-/* Tarjetas Base/Head: corrige márgenes para que no se corten a la derecha */
+/* Tarjetas Base/Head: sin corte a la derecha y mismo padding a ambos lados */
 .cover-cards{
   position:absolute; left:18mm; right:18mm; bottom:18mm;
-  display:grid; grid-template-columns:1fr 1fr; gap:12px;
+  display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px;
 }
-.card-dark{ border:1px solid #1f2937; border-radius:10px; padding:10px; background:#111827; }
+.card-dark{ border:1px solid #1f2937; border-radius:10px; padding:12px; background:#111827; width:100%; }
 .card-dark .card-title{ font-weight:700; margin-bottom:6px; color:#e5e7eb; }
-.card-dark .kv{ display:grid; grid-template-columns:110px 1fr; gap:4px 10px; font-size:13px; line-height:1.35; }
+.card-dark .kv{ display:grid; grid-template-columns:120px 1fr; gap:6px 12px; font-size:13px; line-height:1.38; }
 
 /* ===== PÁGINAS ===== */
 .page { page-break-before: always !important; background:#fff !important; }
 .section-wrap{ padding:6mm 0 !important; }
 .section-title{ font-size:20px !important; margin:0 0 8px 0 !important; }
 
-/* TOC más grande y con mayor interlineado */
+/* TOC más grande y con mayor interlineado (cubren .toc y el fallback genérico) */
 .toc h2{ font-size:20px !important; margin-bottom:10px !important; }
-.toc ol{ font-size:13.5px !important; line-height:1.6 !important; padding-left:18px !important; }
+.toc ol{ font-size:14px !important; line-height:1.7 !important; padding-left:18px !important; }
+.toc li{ margin:4px 0 !important; }
+.section-wrap.toc ol{ font-size:14px !important; line-height:1.7 !important; }
 
 /* Subtítulos */
 .subsection-title{ font-weight:700; margin:12px 0 4px 0; padding-bottom:4px; border-bottom:2px solid #0b0f16; }
@@ -147,7 +149,7 @@ table{ width:100% !important; border-collapse: collapse !important; }
 th,td{ text-align:left !important; padding:6px 8px !important; border-bottom:1px solid #e5e7eb !important; }
 thead th{ background:#f3f4f6 !important; font-weight:600 !important; }
 
-/* Dashboard PDF-only */
+/* Dashboard PDF-only (NO tocamos JS) */
 .print-dash-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .print-dash-card{ border:1px solid #e5e7eb; border-radius:10px; padding:8px; }
 .print-dash-card h4{ margin:0 0 6px 0; font-size:14px; }
@@ -176,6 +178,7 @@ code{ background:#eef2ff !important; padding:2px 6px !important; border-radius:6
 .fix-totals { border:1px solid #e5e7eb; border-radius:8px; padding:8px; margin:8px 0 12px; }
 `.trim();
 }
+
 
 // ---------- Sections plan ----------
 function sectionPlan() {
@@ -570,48 +573,88 @@ function buildDependencyPathsSection(items, side) {
     return true;
   };
 
+  const pkgStr = (p) => {
+    if (!p) return '—';
+    const g = p.groupId || ''; const a = p.artifactId || ''; const v = p.version || '';
+    if (g && a && v) return `${g}:${a}:${v}`;
+    if (a && v) return `${a}:${v}`;
+    return a || v || '—';
+  };
+  const vulnLink = (it) => {
+    const url = Array.isArray(it.urls) && it.urls[0] ? it.urls[0] : (it.url || '');
+    const id = it.id || it.vulnerabilityId || '—';
+    return url ? `<a href="${url}">${id}</a>` : id;
+  };
+
+  // Expandimos por-item (para no colapsar vulnerabilidades distintas)
   const triples = [];
   for (const it of (items || [])) {
     if (!keep(it)) continue;
     const sev = String(it.severity || 'UNKNOWN').toUpperCase();
+    const gav = pkgStr(it.package);
+    const vhtml = vulnLink(it);
+    const vid = it.id || it.vulnerabilityId || '';
+
     const mp = it.module_paths || {};
-    for (const mod of Object.keys(mp)) {
+    const mods = Object.keys(mp);
+    if (!mods.length) {
+      // sin module_paths, al menos muestra la fila con módulo vacío y sin tail
+      triples.push({ sev, module: '', tail: '', gav, vhtml, vid });
+      continue;
+    }
+    for (const mod of mods) {
       const tails = Array.isArray(mp[mod]) ? mp[mod] : [];
-      if (!tails.length) triples.push({ sev, module: mod, tail: '' });
-      else for (const t of tails) triples.push({ sev, module: mod, tail: t || '' });
+      if (!tails.length) {
+        triples.push({ sev, module: mod, tail: '', gav, vhtml, vid });
+      } else {
+        for (const t of tails) {
+          triples.push({ sev, module: mod, tail: t || '', gav, vhtml, vid });
+        }
+      }
     }
   }
 
-  // dedupe
+  // Deduplicar SOLO duplicados dentro de la MISMA vulnerabilidad: (vid, module, tail)
   const uniq = new Map();
   for (const r of triples) {
-    const key = `${r.sev}||${r.module}||${r.tail}`;
+    const key = `${r.vid}||${r.module}||${r.tail}`;
     if (!uniq.has(key)) uniq.set(key, r);
   }
   const rows = Array.from(uniq.values());
   if (!rows.length) return `<p>No dependency paths to display for ${side === 'base' ? 'Base' : 'Head'}.</p>`;
 
+  // Orden: Severity desc, Module asc, Package asc, Vulnerability asc, Tail asc
   rows.sort((a, b) => {
     const ra = SEV_ORDER[a.sev] || 0, rb = SEV_ORDER[b.sev] || 0;
     if (ra !== rb) return rb - ra;
     const ma = a.module || '', mb = b.module || '';
     if (ma !== mb) return ma.localeCompare(mb, 'en', { sensitivity: 'base' });
+    const pa = a.gav || '', pb = b.gav || '';
+    if (pa !== pb) return pa.localeCompare(pb, 'en', { sensitivity: 'base' });
+    const ia = a.vid || '', ib = b.vid || '';
+    if (ia !== ib) return ia.localeCompare(ib, 'en', { sensitivity: 'base' });
     return (a.tail || '').localeCompare(b.tail || '', 'en', { sensitivity: 'base' });
   });
 
+  // Agrupar por severidad
   const groups = rows.reduce((acc, r) => ((acc[r.sev] ||= []).push(r), acc), {});
   const sevOrderArr = Object.keys(SEV_ORDER).sort((s1, s2) => (SEV_ORDER[s2] - SEV_ORDER[s1]));
+
   const sections = sevOrderArr
     .filter(sev => Array.isArray(groups[sev]) && groups[sev].length)
     .map(sev => {
       const trs = groups[sev].map(r => {
-        const rhs = r.tail ? ` -> ${r.tail}` : '';
-        return `<tr><td>${r.module}${rhs}</td></tr>`;
+        const left = r.tail ? `${r.module} -> ${r.tail}` : r.module || '—';
+        return `<tr>
+          <td>${left}</td>
+          <td>${r.gav}</td>
+          <td>${r.vhtml}</td>
+        </tr>`;
       }).join('');
       return `
         <h4 class="subsection-title">${sev}</h4>
         <table class="dep-paths-table">
-          <thead><tr><th>Module → Path tail</th></tr></thead>
+          <thead><tr><th>Module → Path tail</th><th>Package</th><th>Vulnerability</th></tr></thead>
           <tbody>${trs}</tbody>
         </table>
       `;
