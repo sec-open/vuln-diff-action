@@ -22,13 +22,16 @@ async function writeText(p, t){ await ensureDir(path.dirname(p)); await fsp.writ
 
 async function waitForCharts(page, { timeout = 60000 } = {}) {
   try {
-    await page.waitForFunction(() => window.__chartsReady === true, { timeout });
-    // small settle time for paint
+    await page.waitForFunction(
+      () => (window.__chartsReady === true) && (window.__mermaidReady === true),
+      { timeout }
+    );
     await page.waitForTimeout(250);
-  } catch (e) {
-    // Do not fail the PDF if charts are slow; continue gracefully.
+  } catch (_) {
+    // no bloquear la exportación si llega a timeout
   }
 }
+
 
 // --- helpers ---
 function fetchHttps(url) {
@@ -304,8 +307,6 @@ function computeDashData(items) {
 }
 
 function buildPdfDashboardHtml(dash) {
-  // PDF-only dashboard: canvases + inline render con Chart.js y bandera __chartsReady.
-  // Esta versión espera a que Chart.js esté disponible (polling corto) antes de pintar.
   const dataJson = JSON.stringify(dash);
   return `
 <div class="print-dash-grid">
@@ -325,42 +326,29 @@ function buildPdfDashboardHtml(dash) {
 
 <script>
   (function(){
-    // Datos deterministas para el render del PDF
     var DASH = ${dataJson};
 
     function ready(){
       try{
         if (typeof Chart === 'undefined') { window.__chartsReady = true; return; }
 
-        // Chart 1: state totals
         var ctx1 = document.getElementById('chart-state-totals').getContext('2d');
         new Chart(ctx1, {
           type: 'bar',
-          data: {
-            labels: ['NEW','REMOVED','UNCHANGED'],
-            datasets: [{ label: 'Count', data: DASH.stateTotals }]
-          },
+          data: { labels: ['NEW','REMOVED','UNCHANGED'], datasets: [{ label: 'Count', data: DASH.stateTotals }] },
           options: { responsive:false, animation:false }
         });
 
-        // Chart 2: NEW vs REMOVED por severidad
         var labels2 = DASH.newVsRemoved.map(function(x){ return x.sev; });
         var dataNew = DASH.newVsRemoved.map(function(x){ return x.NEW; });
         var dataRemoved = DASH.newVsRemoved.map(function(x){ return x.REMOVED; });
         var ctx2 = document.getElementById('chart-new-removed').getContext('2d');
         new Chart(ctx2, {
           type: 'bar',
-          data: {
-            labels: labels2,
-            datasets: [
-              { label: 'NEW', data: dataNew },
-              { label: 'REMOVED', data: dataRemoved }
-            ]
-          },
+          data: { labels: labels2, datasets: [{ label: 'NEW', data: dataNew }, { label: 'REMOVED', data: dataRemoved }] },
           options: { responsive:false, animation:false }
         });
 
-        // Chart 3: stacked por severidad & estado
         var labels3 = DASH.stacked.map(function(x){ return x.sev; });
         var dNew = DASH.stacked.map(function(x){ return x.NEW; });
         var dRem = DASH.stacked.map(function(x){ return x.REMOVED; });
@@ -368,51 +356,28 @@ function buildPdfDashboardHtml(dash) {
         var ctx3 = document.getElementById('chart-stacked').getContext('2d');
         new Chart(ctx3, {
           type: 'bar',
-          data: {
-            labels: labels3,
-            datasets: [
-              { label: 'NEW', data: dNew },
-              { label: 'REMOVED', data: dRem },
-              { label: 'UNCHANGED', data: dUnc }
-            ]
-          },
-          options: {
-            responsive:false, animation:false,
-            plugins: { legend: { position: 'top' } },
-            scales: { x: { stacked:true }, y: { stacked:true } }
-          }
+          data: { labels: labels3, datasets: [{ label:'NEW', data:dNew }, { label:'REMOVED', data:dRem }, { label:'UNCHANGED', data:dUnc }] },
+          options: { responsive:false, animation:false, plugins:{ legend:{ position:'top' } }, scales:{ x:{ stacked:true }, y:{ stacked:true } } }
         });
 
-        // pequeña espera para asegurar pintado antes del PDF
         setTimeout(function(){ window.__chartsReady = true; }, 50);
-      } catch(e){
-        window.__chartsReady = true; // no bloquear el PDF en caso de error
-      }
+      } catch(e){ window.__chartsReady = true; }
     }
 
-    // 🔁 Espera de Chart.js si aún no está cargado
     function waitForChartAndRender(){
-      var tries = 0, max = 100; // ~5s (100 * 50ms)
+      var tries = 0, max = 100; // ~5s
       var t = setInterval(function(){
-        if (typeof Chart !== 'undefined') {
-          clearInterval(t);
-          ready();
-        } else if (++tries >= max) {
-          clearInterval(t);
-          window.__chartsReady = true; // sigue sin bloquear si no llega
-        }
+        if (typeof Chart !== 'undefined') { clearInterval(t); ready(); }
+        else if (++tries >= max) { clearInterval(t); window.__chartsReady = true; }
       }, 50);
     }
 
-    if (typeof Chart !== 'undefined') {
-      ready();
-    } else {
-      waitForChartAndRender();
-    }
+    if (typeof Chart !== 'undefined') { ready(); } else { waitForChartAndRender(); }
   })();
 </script>
 `.trim();
 }
+
 
 
 // ---------- Fix Insights (always built) ----------
@@ -470,18 +435,22 @@ async function buildFixInsightsFromJson(distDir) {
 
 // ---------- Assemble print.html ----------
 async function buildPrintHtml({ distDir, view, logoDataUri }) {
-  const htmlRoot = path.join(distDir,'html');
-  const sectionsDir = path.join(htmlRoot,'sections');
-  const vendorChartPath = path.join(htmlRoot, 'assets', 'js', 'vendor', 'chart.umd.js');
-  const chartTag = exists(vendorChartPath)
-    ? `<script src="file://${vendorChartPath}"></script>`
-    : '';
+  const htmlRoot = path.join(distDir, 'html');
+  const sectionsDir = path.join(htmlRoot, 'sections');
+
+  // Vendors (si existen)
+  const vendorChartPath   = path.join(htmlRoot, 'assets', 'js', 'vendor', 'chart.umd.js');
+  const vendorMermaidPath = path.join(htmlRoot, 'assets', 'js', 'vendor', 'mermaid.min.js');
+
+  // Cargar vendors con rutas absolutas file://
+  const chartTag   = exists(vendorChartPath)   ? `<script src="file://${vendorChartPath}"></script>`   : '';
+  const mermaidTag = exists(vendorMermaidPath) ? `<script src="file://${vendorMermaidPath}"></script>` : '';
 
   // Cover + ToC
   let bodyInner = coverHtml({ repo:view.repo, base:view.base, head:view.head, generatedAt:view.generatedAt, logoDataUri });
   bodyInner += '\n' + tocHtml(view.repo);
 
-  // Data for dashboard & other sections
+  // diff.json para dashboard
   const diff = await loadDiff(distDir);
   const items = diff?.items || [];
 
@@ -489,7 +458,7 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
     let inner = '';
     if (s.id === 'dashboard') {
       const dash = computeDashData(items);
-      inner = buildPdfDashboardHtml(dash); // canvases + inline script set __chartsReady (once Chart is present)
+      inner = buildPdfDashboardHtml(dash);
     } else if (s.id === 'vuln-diff-table') {
       const file = path.join(sectionsDir, 'vuln-diff-table.html');
       const raw = await readTextSafe(file);
@@ -500,8 +469,6 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
     } else {
       const file = s.file ? path.join(sectionsDir, s.file) : null;
       inner = file ? await readTextSafe(file) : '';
-
-      // Improve Summary subsections (solo espaciado/legibilidad)
       if (s.id === 'summary') {
         inner = inner
           .replace(/<h3[^>]*>\s*Tools\s*<\/h3>/i, '<h3 class="subsection-title">Tools</h3>')
@@ -513,11 +480,67 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
     bodyInner += '\n' + sectionWrapper({ id:s.id, title:s.title, num:s.num, innerHtml: inner });
   }
 
-  // HEAD: base href (para que todos los assets relativos del bundle 3.2 funcionen)
-  const baseHref = 'file://' + path.resolve(htmlRoot) + '/';
-  const printCssHref = './assets/print.css'; // se escribe en dist/pdf/assets/print.css
+  // CSS de impresión (vivirá en dist/pdf/assets/print.css, ruta relativa desde print.html)
+  const printCssHref = './assets/print.css';
 
-  // Document completo
+  // Script inline para activar Mermaid y marcar __mermaidReady
+  const mermaidInit = `
+<script>
+  (function(){
+    function bootstrapMermaid() {
+      try {
+        if (!window.mermaid) { window.__mermaidReady = true; return; }
+        // Seguridad laxa para permitir enlaces/estilos del bundle
+        window.mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
+
+        // Soportar bloques que vengan como <div class="mermaid">, o <pre><code class="language-mermaid">
+        var blocks = Array.from(document.querySelectorAll('.mermaid, pre code.language-mermaid'));
+        // Si algún bloque viene como texto suelto "graph LR", lo subimos a un <div class="mermaid">
+        if (blocks.length === 0) {
+          var candidates = Array.from(document.querySelectorAll('section, div, article'));
+          candidates.forEach(function(ct){
+            if (ct.textContent && /\\bgraph\\s+(LR|TD)\\b/.test(ct.textContent) && !ct.querySelector('.mermaid')) {
+              var code = ct.textContent.trim();
+              // Evita duplicar si ya hay algo renderizado
+              if (code.length < 20000) { // protección básica
+                var host = document.createElement('div');
+                host.className = 'mermaid';
+                host.textContent = code;
+                ct.innerHTML = '';
+                ct.appendChild(host);
+              }
+            }
+          });
+          blocks = Array.from(document.querySelectorAll('.mermaid, pre code.language-mermaid'));
+        }
+
+        // Normaliza <pre><code> a <div class="mermaid">
+        blocks.forEach(function(el){
+          if (el.tagName.toLowerCase() === 'code' && el.parentElement && el.parentElement.tagName.toLowerCase() === 'pre') {
+            var code = el.textContent;
+            var host = document.createElement('div');
+            host.className = 'mermaid';
+            host.textContent = code;
+            el.parentElement.replaceWith(host);
+          }
+        });
+
+        // Render
+        window.mermaid.run().then(function(){ window.__mermaidReady = true; }).catch(function(){ window.__mermaidReady = true; });
+      } catch(e) { window.__mermaidReady = true; }
+    }
+
+    // Espera breve por si el script mermaid aún no cargó
+    if (window.mermaid) { bootstrapMermaid(); }
+    else {
+      var tries = 0, max = 100, t = setInterval(function(){
+        if (window.mermaid) { clearInterval(t); bootstrapMermaid(); }
+        else if (++tries >= max) { clearInterval(t); window.__mermaidReady = true; }
+      }, 50);
+    }
+  })();
+</script>`.trim();
+
   return `
 <!doctype html>
 <html>
@@ -525,15 +548,17 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
   <meta charset="utf-8"/>
   <link rel="stylesheet" href="${printCssHref}">
   ${chartTag}
+  ${mermaidTag}
   <title>Vulnerability Diff Report — ${view.repo}</title>
 </head>
 <body>
-  ${bodyInner}
+${bodyInner}
+${mermaidInit}
 </body>
-
 </html>
 `.trim();
 }
+
 
 // ---------- Portable Chrome ----------
 async function ensurePortableChrome(cacheDir) {
@@ -566,7 +591,7 @@ async function resolveBrowserExecutable(outDir){
 
 // ---------- Header/Footer (with band + border) ----------
 function headerTemplate({ logoDataUri, repo, generatedAt }) {
-  const band = '#121826';
+  const band = '#0b0f16'; // igual que portada
   const img = logoDataUri ? `<img src="${logoDataUri}" style="height:12px;vertical-align:middle;margin-right:6px"/>` : '';
   return `
 <style>
@@ -584,7 +609,7 @@ function headerTemplate({ logoDataUri, repo, generatedAt }) {
 }
 
 function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
-  const band = '#121826';
+  const band = '#0b0f16'; // igual que portada
   const img = logoDataUri ? `<img src="${logoDataUri}" style="height:10px;vertical-align:middle;margin-right:6px"/>` : '';
   return `
 <style>
@@ -599,6 +624,9 @@ function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
   <div class="r">${generatedAt} — <span class="pageNumber"></span>/<span class="totalPages"></span></div>
 </div>`.trim();
 }
+
+
+
 
 // ---------- Entry ----------
 async function pdf_init({ distDir = './dist' } = {}) {
