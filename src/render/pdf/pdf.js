@@ -790,30 +790,26 @@ ${mermaidInit}
 `.trim();
 }
 
-// -------------------------------------------------------------
-// Chromium launcher (igual que antes)
-// -------------------------------------------------------------
-// -------------------------------------------------------------
-// Chrome for Testing launcher (con cache) — recomendado
-// -------------------------------------------------------------
+
 async function ensureChromium() {
-  // Carpeta cache local del repo (se puede cachear en CI)
   const cacheDir = path.join(process.cwd(), '.chromium-cache');
 
-  // Permitir overrides por variables de entorno si alguna vez las necesitas
-  const browser   = process.env.PUPPETEER_BROWSER || 'chrome';          // 'chrome' | 'chromium'
-  const buildId   = process.env.PUPPETEER_BUILD_ID || 'stable';         // 'stable' | 'beta' | 'canary' | versión exacta
-  const dlCb      = () => {}; // silenciar progreso en CI
+  // 1) Si el runner ya aporta un Chrome/Chromium, úsalo
+  const execFromEnv = process.env.PUPPETEER_EXECUTABLE_PATH;
+  if (execFromEnv) {
+    try { fs.accessSync(execFromEnv, fs.constants.X_OK); return execFromEnv; } catch { /* seguir */ }
+  }
 
-  // Descarga si no existe y devuelve la ruta del ejecutable
-  await install({ cacheDir, browser, buildId, downloadProgressCallback: dlCb });
+  // 2) Chrome for Testing estable (fiable, sin 404)
+  const browser = 'chrome';
+  const buildId = 'stable';
+  await install({ cacheDir, browser, buildId, downloadProgressCallback: () => {} });
 
   const executablePath = computeExecutablePath({ cacheDir, browser, buildId });
-  if (!executablePath) {
-    throw new Error(`[pdf] No executablePath found for ${browser}@${buildId} in ${cacheDir}`);
-  }
+  if (!executablePath) throw new Error(`[pdf] No executablePath for ${browser}@${buildId}`);
   return executablePath;
 }
+
 
 
 // -------------------------------------------------------------
