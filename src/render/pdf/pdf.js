@@ -243,13 +243,14 @@ const pkgStr = (p) => p ? `${p.groupId ? p.groupId + ':' : ''}${p.artifactId || 
 
 // ---------- Fallback: Vulnerability Diff Table ----------
 async function buildVulnTableFromJson(distDir) {
-  const diffPath = path.join(distDir, 'diff.json');
-  let diff;
-  try {
-    diff = JSON.parse(await fs.readFile(diffPath, 'utf8'));
-  } catch {
-    return '<p>[diff.json not found or invalid]</p>';
-  }
+    const diffPath = path.join(distDir, 'diff.json');
+    let diff;
+    try {
+      diff = JSON.parse(await fsp.readFile(diffPath, 'utf8'));
+    } catch {
+      return '<p>[diff.json not found or invalid]</p>';
+    }
+
   const items = Array.isArray(diff.items) ? diff.items : [];
   if (!items.length) return '<p>No vulnerabilities to display.</p>';
 
@@ -303,7 +304,8 @@ function computeDashData(items) {
 }
 
 function buildPdfDashboardHtml(dash) {
-  // PDF-only dashboard: canvases + inline render with Chart.js and __chartsReady flag.
+  // PDF-only dashboard: canvases + inline render con Chart.js y bandera __chartsReady.
+  // Esta versión espera a que Chart.js esté disponible (polling corto) antes de pintar.
   const dataJson = JSON.stringify(dash);
   return `
 <div class="print-dash-grid">
@@ -323,7 +325,7 @@ function buildPdfDashboardHtml(dash) {
 
 <script>
   (function(){
-    // Data for deterministic render
+    // Datos deterministas para el render del PDF
     var DASH = ${dataJson};
 
     function ready(){
@@ -341,10 +343,10 @@ function buildPdfDashboardHtml(dash) {
           options: { responsive:false, animation:false }
         });
 
-        // Chart 2: NEW vs REMOVED by Severity
-        var labels2 = DASH.newVsRemoved.map(x => x.sev);
-        var dataNew = DASH.newVsRemoved.map(x => x.NEW);
-        var dataRemoved = DASH.newVsRemoved.map(x => x.REMOVED);
+        // Chart 2: NEW vs REMOVED por severidad
+        var labels2 = DASH.newVsRemoved.map(function(x){ return x.sev; });
+        var dataNew = DASH.newVsRemoved.map(function(x){ return x.NEW; });
+        var dataRemoved = DASH.newVsRemoved.map(function(x){ return x.REMOVED; });
         var ctx2 = document.getElementById('chart-new-removed').getContext('2d');
         new Chart(ctx2, {
           type: 'bar',
@@ -358,11 +360,11 @@ function buildPdfDashboardHtml(dash) {
           options: { responsive:false, animation:false }
         });
 
-        // Chart 3: stacked by severity & state
-        var labels3 = DASH.stacked.map(x => x.sev);
-        var dNew = DASH.stacked.map(x => x.NEW);
-        var dRem = DASH.stacked.map(x => x.REMOVED);
-        var dUnc = DASH.stacked.map(x => x.UNCHANGED);
+        // Chart 3: stacked por severidad & estado
+        var labels3 = DASH.stacked.map(function(x){ return x.sev; });
+        var dNew = DASH.stacked.map(function(x){ return x.NEW; });
+        var dRem = DASH.stacked.map(function(x){ return x.REMOVED; });
+        var dUnc = DASH.stacked.map(function(x){ return x.UNCHANGED; });
         var ctx3 = document.getElementById('chart-stacked').getContext('2d');
         new Chart(ctx3, {
           type: 'bar',
@@ -381,16 +383,37 @@ function buildPdfDashboardHtml(dash) {
           }
         });
 
+        // pequeña espera para asegurar pintado antes del PDF
         setTimeout(function(){ window.__chartsReady = true; }, 50);
-      }catch(e){ window.__chartsReady = true; }
+      } catch(e){
+        window.__chartsReady = true; // no bloquear el PDF en caso de error
+      }
     }
 
-    // If Chart.js already loaded (via <script src="...chart.umd.js">), render now. Otherwise, mark ready.
-    if (typeof Chart !== 'undefined') { ready(); } else { window.__chartsReady = true; }
+    // 🔁 Espera de Chart.js si aún no está cargado
+    function waitForChartAndRender(){
+      var tries = 0, max = 100; // ~5s (100 * 50ms)
+      var t = setInterval(function(){
+        if (typeof Chart !== 'undefined') {
+          clearInterval(t);
+          ready();
+        } else if (++tries >= max) {
+          clearInterval(t);
+          window.__chartsReady = true; // sigue sin bloquear si no llega
+        }
+      }, 50);
+    }
+
+    if (typeof Chart !== 'undefined') {
+      ready();
+    } else {
+      waitForChartAndRender();
+    }
   })();
 </script>
 `.trim();
 }
+
 
 // ---------- Fix Insights (always built) ----------
 async function buildFixInsightsFromJson(distDir) {
@@ -449,7 +472,10 @@ async function buildFixInsightsFromJson(distDir) {
 async function buildPrintHtml({ distDir, view, logoDataUri }) {
   const htmlRoot = path.join(distDir,'html');
   const sectionsDir = path.join(htmlRoot,'sections');
-  const vendorChartPath = path.join(htmlRoot,'assets','js','vendor','chart.umd.js');
+  const vendorChartPath = path.join(htmlRoot, 'assets', 'js', 'vendor', 'chart.umd.js');
+  const chartTag = exists(vendorChartPath)
+    ? `<script src="file://${vendorChartPath}"></script>`
+    : '';
 
   // Cover + ToC
   let bodyInner = coverHtml({ repo:view.repo, base:view.base, head:view.head, generatedAt:view.generatedAt, logoDataUri });
@@ -491,25 +517,20 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
   const baseHref = 'file://' + path.resolve(htmlRoot) + '/';
   const printCssHref = './assets/print.css'; // se escribe en dist/pdf/assets/print.css
 
-  // Si existe Chart.js del bundle, lo referenciamos (gráficas PDF dependen solo de él, el resto es inline)
-  const chartTag = exists(vendorChartPath)
-    ? `<script src="${'assets/js/vendor/chart.umd.js'}"></script>`
-    : '';
-
   // Document completo
   return `
 <!doctype html>
 <html>
 <head>
   <meta charset="utf-8"/>
-  <base href="${baseHref}">
   <link rel="stylesheet" href="${printCssHref}">
+  ${chartTag}
   <title>Vulnerability Diff Report — ${view.repo}</title>
 </head>
 <body>
-${bodyInner}
-${chartTag}
+  ${bodyInner}
 </body>
+
 </html>
 `.trim();
 }
