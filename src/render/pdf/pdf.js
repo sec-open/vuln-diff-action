@@ -466,57 +466,94 @@ function buildPdfDashboardHtml(dash) {
 
 
 // ---------- Fix Insights (always built) ----------
+// ---------- Fix Insights (always built) ----------
 async function buildFixInsightsFromJson(distDir) {
   const diff = await loadDiff(distDir);
-  if (!diff || !Array.isArray(diff.items)) return '<p>[diff.json not found or empty]</p>';
+  if (!diff || !Array.isArray(diff.items)) {
+    return '<p>[diff.json not found or empty]</p>';
+  }
 
-  // "fix available" (sin cálculos pesados adicionales)
+  // Definición de "with fix" (mantengo tu heurística actual)
   const withFixAll = diff.items.filter(x => x.fix && x.fix.state === 'fixed');
 
   const groupByState = (arr) => {
-    const g = { NEW:[], REMOVED:[], UNCHANGED:[] };
-    for (const o of arr) (g[o.state] || (g[o.state]=[])).push(o);
+    const g = { NEW: [], REMOVED: [], UNCHANGED: [] };
+    for (const o of arr) (g[o.state] || (g[o.state] = [])).push(o);
     return g;
   };
   const G = groupByState(withFixAll);
 
-  const mkRows = (arr) => arr.map(o=>{
+  // -------- Tabla de Totales (lo que pediste) --------
+  const totalVulns = diff.items.length;
+  const totalWithFix = withFixAll.length;
+  const totalsTable = `
+<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin:8px 0 12px;">
+  <table>
+    <thead>
+      <tr>
+        <th>TOTAL Vulnerabilities</th>
+        <th>Total with Fix</th>
+        <th>NEW</th>
+        <th>REMOVED</th>
+        <th>UNCHANGED</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>${totalVulns}</td>
+        <td>${totalWithFix}</td>
+        <td>${G.NEW.length}</td>
+        <td>${G.REMOVED.length}</td>
+        <td>${G.UNCHANGED.length}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+`.trim();
+
+  // -------- Tablas detalladas (se mantienen) --------
+  const mkRows = (arr) => arr.map(o => {
     const url = o.urls && o.urls[0] ? o.urls[0] : '';
-    const id = url ? `<a href="${url}">${o.id}</a>` : o.id;
+    const id = url ? `<a href="${url}">${o.id}</a>` : (o.id || '—');
     const tgt = o.fix && o.fix.versions && o.fix.versions[0] ? o.fix.versions[0] : '—';
-    return `<tr>
-      <td>${o.severity||'UNKNOWN'}</td>
-      <td>${id}</td>
-      <td>${pkgStr(o.package)}</td>
-      <td>${o.state}</td>
-      <td>${tgt}</td>
-    </tr>`;
+    return `
+      <tr>
+        <td>${(o.severity || 'UNKNOWN').toUpperCase()}</td>
+        <td>${id}</td>
+        <td>${pkgStr(o.package)}</td>
+        <td>${o.state}</td>
+        <td>${tgt}</td>
+      </tr>
+    `;
   }).join('');
 
   const section = (title, arr) => `
-  <h4 class="subsection-title">${title}</h4>
-  <table>
-    <thead>
-      <tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>State</th><th>Target Version</th></tr>
-    </thead>
-    <tbody>${mkRows(arr)}</tbody>
-  </table>`.trim();
+    <h4 class="subsection-title">${title}</h4>
+    <table>
+      <thead>
+        <tr>
+          <th>Severity</th>
+          <th>Vulnerability</th>
+          <th>Package</th>
+          <th>State</th>
+          <th>Target Version</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${mkRows(arr)}
+      </tbody>
+    </table>
+  `.trim();
 
   return `
-<div class="fix-insights">
-  <div class="kpi-row" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:8px 0 12px 0">
-    <div class="kpi"><div class="kpi-label">Total with Fix</div><div class="kpi-value">${withFixAll.length}</div></div>
-    <div class="kpi"><div class="kpi-label">NEW</div><div class="kpi-value">${G.NEW.length}</div></div>
-    <div class="kpi"><div class="kpi-label">REMOVED</div><div class="kpi-value">${G.REMOVED.length}</div></div>
-    <div class="kpi"><div class="kpi-label">UNCHANGED</div><div class="kpi-value">${G.UNCHANGED.length}</div></div>
-  </div>
-  ${section('All with fix', withFixAll)}
-  ${section('NEW with fix', G.NEW)}
-  ${section('REMOVED with fix', G.REMOVED)}
-  ${section('UNCHANGED with fix', G.UNCHANGED)}
-</div>
-`.trim();
+    ${totalsTable}
+    ${section('All with fix', withFixAll)}
+    ${section('NEW with fix', G.NEW)}
+    ${section('REMOVED with fix', G.REMOVED)}
+    ${section('UNCHANGED with fix', G.UNCHANGED)}
+  `.trim();
 }
+
 // ---------- Dependency Paths (PDF-only) ----------
 // side: 'base' | 'head'
 function buildDependencyPathsSection(items, side) {
