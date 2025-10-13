@@ -591,38 +591,56 @@ async function resolveBrowserExecutable(outDir){
 
 // ---------- Header/Footer (with band + border) ----------
 function headerTemplate({ logoDataUri, repo, generatedAt }) {
-  const band = '#0b0f16'; // igual que portada
-  const img = logoDataUri ? `<img src="${logoDataUri}" style="height:12px;vertical-align:middle;margin-right:6px"/>` : '';
+  const band = '#0b0f16'; // mismo color que la portada
+  const img = logoDataUri
+    ? `<img src="${logoDataUri}" style="height:12px;vertical-align:middle;margin-right:6px"/>`
+    : '';
   return `
 <style>
-  .h{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:10px; color:#fff;
-      width:100%; padding:6px 12px; background:${band};
-      display:flex; align-items:center; justify-content:space-between;
-      border-bottom:1px solid rgba(255,255,255,0.15); }
-  .h .l{ display:flex; align-items:center; gap:6px; }
-  .h .r{ opacity:0.9; }
+  /* Forzar impresión de fondos en el template */
+  html, body { margin:0; padding:0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 6px 12px; }
+  .bg { background-color: ${band}; color: #ffffff; }
+  .txt { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:10px; }
+  .left { display: inline-flex; align-items: center; gap: 6px; }
+  .right { opacity: 0.9; float: right; }
 </style>
-<div class="h">
-  <div class="l">${img}<span>Vulnerability Diff Report — ${repo}</span></div>
-  <div class="r">${generatedAt}</div>
-</div>`.trim();
+<table class="txt bg">
+  <tr>
+    <td>
+      <span class="left">${img}<span>Vulnerability Diff Report — ${repo}</span></span>
+      <span class="right">${generatedAt}</span>
+    </td>
+  </tr>
+</table>
+`.trim();
 }
 
 function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
-  const band = '#0b0f16'; // igual que portada
-  const img = logoDataUri ? `<img src="${logoDataUri}" style="height:10px;vertical-align:middle;margin-right:6px"/>` : '';
+  const band = '#0b0f16'; // mismo color que la portada
+  const img = logoDataUri
+    ? `<img src="${logoDataUri}" style="height:10px;vertical-align:middle;margin-right:6px"/>`
+    : '';
   return `
 <style>
-  .f{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:10px; color:#fff;
-      width:100%; padding:6px 12px; background:${band};
-      display:flex; align-items:center; justify-content:space-between;
-      border-top:1px solid rgba(255,255,255,0.15); }
-  .f .r{ opacity:0.9; }
+  html, body { margin:0; padding:0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 6px 12px; }
+  .bg { background-color: ${band}; color: #ffffff; }
+  .txt { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:10px; }
+  .left { display: inline-flex; align-items: center; gap: 6px; }
+  .right { opacity: 0.9; float: right; }
 </style>
-<div class="f">
-  <div class="l">${img}BASE: ${baseRef} → HEAD: ${headRef}</div>
-  <div class="r">${generatedAt} — <span class="pageNumber"></span>/<span class="totalPages"></span></div>
-</div>`.trim();
+<table class="txt bg">
+  <tr>
+    <td>
+      <span class="left">${img}BASE: ${baseRef} → HEAD: ${headRef}</span>
+      <span class="right">${generatedAt} — <span class="pageNumber"></span>/<span class="totalPages"></span></span>
+    </td>
+  </tr>
+</table>
+`.trim();
 }
 
 
