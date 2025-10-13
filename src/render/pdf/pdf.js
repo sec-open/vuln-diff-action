@@ -1,97 +1,42 @@
-// src/render/pdf/pdf.js
-// PDF renderer that reuses the HTML bundle but prints with a dedicated layout:
-// - Clean light theme for pages (dark only on cover)
-// - PDF-only dashboard (fixed grid, no overlap) with deterministic Chart.js render
-// - Fix Insights section (always built from diff.json)
-// - Cover without header/footer (merge cover + rest with pdf-lib)
-// - Portable Chrome install via @puppeteer/browsers (no sudo)
-
-const core = require('@actions/core');
-const fs = require('fs');
-const fsp = require('fs/promises');
+/* eslint-disable no-console */
 const path = require('path');
-const os = require('os');
-const https = require('https');
-const { PDFDocument } = require('pdf-lib');
+const fs = require('fs');
+const fsp = fs.promises;
+const { fileURLToPath } = require('url');
+const { install, computeExecutablePath } = require('@puppeteer/browsers');
+const puppeteer = require('puppeteer-core');
 const { buildView } = require('../common/view');
 
-function exists(p){ try { fs.accessSync(p); return true; } catch { return false; } }
-async function ensureDir(p){ await fsp.mkdir(p, { recursive: true }); }
-async function readTextSafe(p){ try { return await fsp.readFile(p,'utf8'); } catch { return ''; } }
-async function writeText(p, t){ await ensureDir(path.dirname(p)); await fsp.writeFile(p, t, 'utf8'); }
+// -------------------------------------------------------------
+// Utils
+// -------------------------------------------------------------
+const exists = (p) => { try { fs.accessSync(p); return true; } catch { return false; } };
+const readTextSafe = async (p) => { try { return await fsp.readFile(p, 'utf8'); } catch { return ''; } };
+const loadDiff = async (distDir) => {
+  try { return JSON.parse(await fsp.readFile(path.join(distDir, 'diff.json'), 'utf8')); }
+  catch { return null; }
+};
 
-async function waitForCharts(page, { timeout = 60000 } = {}) {
-  try {
-    await page.waitForFunction(
-      () => (window.__chartsReady === true) && (window.__mermaidReady === true),
-      { timeout }
-    );
-    await page.waitForTimeout(250);
-  } catch (_) {
-    // no bloquear la exportación si llega a timeout
-  }
-}
+const SEV_ORDER = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, UNKNOWN:1 };
+const STATE_ORDER = { NEW:3, REMOVED:2, UNCHANGED:1 };
 
+// GAV string
+const pkgStr = (p) => {
+  if (!p) return '—';
+  const g = p.groupId || ''; const a = p.artifactId || ''; const v = p.version || '';
+  if (g && a && v) return `${g}:${a}:${v}`;
+  if (a && v) return `${a}:${v}`;
+  return a || v || '—';
+};
+const vulnLink = (it) => {
+  const url = Array.isArray(it.urls) && it.urls[0] ? it.urls[0] : (it.url || '');
+  const id = it.id || it.vulnerabilityId || '—';
+  return url ? `<a href="${url}">${id}</a>` : id;
+};
 
-// --- helpers ---
-function fetchHttps(url) {
-  return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
-      if (res.statusCode !== 200) {
-        res.resume();
-        return reject(new Error(`HTTP ${res.statusCode}`));
-      }
-      const chunks = [];
-      res.on('data', (d) => chunks.push(d));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
-    }).on('error', reject);
-  });
-}
-
-async function logoToDataUri(logoInput, distDir) {
-  if (!logoInput) return '';
-
-  const u = String(logoInput).trim();
-
-  // If it's an absolute HTTP(S) URL, try to fetch and embed as data URI so it works in header/footer.
-  if (/^https?:\/\//i.test(u)) {
-    try {
-      const buf = await fetchHttps(u);
-      // Try to infer mime by extension
-      const ext = path.extname(new URL(u).pathname).toLowerCase();
-      const mime = ext === '.png' ? 'image/png'
-        : (ext === '.webp' ? 'image/webp'
-        : (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg'
-        : (ext === '.svg') ? 'image/svg+xml'
-        : 'application/octet-stream');
-      return `data:${mime};base64,${buf.toString('base64')}`;
-    } catch {
-      // Fallback: return the original URL (may still work on cover, but header/footer prefers data URIs)
-      return u;
-    }
-  }
-
-  // Local/relative path → resolve and embed
-  let abs = u.startsWith('/') ? u : path.resolve(distDir, u.replace(/^\.\//,''));
-  if (!exists(abs)) {
-    const maybe = path.resolve(distDir, 'html', u.replace(/^\.\//,'').replace(/^html\//,''));
-    if (exists(maybe)) abs = maybe;
-  }
-  try {
-    const buf = await fsp.readFile(abs);
-    const ext = path.extname(abs).toLowerCase();
-    const mime = ext === '.png' ? 'image/png'
-      : ext === '.webp' ? 'image/webp'
-      : (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg'
-      : ext === '.svg' ? 'image/svg+xml'
-      : 'application/octet-stream';
-    return `data:${mime};base64,${buf.toString('base64')}`;
-  } catch {
-    return '';
-  }
-}
-
-// ---------- CSS (print) ----------
+// -------------------------------------------------------------
+// CSS (impresión)
+// -------------------------------------------------------------
 function makePrintCss() {
   return `
 @page { size: A4; margin: 18mm 14mm 18mm 14mm; }
@@ -101,8 +46,6 @@ html, body {
   background:#ffffff !important; color:#0b0f16 !important;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif !important;
 }
-
-/* Neutraliza fondos oscuros del bundle en impresión */
 body, .card, .panel, .box, .bg, .bg-slate-900, .bg-slate-800, .bg-slate-700, .chart-card {
   background:#ffffff !important; color:#0b0f16 !important;
 }
@@ -121,7 +64,7 @@ body, .card, .panel, .box, .bg, .bg-slate-900, .bg-slate-800, .bg-slate-700, .ch
 .cover-title .line1{ font-size:22px; font-weight:700; margin:0 0 6px 0; }
 .cover-title .line2{ font-size:18px; color:#cbd5e1; }
 
-/* Tarjetas Base/Head: sin corte a la derecha y mismo padding a ambos lados */
+/* Tarjetas Base/Head: corregir corte y wrap de SHA largo */
 .cover-cards{
   position:absolute; left:18mm; right:18mm; bottom:18mm;
   display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px;
@@ -129,32 +72,37 @@ body, .card, .panel, .box, .bg, .bg-slate-900, .bg-slate-800, .bg-slate-700, .ch
 .card-dark{ border:1px solid #1f2937; border-radius:10px; padding:12px; background:#111827; width:100%; }
 .card-dark .card-title{ font-weight:700; margin-bottom:6px; color:#e5e7eb; }
 .card-dark .kv{ display:grid; grid-template-columns:120px 1fr; gap:6px 12px; font-size:13px; line-height:1.38; }
+.wrap { word-break: break-word; overflow-wrap: anywhere; }
 
 /* ===== PÁGINAS ===== */
 .page { page-break-before: always !important; background:#fff !important; }
 .section-wrap{ padding:6mm 0 !important; }
 .section-title{ font-size:20px !important; margin:0 0 8px 0 !important; }
 
-/* TOC más grande y con mayor interlineado (cubren .toc y el fallback genérico) */
-.toc h2{ font-size:20px !important; margin-bottom:10px !important; }
-.toc ol{ font-size:14px !important; line-height:1.7 !important; padding-left:18px !important; }
-.toc li{ margin:4px 0 !important; }
-.section-wrap.toc ol{ font-size:14px !important; line-height:1.7 !important; }
+/* TOC muy amplio */
+.toc h2{ font-size:22px !important; margin-bottom:14px !important; }
+.toc ol{ font-size:15px !important; line-height:1.9 !important; padding-left:20px !important; }
+.toc li{ margin:6px 0 !important; }
 
 /* Subtítulos */
 .subsection-title{ font-weight:700; margin:12px 0 4px 0; padding-bottom:4px; border-bottom:2px solid #0b0f16; }
 
 /* Tablas */
 table{ width:100% !important; border-collapse: collapse !important; }
-th,td{ text-align:left !important; padding:6px 8px !important; border-bottom:1px solid #e5e7eb !important; }
+th,td{ text-align:left !important; padding:6px 8px !important; border-bottom:1px solid #e5e7eb !important; vertical-align: top; }
 thead th{ background:#f3f4f6 !important; font-weight:600 !important; }
 
-/* Dashboard PDF-only (NO tocamos JS) */
+/* Dashboard */
 .print-dash-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .print-dash-card{ border:1px solid #e5e7eb; border-radius:10px; padding:8px; }
 .print-dash-card h4{ margin:0 0 6px 0; font-size:14px; }
 .print-dash-card canvas{ width:100% !important; height:200px !important; }
 .print-dash-span2{ grid-column:1 / span 2; }
+
+/* Tablas por módulo en Dashboard */
+.module-tables { margin-top:10px; }
+.module-tables h4 { margin:12px 0 6px 0; }
+.module-tables table { margin-bottom:8px; }
 
 /* Ocultar elementos interactivos del bundle */
 #app-menu, #app-header, nav, .controls, .filters, .btn, button{ display:none !important; }
@@ -164,7 +112,7 @@ a{ color:#1d4ed8 !important; text-decoration:none !important; }
 a:hover{ text-decoration:underline !important; }
 code{ background:#eef2ff !important; padding:2px 6px !important; border-radius:6px !important; }
 
-/* === Dependency Paths: ocultar filtro y evitar cortes de filas === */
+/* Dependency Paths */
 #Paths, .paths-filter, .filter, .filter-box, .search, .search-box, input[type="search"] {
   display: none !important;
 }
@@ -174,37 +122,79 @@ code{ background:#eef2ff !important; padding:2px 6px !important; border-radius:6
 .dep-paths .subsection-title { margin-top: 10px; }
 .dep-paths-table th, .dep-paths-table td { font-size: 13px; }
 
-/* Fix Insights: bloque totales con bordes visibles */
+/* Fix Insights totals box */
 .fix-totals { border:1px solid #e5e7eb; border-radius:8px; padding:8px; margin:8px 0 12px; }
 `.trim();
 }
 
-
-// ---------- Sections plan ----------
-function sectionPlan() {
-  return [
-    { num: 1, id: 'introduction',   title: 'Introduction',                 file: 'overview.html' },
-    { num: 2, id: 'summary',        title: 'Summary',                      file: 'summary.html' },
-    { num: 3, id: 'vuln-diff-table',title: 'Vulnerability Diff Table',     file: 'vuln-diff-table.html' },
-    { num: 4, id: 'dashboard',      title: 'Dashboard',                    file: null /* PDF-only dashboard */ },
-    { num: 5, id: 'dep-graph-base', title: 'Dependency Graph — Base',      file: 'dep-graph-base.html' },
-    { num: 6, id: 'dep-graph-head', title: 'Dependency Graph — Head',      file: 'dep-graph-head.html' },
-    { num: 7, id: 'dep-paths-base', title: 'Dependency Paths — Base',      file: 'dep-paths-base.html' },
-    { num: 8, id: 'dep-paths-head', title: 'Dependency Paths — Head',      file: 'dep-paths-head.html' },
-    { num: 9, id: 'fix-insights',   title: 'Fix Insights',                 file: null /* always built */ },
-  ];
+// -------------------------------------------------------------
+// Header / Footer
+// (sin cambios visuales: solo se aseguran refs desde inputs.*_ref)
+// -------------------------------------------------------------
+function headerTemplate({ logoDataUri, repo, generatedAt }) {
+  const band = '#0b0f16';
+  const img = logoDataUri
+    ? `<img src="${logoDataUri}" style="height:12px;vertical-align:middle;margin-right:6px"/>`
+    : '';
+  return `
+<style>
+  html, body { margin:0; padding:0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 6px 12px; }
+  .bg { background-color: ${band}; color: #ffffff; }
+  .txt { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:10px; }
+  .left { display: inline-flex; align-items: center; gap: 6px; }
+  .right { opacity: 0.9; float: right; }
+</style>
+<table class="txt bg">
+  <tr>
+    <td>
+      <span class="left">${img}<span>Vulnerability Diff Report — ${repo}</span></span>
+      <span class="right">${generatedAt}</span>
+    </td>
+  </tr>
+</table>
+`.trim();
 }
 
-// ---------- HTML helpers ----------
-function coverHtml({ repo, base, head, generatedAt, logoDataUri }) {
+function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
+  const band = '#0b0f16';
+  const img = logoDataUri
+    ? `<img src="${logoDataUri}" style="height:10px;vertical-align:middle;margin-right:6px"/>`
+    : '';
+  return `
+<style>
+  html, body { margin:0; padding:0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 6px 12px; }
+  .bg { background-color: ${band}; color: #ffffff; }
+  .txt { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:10px; }
+  .left { display: inline-flex; align-items: center; gap: 6px; }
+  .right { opacity: 0.9; float: right; }
+</style>
+<table class="txt bg">
+  <tr>
+    <td>
+      <span class="left">${img}BASE: ${baseRef} → HEAD: ${headRef}</span>
+      <span class="right">${generatedAt} — <span class="pageNumber"></span>/<span class="totalPages"></span></span>
+    </td>
+  </tr>
+</table>
+`.trim();
+}
+
+// -------------------------------------------------------------
+// Cover & TOC
+// -------------------------------------------------------------
+function coverHtml({ repo, base, head, inputs, generatedAt, logoDataUri }) {
+  const baseRef = inputs?.baseRef || base.ref;
+  const headRef = inputs?.headRef || head.ref;
+
   return `
 <div class="cover-page">
   <div class="cover-top">
-    <div class="cover-brand">
-      ${logoDataUri ? `<img src="${logoDataUri}" alt="logo" />` : ''}
-    </div>
+    <div class="cover-brand">${logoDataUri ? `<img src="${logoDataUri}" alt="logo"/>` : ''}</div>
     <div class="cover-meta">
-      <div>Generated at</div>
       <div class="cover-meta-ts">${generatedAt}</div>
     </div>
   </div>
@@ -217,151 +207,144 @@ function coverHtml({ repo, base, head, generatedAt, logoDataUri }) {
   <div class="cover-cards">
     <div class="card-dark">
       <div class="card-title">Base</div>
-      <div class="kv"><div>Ref</div><div>${base.ref}</div></div>
-      <div class="kv"><div>Commit</div><div>${base.shaShort} (${base.sha})</div></div>
+      <div class="kv"><div>Ref</div><div class="wrap">${baseRef || '—'}</div></div>
+      <div class="kv"><div>Commit</div><div>${base.shaShort} <span class="wrap">(${base.sha})</span></div></div>
       <div class="kv"><div>Author</div><div>${base.author}</div></div>
       <div class="kv"><div>Authored at</div><div>${base.authoredAt}</div></div>
-      <div class="kv"><div>Subject</div><div>${base.commitSubject}</div></div>
+      <div class="kv"><div>Subject</div><div class="wrap">${base.commitSubject}</div></div>
     </div>
+
     <div class="card-dark">
       <div class="card-title">Head</div>
-      <div class="kv"><div>Ref</div><div>${head.ref}</div></div>
-      <div class="kv"><div>Commit</div><div>${head.shaShort} (${head.sha})</div></div>
+      <div class="kv"><div>Ref</div><div class="wrap">${headRef || '—'}</div></div>
+      <div class="kv"><div>Commit</div><div>${head.shaShort} <span class="wrap">(${head.sha})</span></div></div>
       <div class="kv"><div>Author</div><div>${head.author}</div></div>
       <div class="kv"><div>Authored at</div><div>${head.authoredAt}</div></div>
-      <div class="kv"><div>Subject</div><div>${head.commitSubject}</div></div>
+      <div class="kv"><div>Subject</div><div class="wrap">${head.commitSubject}</div></div>
     </div>
   </div>
 </div>
 `.trim();
 }
 
+// TOC — títulos actualizados (3 = Results tables)
 function tocHtml(repo) {
-  const items = sectionPlan().map(s => `<li>${s.title}</li>`).join('');
   return `
-<div class="page">
-  <div class="section-wrap">
-    <h2 class="section-title">Table of Contents — ${repo}</h2>
-    <ol>${items}</ol>
-  </div>
+<div class="page section-wrap toc">
+  <h2>Table of Contents — ${repo}</h2>
+  <ol>
+    <li>1. Introduction</li>
+    <li>2. Summary</li>
+    <li>3. Results tables</li>
+    <li>4. Dashboard</li>
+    <li>5. Dependency Graph — Base</li>
+    <li>6. Dependency Graph — Head</li>
+    <li>7. Dependency Paths — Base</li>
+    <li>8. Dependency Paths — Head</li>
+    <li>9. Fix Insights</li>
+  </ol>
 </div>
 `.trim();
+}
+
+// -------------------------------------------------------------
+// Secciones
+// -------------------------------------------------------------
+function sectionPlan() {
+  return [
+    { id: 'intro', title: 'Introduction', num: 1, file: 'intro.html' },
+    { id: 'summary', title: 'Summary', num: 2, file: 'summary.html' },
+    // id 3 se genera custom (diff/base/head tables)
+    { id: 'dashboard', title: 'Dashboard', num: 4, file: null },
+    { id: 'dep-graph-base', title: 'Dependency Graph — Base', num: 5, file: 'dep-graph-base.html' },
+    { id: 'dep-graph-head', title: 'Dependency Graph — Head', num: 6, file: 'dep-graph-head.html' },
+    { id: 'dep-paths-base', title: 'Dependency Paths — Base', num: 7, file: null },
+    { id: 'dep-paths-head', title: 'Dependency Paths — Head', num: 8, file: null },
+    { id: 'fix-insights', title: 'Fix Insights', num: 9, file: null },
+  ];
 }
 
 function sectionWrapper({ id, title, num, innerHtml }) {
   return `
-<div class="page" id="${id}">
-  <div class="section-wrap">
-    <h2 class="section-title">${num}. ${title}</h2>
-    ${innerHtml || '<p>[empty]</p>'}
-  </div>
+<div class="page section-wrap" id="${id}">
+  <h2 class="section-title">${num}. ${title}</h2>
+  ${innerHtml}
 </div>
 `.trim();
 }
 
-// ---------- Load diff.json ----------
-async function loadDiff(distDir) {
-  const p = path.join(distDir, 'diff.json');
-  try { return JSON.parse(await fsp.readFile(p, 'utf8')); } catch { return null; }
+// -------------------------------------------------------------
+// Vulnerability tables (Diff/Base/Head)
+// -------------------------------------------------------------
+async function buildVulnTableDiffOrFallback(distDir) {
+  const htmlRoot = path.join(distDir, 'html');
+  const file = path.join(htmlRoot, 'sections', 'vuln-diff-table.html');
+  const raw = await readTextSafe(file);
+  const hasRows = /<tbody[^>]*>\s*<tr[\s\S]*<\/tr>\s*<\/tbody>/i.test(raw);
+  if (raw && hasRows) return raw;
+  // fallback desde JSON (ordenar por severidad desc + estado + package)
+  const diff = await loadDiff(distDir);
+  const items = Array.isArray(diff?.items) ? diff.items : [];
+  return buildVulnTableGeneric(items, () => true, 'Vulnerability Diff Table');
 }
-const pkgStr = (p) => p ? `${p.groupId ? p.groupId + ':' : ''}${p.artifactId || ''}${p.version ? ':' + p.version : ''}` : '—';
 
-// ---------- Fallback: Vulnerability Diff Table ----------
-async function buildVulnTableFromJson(distDir) {
-  const diffPath = path.join(distDir, 'diff.json');
-  let diff;
-  try {
-    diff = JSON.parse(await fsp.readFile(diffPath, 'utf8'));
-  } catch {
-    return '<p>[diff.json not found or invalid]</p>';
+function buildVulnTableGeneric(items, filterFn, title) {
+  const filtered = items.filter(filterFn);
+  if (!filtered.length) {
+    return `<h3 class="subsection-title">${title}</h3><p>No vulnerabilities to display.</p>`;
+  }
+  // group by severity
+  const groups = new Map();
+  for (const it of filtered) {
+    const sev = String(it.severity || 'UNKNOWN').toUpperCase();
+    if (!groups.has(sev)) groups.set(sev, []);
+    groups.get(sev).push(it);
+  }
+  // render
+  const sevOrder = Object.keys(SEV_ORDER).sort((a,b)=>SEV_ORDER[b]-SEV_ORDER[a]);
+  const stateRank = (s) => STATE_ORDER[s] || 0;
+
+  const blocks = [];
+  for (const sev of sevOrder) {
+    const arr = groups.get(sev);
+    if (!arr || !arr.length) continue;
+    arr.sort((a,b)=>{
+      const sa = String(a.state||'').toUpperCase(), sb = String(b.state||'').toUpperCase();
+      const ra = stateRank(sa), rb = stateRank(sb);
+      if (ra !== rb) return rb - ra; // NEW > REMOVED > UNCHANGED
+      const pa = pkgStr(a.package), pb = pkgStr(b.package);
+      return pa.localeCompare(pb, 'en', { sensitivity:'base' });
+    });
+    const rows = arr.map(it => `
+      <tr>
+        <td>${sev}</td>
+        <td>${vulnLink(it)}</td>
+        <td>${pkgStr(it.package)}</td>
+        <td>${it.state}</td>
+      </tr>
+    `).join('');
+    blocks.push(`
+      <h4 class="subsection-title">${sev}</h4>
+      <table>
+        <thead><tr><th>Severity</th><th>Vulnerability</th><th>Package</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `);
   }
 
-  const items = Array.isArray(diff.items) ? diff.items : [];
-  if (!items.length) return '<p>No vulnerabilities to display.</p>';
-
-  // Orden deseado por severidad (desc) y luego por Package (asc)
-  const sevRank = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, UNKNOWN: 1 };
-  const normSev = (s) => (s || 'UNKNOWN').toUpperCase();
-  const pkgStr = (pkg) => {
-    if (!pkg) return '';
-    const g = pkg.groupId || '';
-    const a = pkg.artifactId || pkg.name || '';
-    const v = pkg.version || '';
-    if (a && v && g) return `${g}:${a}:${v}`;
-    if (a && v) return `${a}:${v}`;
-    return a || v || '';
-  };
-
-  // Normalizamos campos que usaremos y ordenamos
-  const rowsData = items.map(it => {
-    const severity = normSev(it.severity);
-    const pkg = pkgStr(it.package);
-    const url = (Array.isArray(it.urls) && it.urls[0]) ? it.urls[0] : (it.url || '');
-    const vulnId = it.id || it.vulnerabilityId || '';
-    const status = it.state || it.status || '';
-    return {
-      severity,
-      pkg,
-      vulnHtml: url ? `<a href="${url}">${vulnId}</a>` : (vulnId || '—'),
-      status: status || '—'
-    };
-  }).sort((a, b) => {
-    const rA = sevRank[a.severity] || 0;
-    const rB = sevRank[b.severity] || 0;
-    if (rA !== rB) return rB - rA; // desc por severidad
-    return (a.pkg || '').localeCompare(b.pkg || '', 'en', { sensitivity: 'base' });
-  });
-
-  const rowsHtml = rowsData.map(r => `
-    <tr>
-      <td>${r.severity}</td>
-      <td>${r.vulnHtml}</td>
-      <td>${r.pkg || '—'}</td>
-      <td>${r.status}</td>
-    </tr>
-  `).join('');
-
   return `
-<table>
-  <thead>
-    <tr>
-      <th>Severity</th>
-      <th>Vulnerability</th>
-      <th>Package</th>
-      <th>Status</th>
-    </tr>
-  </thead>
-  <tbody>
-    ${rowsHtml}
-  </tbody>
-</table>
-`.trim();
+    <h3 class="subsection-title">${title}</h3>
+    ${blocks.join('\n')}
+  `;
 }
 
-
-// ---------- PDF-only Dashboard ----------
-function computeDashData(items) {
-  const states = ['NEW','REMOVED','UNCHANGED'];
-  const severities = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
-
-  const stateTotals = states.map(s => items.filter(x => x.state === s).length);
-  const newVsRemoved = severities.map(sev => ({
-    sev,
-    NEW: items.filter(x => x.state==='NEW'      && (x.severity||'UNKNOWN')===sev).length,
-    REMOVED: items.filter(x => x.state==='REMOVED'  && (x.severity||'UNKNOWN')===sev).length
-  }));
-  const stacked = severities.map(sev => ({
-    sev,
-    NEW: items.filter(x => x.state==='NEW'      && (x.severity||'UNKNOWN')===sev).length,
-    REMOVED: items.filter(x => x.state==='REMOVED'  && (x.severity||'UNKNOWN')===sev).length,
-    UNCHANGED: items.filter(x => x.state==='UNCHANGED' && (x.severity||'UNKNOWN')===sev).length
-  }));
-  return { states, severities, stateTotals, newVsRemoved, stacked };
-}
-function buildPdfDashboardHtml(dash) {
+// -------------------------------------------------------------
+// Dashboard (añade tablas por módulo)
+// -------------------------------------------------------------
+function buildPdfDashboardHtml(dash, view) {
   const dataJson = JSON.stringify(dash);
 
-  // 1) Distribution by State (sin fila Total)
+  // Tablas numéricas (sin filas/cols de totales “extra”)
   const states = ['NEW','REMOVED','UNCHANGED'];
   const stateTotalsRows = states.map((s, i) => {
     const v = (dash.stateTotals && dash.stateTotals[i]) || 0;
@@ -374,7 +357,6 @@ function buildPdfDashboardHtml(dash) {
     </table>
   `.trim();
 
-  // 2) NEW vs REMOVED por severidad (sin columna Total)
   const nvrHeader = `<thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th></tr></thead>`;
   const nvrRows = (dash.newVsRemoved || []).map(row => {
     const n = row.NEW || 0, r = row.REMOVED || 0;
@@ -382,13 +364,36 @@ function buildPdfDashboardHtml(dash) {
   }).join('');
   const nvrTable = `<table>${nvrHeader}<tbody>${nvrRows}</tbody></table>`;
 
-  // 3) Stacked por severidad & estado (sin columna Total)
   const stkHeader = `<thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>`;
   const stkRows = (dash.stacked || []).map(row => {
     const n = row.NEW || 0, r = row.REMOVED || 0, u = row.UNCHANGED || 0;
     return `<tr><td>${row.sev}</td><td>${n}</td><td>${r}</td><td>${u}</td></tr>`;
   }).join('');
   const stkTable = `<table>${stkHeader}<tbody>${stkRows}</tbody></table>`;
+
+  // --- Tablas por módulo (view.precomputed.aggregates.by_module_severity_state) ---
+  let moduleTablesHtml = '';
+  const byMod = view?.precomputed?.aggregates?.by_module_severity_state || {};
+  const sevOrderArr = Object.keys(SEV_ORDER).sort((a,b)=>SEV_ORDER[b]-SEV_ORDER[a]);
+
+  const modNames = Object.keys(byMod).sort((a,b)=>a.localeCompare(b, 'en', {sensitivity:'base'}));
+  if (modNames.length) {
+    const tables = modNames.map(mod => {
+      const map = byMod[mod] || {};
+      const rows = sevOrderArr.map(s => {
+        const row = map[s] || { NEW:0, REMOVED:0, UNCHANGED:0 };
+        return `<tr><td>${s}</td><td>${row.NEW||0}</td><td>${row.REMOVED||0}</td><td>${row.UNCHANGED||0}</td></tr>`;
+      }).join('');
+      return `
+        <h4>${mod}</h4>
+        <table>
+          <thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }).join('');
+    moduleTablesHtml = `<div class="module-tables"><h3 class="subsection-title">Per-module counts</h3>${tables}</div>`;
+  }
 
   return `
 <div class="print-dash-grid">
@@ -419,6 +424,8 @@ function buildPdfDashboardHtml(dash) {
     </div>
   </div>
 </div>
+
+${moduleTablesHtml}
 
 <script>
   (function(){
@@ -462,58 +469,111 @@ function buildPdfDashboardHtml(dash) {
 `.trim();
 }
 
-// ---------- Fix Insights (always built) ----------
+// -------------------------------------------------------------
+// Dependency Paths (column order: Vulnerability - Package - Module → tail)
+// -------------------------------------------------------------
+function buildDependencyPathsSection(items, side) {
+  const keep = (it) => {
+    const st = String(it.state || '').toUpperCase();
+    if (side === 'base') return st === 'REMOVED' || st === 'UNCHANGED';
+    if (side === 'head') return st === 'NEW' || st === 'UNCHANGED';
+    return true;
+  };
+
+  const triples = [];
+  for (const it of (items || [])) {
+    if (!keep(it)) continue;
+    const sev = String(it.severity || 'UNKNOWN').toUpperCase();
+    const gav = pkgStr(it.package);
+    const vhtml = vulnLink(it);
+    const vid = it.id || it.vulnerabilityId || '';
+    const mp = it.module_paths || {};
+    const mods = Object.keys(mp);
+    if (!mods.length) {
+      triples.push({ sev, module:'', tail:'', gav, vhtml, vid });
+      continue;
+    }
+    for (const mod of mods) {
+      const tails = Array.isArray(mp[mod]) ? mp[mod] : [];
+      if (!tails.length) triples.push({ sev, module:mod, tail:'', gav, vhtml, vid });
+      else for (const t of tails) triples.push({ sev, module:mod, tail:t||'', gav, vhtml, vid });
+    }
+  }
+  // dedupe intra-vuln
+  const uniq = new Map();
+  for (const r of triples) {
+    const key = `${r.vid}||${r.module}||${r.tail}`;
+    if (!uniq.has(key)) uniq.set(key, r);
+  }
+  const rows = Array.from(uniq.values());
+  if (!rows.length) return `<p>No dependency paths to display for ${side === 'base' ? 'Base' : 'Head'}.</p>`;
+
+  rows.sort((a, b) => {
+    const ra = SEV_ORDER[a.sev] || 0, rb = SEV_ORDER[b.sev] || 0;
+    if (ra !== rb) return rb - ra;
+    const ia = a.vid||'', ib = b.vid||''; if (ia!==ib) return ia.localeCompare(ib,'en',{sensitivity:'base'});
+    const pa = a.gav||'', pb = b.gav||''; if (pa!==pb) return pa.localeCompare(pb,'en',{sensitivity:'base'});
+    const ma = a.module||'', mb = b.module||''; if (ma!==mb) return ma.localeCompare(mb,'en',{sensitivity:'base'});
+    return (a.tail||'').localeCompare(b.tail||'','en',{sensitivity:'base'});
+  });
+
+  const groups = rows.reduce((acc, r) => ((acc[r.sev] ||= []).push(r), acc), {});
+  const sevOrderArr = Object.keys(SEV_ORDER).sort((s1, s2) => (SEV_ORDER[s2] - SEV_ORDER[s1]));
+  const sections = sevOrderArr
+    .filter(sev => Array.isArray(groups[sev]) && groups[sev].length)
+    .map(sev => {
+      const trs = groups[sev].map(r => {
+        const right = r.tail ? `${r.module} -> ${r.tail}` : (r.module || '—');
+        return `<tr>
+          <td>${r.vhtml}</td>
+          <td>${r.gav}</td>
+          <td>${right}</td>
+        </tr>`;
+      }).join('');
+      return `
+        <h4 class="subsection-title">${sev}</h4>
+        <table class="dep-paths-table">
+          <thead><tr><th>Vulnerability</th><th>Package</th><th>Module → Path tail</th></tr></thead>
+          <tbody>${trs}</tbody>
+        </table>
+      `;
+    }).join('\n');
+
+  return `<div class="dep-paths">${sections}</div>`;
+}
+
+// -------------------------------------------------------------
+// Fix Insights (manteniendo tu lógica + sin REMOVED)
+// -------------------------------------------------------------
 async function buildFixInsightsFromJson(distDir) {
   const diff = await loadDiff(distDir);
   if (!diff || !Array.isArray(diff.items)) {
     return '<p>[diff.json not found or empty]</p>';
   }
-
-  // Estados relevantes para "Fix": solo lo que está en HEAD (NEW/UNCHANGED)
   const headItems = diff.items.filter(x => {
     const st = String(x.state || '').toUpperCase();
     return st === 'NEW' || st === 'UNCHANGED';
   });
-
-  // Heurística de "with fix" (como tenías)
   const hasFix = (o) => Boolean(o && o.fix && (
     (Array.isArray(o.fix.versions) && o.fix.versions.length) ||
     o.fix.state === 'fixed'
   ));
-
   const withFix = headItems.filter(hasFix);
   const withoutFix = headItems.filter(x => !hasFix(x));
-
-  // Totales pedidos (sin REMOVED)
   const totalVulns = headItems.length;
   const totalWithFix = withFix.length;
 
-  // Helpers UI
   const sev = (s) => (String(s || 'UNKNOWN').toUpperCase());
-  const mkId = (o) => {
-    const url = o.urls && o.urls[0] ? o.urls[0] : '';
-    const id = o.id || o.vulnerabilityId || '—';
-    return url ? `<a href="${url}">${id}</a>` : id;
-  };
-  const pkg = (p) => {
-    if (!p) return '—';
-    const g = p.groupId || ''; const a = p.artifactId || ''; const v = p.version || '';
-    if (g && a && v) return `${g}:${a}:${v}`;
-    if (a && v) return `${a}:${v}`;
-    return a || v || '—';
-  };
   const tgt = (o) => (o.fix && Array.isArray(o.fix.versions) && o.fix.versions[0]) ? o.fix.versions[0] : '—';
-
   const mkRows = (arr) => arr.map(o => `
     <tr>
       <td>${sev(o.severity)}</td>
-      <td>${mkId(o)}</td>
-      <td>${pkg(o.package)}</td>
+      <td>${vulnLink(o)}</td>
+      <td>${pkgStr(o.package)}</td>
       <td>${o.state}</td>
       <td>${tgt(o)}</td>
     </tr>
   `).join('');
-
   const section = (title, arr) => `
     <h4 class="subsection-title">${title}</h4>
     <table>
@@ -530,7 +590,6 @@ async function buildFixInsightsFromJson(distDir) {
     </table>
   `.trim();
 
-  // Totales (sin REMOVED)
   const totalsTable = `
 <div class="fix-totals">
   <table>
@@ -554,7 +613,6 @@ async function buildFixInsightsFromJson(distDir) {
 </div>
 `.trim();
 
-  // Render
   return `
     ${totalsTable}
     ${section('With fix (NEW/UNCHANGED)', withFix)}
@@ -562,200 +620,137 @@ async function buildFixInsightsFromJson(distDir) {
   `.trim();
 }
 
-// ---------- Dependency Paths (PDF-only) ----------
-function buildDependencyPathsSection(items, side) {
-  const SEV_ORDER = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, UNKNOWN:1 };
+// -------------------------------------------------------------
+// Sección 3 (Results tables): 3.1 Diff, 3.2 Base, 3.3 Head
+// -------------------------------------------------------------
+async function buildResultsTablesHtml(distDir) {
+  const diff = await loadDiff(distDir);
+  const items = Array.isArray(diff?.items) ? diff.items : [];
 
-  const keep = (it) => {
-    const st = String(it.state || '').toUpperCase();
-    if (side === 'base') return st === 'REMOVED' || st === 'UNCHANGED';
-    if (side === 'head') return st === 'NEW' || st === 'UNCHANGED';
-    return true;
-  };
+  const diffHtml = await buildVulnTableDiffOrFallback(distDir);
 
-  const pkgStr = (p) => {
-    if (!p) return '—';
-    const g = p.groupId || ''; const a = p.artifactId || ''; const v = p.version || '';
-    if (g && a && v) return `${g}:${a}:${v}`;
-    if (a && v) return `${a}:${v}`;
-    return a || v || '—';
-  };
-  const vulnLink = (it) => {
-    const url = Array.isArray(it.urls) && it.urls[0] ? it.urls[0] : (it.url || '');
-    const id = it.id || it.vulnerabilityId || '—';
-    return url ? `<a href="${url}">${id}</a>` : id;
-  };
+  const baseHtml = buildVulnTableGeneric(
+    items,
+    (it) => {
+      const st = String(it.state || '').toUpperCase();
+      return st === 'REMOVED' || st === 'UNCHANGED';
+    },
+    '3.2 Vulnerability Base Table'
+  );
 
-  // Expandimos por-item (para no colapsar vulnerabilidades distintas)
-  const triples = [];
-  for (const it of (items || [])) {
-    if (!keep(it)) continue;
-    const sev = String(it.severity || 'UNKNOWN').toUpperCase();
-    const gav = pkgStr(it.package);
-    const vhtml = vulnLink(it);
-    const vid = it.id || it.vulnerabilityId || '';
+  const headHtml = buildVulnTableGeneric(
+    items,
+    (it) => {
+      const st = String(it.state || '').toUpperCase();
+      return st === 'NEW' || st === 'UNCHANGED';
+    },
+    '3.3 Vulnerability Head Table'
+  );
 
-    const mp = it.module_paths || {};
-    const mods = Object.keys(mp);
-    if (!mods.length) {
-      // sin module_paths, al menos muestra la fila con módulo vacío y sin tail
-      triples.push({ sev, module: '', tail: '', gav, vhtml, vid });
-      continue;
-    }
-    for (const mod of mods) {
-      const tails = Array.isArray(mp[mod]) ? mp[mod] : [];
-      if (!tails.length) {
-        triples.push({ sev, module: mod, tail: '', gav, vhtml, vid });
-      } else {
-        for (const t of tails) {
-          triples.push({ sev, module: mod, tail: t || '', gav, vhtml, vid });
-        }
-      }
-    }
-  }
-
-  // Deduplicar SOLO duplicados dentro de la MISMA vulnerabilidad: (vid, module, tail)
-  const uniq = new Map();
-  for (const r of triples) {
-    const key = `${r.vid}||${r.module}||${r.tail}`;
-    if (!uniq.has(key)) uniq.set(key, r);
-  }
-  const rows = Array.from(uniq.values());
-  if (!rows.length) return `<p>No dependency paths to display for ${side === 'base' ? 'Base' : 'Head'}.</p>`;
-
-  // Orden: Severity desc, Module asc, Package asc, Vulnerability asc, Tail asc
-  rows.sort((a, b) => {
-    const ra = SEV_ORDER[a.sev] || 0, rb = SEV_ORDER[b.sev] || 0;
-    if (ra !== rb) return rb - ra;
-    const ma = a.module || '', mb = b.module || '';
-    if (ma !== mb) return ma.localeCompare(mb, 'en', { sensitivity: 'base' });
-    const pa = a.gav || '', pb = b.gav || '';
-    if (pa !== pb) return pa.localeCompare(pb, 'en', { sensitivity: 'base' });
-    const ia = a.vid || '', ib = b.vid || '';
-    if (ia !== ib) return ia.localeCompare(ib, 'en', { sensitivity: 'base' });
-    return (a.tail || '').localeCompare(b.tail || '', 'en', { sensitivity: 'base' });
-  });
-
-  // Agrupar por severidad
-  const groups = rows.reduce((acc, r) => ((acc[r.sev] ||= []).push(r), acc), {});
-  const sevOrderArr = Object.keys(SEV_ORDER).sort((s1, s2) => (SEV_ORDER[s2] - SEV_ORDER[s1]));
-
-  const sections = sevOrderArr
-    .filter(sev => Array.isArray(groups[sev]) && groups[sev].length)
-    .map(sev => {
-      const trs = groups[sev].map(r => {
-        const left = r.tail ? `${r.module} -> ${r.tail}` : r.module || '—';
-        return `<tr>
-          <td>${left}</td>
-          <td>${r.gav}</td>
-          <td>${r.vhtml}</td>
-        </tr>`;
-      }).join('');
-      return `
-        <h4 class="subsection-title">${sev}</h4>
-        <table class="dep-paths-table">
-          <thead><tr><th>Module → Path tail</th><th>Package</th><th>Vulnerability</th></tr></thead>
-          <tbody>${trs}</tbody>
-        </table>
-      `;
-    }).join('\n');
-
-  return `<div class="dep-paths">${sections}</div>`;
+  // Encabezado de la sección 3
+  return `
+    <h3 class="subsection-title">3.1 Vulnerability Diff Table</h3>
+    ${diffHtml}
+    ${baseHtml}
+    ${headHtml}
+  `.trim();
 }
 
+// -------------------------------------------------------------
+// Dashboard data (igual que tu lógica actual)
+// -------------------------------------------------------------
+function computeDashData(items = []) {
+  const sevList = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
+  const bySev = {}; sevList.forEach(s => bySev[s] = { NEW:0, REMOVED:0, UNCHANGED:0 });
+  for (const it of items) {
+    const sev = String(it.severity || 'UNKNOWN').toUpperCase();
+    const st  = String(it.state || '').toUpperCase();
+    if (bySev[sev] && (st in bySev[sev])) bySev[sev][st]++;
+  }
+  const stateTotals = [
+    items.filter(x => String(x.state||'').toUpperCase()==='NEW').length,
+    items.filter(x => String(x.state||'').toUpperCase()==='REMOVED').length,
+    items.filter(x => String(x.state||'').toUpperCase()==='UNCHANGED').length,
+  ];
+  const newVsRemoved = Object.keys(bySev).map(sev => ({ sev, NEW: bySev[sev].NEW, REMOVED: bySev[sev].REMOVED }));
+  const stacked = Object.keys(bySev).map(sev => ({ sev, ...bySev[sev] }));
+  return { stateTotals, newVsRemoved, stacked };
+}
 
-
-// ---------- Assemble print.html ----------
+// -------------------------------------------------------------
+// HTML completo para imprimir
+// -------------------------------------------------------------
 async function buildPrintHtml({ distDir, view, logoDataUri }) {
   const htmlRoot = path.join(distDir, 'html');
   const sectionsDir = path.join(htmlRoot, 'sections');
 
-  // Vendors (si existen)
   const vendorChartPath   = path.join(htmlRoot, 'assets', 'js', 'vendor', 'chart.umd.js');
   const vendorMermaidPath = path.join(htmlRoot, 'assets', 'js', 'vendor', 'mermaid.min.js');
-
-  // Cargar vendors con rutas absolutas file://
   const chartTag   = exists(vendorChartPath)   ? `<script src="file://${vendorChartPath}"></script>`   : '';
   const mermaidTag = exists(vendorMermaidPath) ? `<script src="file://${vendorMermaidPath}"></script>` : '';
 
-  // Cover + ToC
-  let bodyInner = coverHtml({ repo:view.repo, base:view.base, head:view.head, generatedAt:view.generatedAt, logoDataUri });
+  // Cover + TOC
+  let bodyInner = coverHtml({
+    repo: view.repo,
+    base: view.base,
+    head: view.head,
+    inputs: view.inputs, // <-- usa inputs.baseRef / inputs.headRef
+    generatedAt: view.generatedAt,
+    logoDataUri
+  });
   bodyInner += '\n' + tocHtml(view.repo);
 
-  // diff.json para dashboard
   const diff = await loadDiff(distDir);
   const items = (view && Array.isArray(view.items)) ? view.items : (diff?.items || []);
 
+  // ==== Sección 3: Results tables (Diff/Base/Head) ====
+  bodyInner += '\n' + sectionWrapper({
+    id: 'results-tables',
+    title: 'Results tables',
+    num: 3,
+    innerHtml: await buildResultsTablesHtml(distDir),
+  });
 
-  for (const s of sectionPlan()) {
+  // Resto de secciones plan
+  for (const s of sectionPlan().filter(x => x.num !== 3)) {
     let inner = '';
     if (s.id === 'dashboard') {
-      const dash = computeDashData(items);
-      inner = buildPdfDashboardHtml(dash);
-    } else if (s.id === 'vuln-diff-table') {
-      const file = path.join(sectionsDir, 'vuln-diff-table.html');
-      const raw = await readTextSafe(file);
-      const hasRows = /<tbody[^>]*>\s*<tr[\s\S]*<\/tr>\s*<\/tbody>/i.test(raw);
-      inner = (raw && hasRows) ? raw : await buildVulnTableFromJson(distDir);
-    } else if (s.id === 'fix-insights') {
-      inner = await buildFixInsightsFromJson(distDir);
+      const dash = computeDashData(diff?.items || []);
+      inner = buildPdfDashboardHtml(dash, view);
     } else if (s.id === 'dep-paths-base') {
-      // PDF-only: construir desde view.items (sin columna "Paths", sin filtros)
       inner = buildDependencyPathsSection(items, 'base');
     } else if (s.id === 'dep-paths-head') {
-      // PDF-only: construir desde view.items (sin columna "Paths", sin filtros)
       inner = buildDependencyPathsSection(items, 'head');
+    } else if (s.id === 'fix-insights') {
+      inner = await buildFixInsightsFromJson(distDir);
     } else {
       const file = s.file ? path.join(sectionsDir, s.file) : null;
       inner = file ? await readTextSafe(file) : '';
       if (s.id === 'summary') {
+        // quita "Generated at ..." redundante
         inner = inner
           .replace(/<h3[^>]*>\s*Tools\s*<\/h3>/i, '<h3 class="subsection-title">Tools</h3>')
           .replace(/<h3[^>]*>\s*Inputs\s*<\/h3>/i, '<h3 class="subsection-title">Inputs</h3>')
           .replace(/<h3[^>]*>\s*Base\s*<\/h3>/i, '<h3 class="subsection-title">Base</h3>')
-          .replace(/<h3[^>]*>\s*Head\s*<\/h3>/i, '<h3 class="subsection-title">Head</h3>');
+          .replace(/<h3[^>]*>\s*Head\s*<\/h3>/i, '<h3 class="subsection-title">Head</h3>')
+          .replace(/<p>\s*Generated at\s+[^<]*<\/p>/i, '');
       }
     }
-    bodyInner += '\n' + sectionWrapper({ id:s.id, title:s.title, num:s.num, innerHtml: inner });
+    bodyInner += '\n' + sectionWrapper({ id: s.id, title: s.title, num: s.num, innerHtml: inner });
   }
 
-  // CSS de impresión (vivirá en dist/pdf/assets/print.css, ruta relativa desde print.html)
   const printCssHref = './assets/print.css';
 
-  // Script inline para activar Mermaid y marcar __mermaidReady
   const mermaidInit = `
 <script>
   (function(){
     function bootstrapMermaid() {
       try {
         if (!window.mermaid) { window.__mermaidReady = true; return; }
-        // Seguridad laxa para permitir enlaces/estilos del bundle
         window.mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
-
-        // Soportar bloques que vengan como <div class="mermaid">, o <pre><code class="language-mermaid">
         var blocks = Array.from(document.querySelectorAll('.mermaid, pre code.language-mermaid'));
-        // Si algún bloque viene como texto suelto "graph LR", lo subimos a un <div class="mermaid">
-        if (blocks.length === 0) {
-          var candidates = Array.from(document.querySelectorAll('section, div, article'));
-          candidates.forEach(function(ct){
-            if (ct.textContent && /\\bgraph\\s+(LR|TD)\\b/.test(ct.textContent) && !ct.querySelector('.mermaid')) {
-              var code = ct.textContent.trim();
-              // Evita duplicar si ya hay algo renderizado
-              if (code.length < 20000) { // protección básica
-                var host = document.createElement('div');
-                host.className = 'mermaid';
-                host.textContent = code;
-                ct.innerHTML = '';
-                ct.appendChild(host);
-              }
-            }
-          });
-          blocks = Array.from(document.querySelectorAll('.mermaid, pre code.language-mermaid'));
-        }
-
-        // Normaliza <pre><code> a <div class="mermaid">
         blocks.forEach(function(el){
-          if (el.tagName.toLowerCase() === 'code' && el.parentElement && el.parentElement.tagName.toLowerCase() === 'pre') {
+          if (el.tagName && el.tagName.toLowerCase() === 'code') {
             var code = el.textContent;
             var host = document.createElement('div');
             host.className = 'mermaid';
@@ -763,13 +758,10 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
             el.parentElement.replaceWith(host);
           }
         });
-
-        // Render
-        window.mermaid.run().then(function(){ window.__mermaidReady = true; }).catch(function(){ window.__mermaidReady = true; });
+        window.mermaid.run().then(function(){ window.__mermaidReady = true; })
+                           .catch(function(){ window.__mermaidReady = true; });
       } catch(e) { window.__mermaidReady = true; }
     }
-
-    // Espera breve por si el script mermaid aún no cargó
     if (window.mermaid) { bootstrapMermaid(); }
     else {
       var tries = 0, max = 100, t = setInterval(function(){
@@ -798,172 +790,128 @@ ${mermaidInit}
 `.trim();
 }
 
-
-// ---------- Portable Chrome ----------
-async function ensurePortableChrome(cacheDir) {
-  const { install, computeExecutablePath } = require('@puppeteer/browsers');
-  const platformMap = { linux:'linux', darwin:(os.arch()==='arm64'?'mac-arm':'mac'), win32:'win64' };
-  const platform = platformMap[os.platform()];
-  if (!platform) throw new Error(`Unsupported platform: ${os.platform()}`);
-  const buildId = 'stable';
-  await install({ browser:'chrome', buildId, cacheDir, platform });
-  return computeExecutablePath({ browser:'chrome', cacheDir, platform, buildId });
+// -------------------------------------------------------------
+// Chromium launcher (igual que antes)
+// -------------------------------------------------------------
+async function ensureChromium() {
+  const cacheDir = path.join(process.cwd(), '.chromium-cache');
+  const browser = 'chromium';
+  const buildId = process.env.PUPPETEER_CHROMIUM_REVISION || '128.0.6613.119';
+  const installResult = await install({
+    cacheDir, browser, buildId, downloadProgressCallback: () => {},
+  });
+  const executablePath = computeExecutablePath({ cacheDir, browser, buildId });
+  return executablePath || installResult.executablePath;
 }
 
-function knownBrowserCandidates() {
-  return [
-    process.env.CHROMIUM_PATH || '',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-    '/snap/bin/chromium',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/google-chrome',
-  ].filter(Boolean);
-}
-async function resolveBrowserExecutable(outDir){
-  for (const p of knownBrowserCandidates()) if (exists(p)) return p;
-  const cacheDir = path.join(outDir,'.browsers');
-  await ensureDir(cacheDir);
-  core.info('[render/pdf] no system browser found; downloading Chrome (stable) locally…');
-  return await ensurePortableChrome(cacheDir);
-}
+// -------------------------------------------------------------
+// Orquestador PDF
+// -------------------------------------------------------------
+async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
+  const absDist = path.resolve(distDir);
+  const pdfDir = path.join(absDist, 'pdf');
+  const assetsDir = path.join(pdfDir, 'assets');
+  await fsp.mkdir(assetsDir, { recursive: true });
 
-// ---------- Header/Footer (with band + border) ----------
-function headerTemplate({ logoDataUri, repo, generatedAt }) {
-  const band = '#0b0f16'; // mismo color que la portada
-  const img = logoDataUri
-    ? `<img src="${logoDataUri}" style="height:12px;vertical-align:middle;margin-right:6px"/>`
-    : '';
-  return `
-<style>
-  /* Forzar impresión de fondos en el template */
-  html, body { margin:0; padding:0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  table { border-collapse: collapse; width: 100%; }
-  td { padding: 6px 12px; }
-  .bg { background-color: ${band}; color: #ffffff; }
-  .txt { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:10px; }
-  .left { display: inline-flex; align-items: center; gap: 6px; }
-  .right { opacity: 0.9; float: right; }
-</style>
-<table class="txt bg">
-  <tr>
-    <td>
-      <span class="left">${img}<span>Vulnerability Diff Report — ${repo}</span></span>
-      <span class="right">${generatedAt}</span>
-    </td>
-  </tr>
-</table>
-`.trim();
-}
+  // Genera CSS de impresión en disco (no se inyecta inline para mantener tu ruta existente)
+  await fsp.writeFile(path.join(assetsDir, 'print.css'), makePrintCss(), 'utf8');
 
-function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
-  const band = '#0b0f16'; // mismo color que la portada
-  const img = logoDataUri
-    ? `<img src="${logoDataUri}" style="height:10px;vertical-align:middle;margin-right:6px"/>`
-    : '';
-  return `
-<style>
-  html, body { margin:0; padding:0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  table { border-collapse: collapse; width: 100%; }
-  td { padding: 6px 12px; }
-  .bg { background-color: ${band}; color: #ffffff; }
-  .txt { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:10px; }
-  .left { display: inline-flex; align-items: center; gap: 6px; }
-  .right { opacity: 0.9; float: right; }
-</style>
-<table class="txt bg">
-  <tr>
-    <td>
-      <span class="left">${img}BASE: ${baseRef} → HEAD: ${headRef}</span>
-      <span class="right">${generatedAt} — <span class="pageNumber"></span>/<span class="totalPages"></span></span>
-    </td>
-  </tr>
-</table>
-`.trim();
-}
-
-
-
-
-// ---------- Entry ----------
-async function pdf_init({ distDir = './dist' } = {}) {
-  core.startGroup('[render] PDF');
+  // Logo -> data URI
+  let logoDataUri = '';
   try {
-    const view = buildView(distDir);
+    if (html_logo_url) {
+      const isHttp = /^https?:\/\//i.test(html_logo_url);
+      if (isHttp) {
+        const res = await fetch(html_logo_url);
+        const buf = Buffer.from(await res.arrayBuffer());
+        const mime = res.headers.get('content-type') || 'image/png';
+        logoDataUri = `data:${mime};base64,${buf.toString('base64')}`;
+      } else {
+        const p = path.isAbsolute(html_logo_url) ? html_logo_url : path.join(absDist, 'html', html_logo_url.replace(/^\.?\//,''));
+        const mime = (p.endsWith('.svg') ? 'image/svg+xml'
+                    : p.endsWith('.jpg') || p.endsWith('.jpeg') ? 'image/jpeg'
+                    : 'image/png');
+        const buf = await fsp.readFile(p);
+        logoDataUri = `data:${mime};base64,${buf.toString('base64')}`;
+      }
+    }
+  } catch { /* sin logo */ }
 
-    const outDir = path.join(path.resolve(distDir), 'pdf');
-    const assetsDir = path.join(outDir, 'assets');
-    await ensureDir(outDir);
-    await ensureDir(assetsDir);
+  // View (Fase-3)
+  const view = buildView(absDist);
 
-    // CSS
-    await writeText(path.join(assetsDir,'print.css'), makePrintCss());
+  // HTML completo para imprimir
+  const html = await buildPrintHtml({ distDir: absDist, view, logoDataUri });
+  const printHtmlPath = path.join(pdfDir, 'print.html');
+  await fsp.writeFile(printHtmlPath, html, 'utf8');
 
-    // Logo (force data URI even if html_logo_url is remote)
-    const logoInput = core.getInput('html_logo_url') || '';
-    const logoDataUri = await logoToDataUri(logoInput, path.resolve(distDir));
+  // Puppeteer (Chromium portable)
+  const executablePath = await ensureChromium();
+  const browser = await puppeteer.launch({
+    headless: true,
+    executablePath,
+    args: ['--no-sandbox', '--disable-gpu', '--font-render-hinting=none'],
+  });
+  const page = await browser.newPage();
+  await page.goto(`file://${printHtmlPath}`, { waitUntil: 'load', timeout: 120000 });
 
-    // Assemble HTML (includes PDF-only dashboard & Fix Insights)
-    const html = await buildPrintHtml({ distDir: path.resolve(distDir), view, logoDataUri });
-    const htmlPath = path.join(outDir, 'print.html');
-    await writeText(htmlPath, html);
+  // Esperar gráficos/mermaid
+  try {
+    await page.waitForFunction(() => (window.__chartsReady === true) && (window.__mermaidReady === true), { timeout: 60000 });
+    await page.waitForTimeout(250);
+  } catch { /* continuar */ }
 
-    // Browser
-    let pptr;
-    try { pptr = require('puppeteer-core'); }
-    catch { throw new Error('puppeteer-core is not installed.\nPlease add "puppeteer-core" to your dependencies.'); }
+  // Primera página sin header/footer
+  const coverPdf = await page.pdf({
+    printBackground: true,
+    preferCSSPageSize: true,
+    displayHeaderFooter: false,
+    pageRanges: '1',
+    path: path.join(pdfDir, 'cover.tmp.pdf'),
+  });
 
-    const executablePath = await resolveBrowserExecutable(outDir);
-    const browser = await pptr.launch({ headless: 'new', executablePath, args: ['--no-sandbox','--disable-setuid-sandbox'] });
-    const page = await browser.newPage();
+  // Resto con header/footer (refs desde inputs)
+  const header = headerTemplate({ logoDataUri, repo: view.repo, generatedAt: view.generatedAt });
+  const footer = footerTemplate({
+    logoDataUri,
+    baseRef: view.inputs?.baseRef || view.base.ref,
+    headRef: view.inputs?.headRef || view.head.ref,
+    generatedAt: view.generatedAt
+  });
 
-    // IMPORTANT: load via file://
-    await page.goto('file://' + htmlPath, { waitUntil: 'networkidle0' });
+  const restPdf = await page.pdf({
+    printBackground: true,
+    preferCSSPageSize: true,
+    displayHeaderFooter: true,
+    headerTemplate: header,
+    footerTemplate: footer,
+    margin: { top: '60px', bottom: '60px', left: '14mm', right: '14mm' },
+    pageRanges: '2-',
+    path: path.join(pdfDir, 'rest.tmp.pdf'),
+  });
 
-    // Export cover only (no header/footer)
-    const coverPdf = path.join(outDir, 'cover.pdf');
-    await waitForCharts(page); // (cover doesn't need charts, but keep a small wait symmetry)
-    await page.pdf({
-      path: coverPdf,
-      printBackground: true,
-      displayHeaderFooter: false,
-      margin:{top:'0mm',right:'0mm',bottom:'0mm',left:'0mm'},
-      format:'A4',
-      pageRanges:'1'
-    });
+  await browser.close();
 
-    // Export rest with header/footer (band + border; logo as data-uri)
-    const restPdf = path.join(outDir, 'rest.pdf');
-    await page.pdf({
-      path: restPdf,
-      printBackground: true,
-      displayHeaderFooter: true,
-      headerTemplate: headerTemplate({ logoDataUri, repo: view.repo, generatedAt: view.generatedAt }),
-      footerTemplate: footerTemplate({ logoDataUri, baseRef: view.base.ref, headRef: view.head.ref, generatedAt: view.generatedAt }),
-      margin: { top:'20mm', right:'14mm', bottom:'16mm', left:'14mm' },
-      format: 'A4',
-      pageRanges: '2-'
-    });
+  // Unir PDFs (portada + resto) con pdf-lib
+  const { PDFDocument } = require('pdf-lib');
+  const coverDoc = await PDFDocument.load(await fsp.readFile(path.join(pdfDir, 'cover.tmp.pdf')));
+  const restDoc  = await PDFDocument.load(await fsp.readFile(path.join(pdfDir, 'rest.tmp.pdf')));
+  const out = await PDFDocument.create();
+  const [coverPage] = await out.copyPages(coverDoc, [0]);
+  out.addPage(coverPage);
+  const restPages = await out.copyPages(restDoc, restDoc.getPageIndices());
+  restPages.forEach((p) => out.addPage(p));
+  const bytes = await out.save();
+  const outPath = path.join(pdfDir, 'report.pdf');
+  await fsp.writeFile(outPath, bytes);
 
-    await browser.close();
+  // limpiar temporales
+  await Promise.allSettled([
+    fsp.unlink(path.join(pdfDir, 'cover.tmp.pdf')),
+    fsp.unlink(path.join(pdfDir, 'rest.tmp.pdf')),
+  ]);
 
-    // Merge cover + rest
-    const finalPdf = path.join(outDir, 'report.pdf');
-    const coverDoc = await PDFDocument.load(await fsp.readFile(coverPdf));
-    const restDoc = await PDFDocument.load(await fsp.readFile(restPdf));
-    const dest = await PDFDocument.create();
-    const [c] = await dest.copyPages(coverDoc,[0]);
-    dest.addPage(c);
-    const rp = await dest.copyPages(restDoc, restDoc.getPageIndices());
-    rp.forEach(p=>dest.addPage(p));
-    await fsp.writeFile(finalPdf, await dest.save());
-    core.info(`[render/pdf] exported: ${finalPdf}`);
-  } catch (e) {
-    core.setFailed(`[render] PDF failed: ${e?.message || e}`);
-    throw e;
-  } finally {
-    core.endGroup();
-  }
+  console.log(`[pdf] written: ${outPath}`);
 }
 
 module.exports = { pdf_init };
