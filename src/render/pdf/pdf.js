@@ -793,16 +793,28 @@ ${mermaidInit}
 // -------------------------------------------------------------
 // Chromium launcher (igual que antes)
 // -------------------------------------------------------------
+// -------------------------------------------------------------
+// Chrome for Testing launcher (con cache) — recomendado
+// -------------------------------------------------------------
 async function ensureChromium() {
+  // Carpeta cache local del repo (se puede cachear en CI)
   const cacheDir = path.join(process.cwd(), '.chromium-cache');
-  const browser = 'chromium';
-  const buildId = process.env.PUPPETEER_CHROMIUM_REVISION || '128.0.6613.119';
-  const installResult = await install({
-    cacheDir, browser, buildId, downloadProgressCallback: () => {},
-  });
+
+  // Permitir overrides por variables de entorno si alguna vez las necesitas
+  const browser   = process.env.PUPPETEER_BROWSER || 'chrome';          // 'chrome' | 'chromium'
+  const buildId   = process.env.PUPPETEER_BUILD_ID || 'stable';         // 'stable' | 'beta' | 'canary' | versión exacta
+  const dlCb      = () => {}; // silenciar progreso en CI
+
+  // Descarga si no existe y devuelve la ruta del ejecutable
+  await install({ cacheDir, browser, buildId, downloadProgressCallback: dlCb });
+
   const executablePath = computeExecutablePath({ cacheDir, browser, buildId });
-  return executablePath || installResult.executablePath;
+  if (!executablePath) {
+    throw new Error(`[pdf] No executablePath found for ${browser}@${buildId} in ${cacheDir}`);
+  }
+  return executablePath;
 }
+
 
 // -------------------------------------------------------------
 // Orquestador PDF
