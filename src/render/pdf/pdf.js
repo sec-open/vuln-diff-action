@@ -659,7 +659,6 @@ async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
 
 
   // Inputs + logo (data URI)
-  const inputs = (view && view.inputs) ? view.inputs : {};
   if (!inputs || Object.keys(inputs).length === 0) {
     console.warn('[pdf/inputs] view.inputs is empty/undefined');
   }
