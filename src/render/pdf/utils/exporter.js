@@ -3,38 +3,8 @@
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
-
-const puppeteer = require('puppeteer');
-const { install, computeExecutablePath } = require('@puppeteer/browsers');
+const { chromium } = require('playwright'); // ← Playwright
 const { PDFDocument } = require('pdf-lib');
-
-async function ensureChromePath() {
-  // 0) Si el runner te da un binario explícito, úsalo
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    const p = process.env.PUPPETEER_EXECUTABLE_PATH;
-    try { fs.accessSync(p, fs.constants.X_OK); return p; } catch {}
-  }
-
-  // 1) Instalar Chrome for Testing en una caché controlada por el repo
-  const cacheDir = path.join(process.cwd(), '.puppeteer-cache');
-  const browser = 'chrome';     // Chrome for Testing
-  const buildId = 'stable';     // canal estable
-
-  // Si ya existe en cacheDir, computeExecutablePath lo devolverá
-  try {
-    // Asegura que exista (idempotente): si ya está, no volverá a descargar
-    await install({ cacheDir, browser, buildId, downloadProgressCallback: () => {} });
-  } catch (e) {
-    throw new Error(`[pdf] Failed to install Chrome for Testing: ${e?.message || e}`);
-  }
-
-  // 2) Resolver la ruta del ejecutable dentro de esa caché
-  const execPath = computeExecutablePath({ cacheDir, browser, buildId });
-  if (!execPath || !fs.existsSync(execPath)) {
-    throw new Error(`[pdf] Chrome executable not found in cache: ${execPath || '(empty)'} (cacheDir=${cacheDir})`);
-  }
-  return execPath;
-}
 
 async function waitForVisuals(page, { timeout = 60000 } = {}) {
   try {
@@ -42,73 +12,73 @@ async function waitForVisuals(page, { timeout = 60000 } = {}) {
       () => (window.__chartsReady === true) && (window.__mermaidReady === true),
       { timeout }
     );
-    await page.waitForTimeout(250); // settle a little
+    await page.waitForTimeout(250); // pequeño settle
   } catch {
-    // Continuar aunque no estén listos (no rompemos el render)
+    // continuar aunque no estén listos
   }
 }
 
 /**
- * Renderiza el print.html en dos pasadas:
- *  - Página 1 (portada) sin header/footer
- *  - Resto con header/footer y márgenes adecuados
+ * Renderiza print.html en dos pasadas:
+ *   1) Portada (pág.1) sin header/footer
+ *   2) Resto (pág.2..n) con header/footer
  * Une ambos en dist/pdf/report.pdf
  */
 async function renderPdf({
-  printHtmlPath,       // ruta al HTML de impresión (file path)
-  pdfDir,              // carpeta ./dist/pdf
-  headerHtml,          // string HTML para header
-  footerHtml,          // string HTML para footer
+  printHtmlPath,
+  pdfDir,
+  headerHtml,
+  footerHtml,
   marginTop = '60px',
   marginBottom = '60px',
   marginLeft = '14mm',
   marginRight = '14mm',
-  gotoTimeoutMs = 120000,  // timeout de carga
-  visualsTimeoutMs = 60000 // timeout de charts/mermaid
+  gotoTimeoutMs = 120000,
+  visualsTimeoutMs = 60000,
 }) {
-
-
-    const executablePath = await ensureChromePath();
-
-    const browser = await puppeteer.launch({
-      headless: true,
-      executablePath,
-      args: ['--no-sandbox', '--disable-gpu', '--font-render-hinting=none'],
-    });
-
-
+  // Playwright trae su propio Chromium (descargado en la instalación de la lib)
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--no-sandbox'],
+  });
 
   try {
-    const page = await browser.newPage();
+    const context = await browser.newContext({
+      viewport: null,              // usa tamaño del contenido/CSS @page
+      deviceScaleFactor: 1,
+    });
+    const page = await context.newPage();
+
     await page.goto(`file://${printHtmlPath}`, { waitUntil: 'load', timeout: gotoTimeoutMs });
 
-    // Esperas de gráficas/mermaid
+    // Esperar a charts/mermaid como en Puppeteer
     await waitForVisuals(page, { timeout: visualsTimeoutMs });
 
-    // 1) Portada sin header/footer
+    // 1) Portada (sin header/footer)
     const coverTmp = path.join(pdfDir, 'cover.tmp.pdf');
     await page.pdf({
+      path: coverTmp,
       printBackground: true,
-      preferCSSPageSize: true,
       displayHeaderFooter: false,
       pageRanges: '1',
-      path: coverTmp,
+      preferCSSPageSize: true,
+      margin: { top: marginTop, bottom: marginBottom, left: marginLeft, right: marginRight },
     });
 
-    // 2) Resto con header/footer
+    // 2) Resto (con header/footer)
     const restTmp = path.join(pdfDir, 'rest.tmp.pdf');
     await page.pdf({
+      path: restTmp,
       printBackground: true,
-      preferCSSPageSize: true,
       displayHeaderFooter: true,
       headerTemplate: headerHtml,
       footerTemplate: footerHtml,
-      margin: { top: marginTop, bottom: marginBottom, left: marginLeft, right: marginRight },
       pageRanges: '2-',
-      path: restTmp,
+      preferCSSPageSize: true,
+      margin: { top: marginTop, bottom: marginBottom, left: marginLeft, right: marginRight },
     });
 
-    // 3) Unir PDFs
+    // 3) Unir PDFs con pdf-lib (igual que tenías)
     const coverDoc = await PDFDocument.load(await fsp.readFile(coverTmp));
     const restDoc  = await PDFDocument.load(await fsp.readFile(restTmp));
     const out = await PDFDocument.create();
@@ -123,11 +93,7 @@ async function renderPdf({
     const outPath = path.join(pdfDir, 'report.pdf');
     await fsp.writeFile(outPath, bytes);
 
-    // Limpiar temporales
-    await Promise.allSettled([
-      fsp.unlink(coverTmp),
-      fsp.unlink(restTmp),
-    ]);
+    await Promise.allSettled([ fsp.unlink(coverTmp), fsp.unlink(restTmp) ]);
 
     console.log(`[pdf] written: ${outPath}`);
     return outPath;
@@ -136,7 +102,4 @@ async function renderPdf({
   }
 }
 
-module.exports = {
-  renderPdf,
-  waitForVisuals,
-};
+module.exports = { renderPdf, waitForVisuals };
