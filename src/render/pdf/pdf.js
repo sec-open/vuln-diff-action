@@ -8,7 +8,9 @@ const { renderPdf } = require('./utils/exporter');
 const { coverHtml } = require('./sections/cover');
 const { makePrintCss } = require('./print.css'); // js
 const { headerTemplate, footerTemplate, getLogoDataUri } = require('./sections/headerFooter');
-
+const { tocHtml } = require('./sections/toc');
+const { introHtml } = require('./sections/introduction');
+const { buildResultsTablesHtml } = require('./sections/results');
 // -------------------------------------------------------------
 // Utils
 // -------------------------------------------------------------
@@ -542,20 +544,17 @@ function computeDashData(items = []) {
 // -------------------------------------------------------------
 // HTML completo para imprimir
 // -------------------------------------------------------------
+// -------------------------------------------------------------
+// HTML completo para imprimir (reemplazo)
+// -------------------------------------------------------------
 async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
-  // LOGS defensivos
-  console.log('[pdf/html] buildPrintHtml: start');
-  if (!view) console.warn('[pdf/html] buildPrintHtml: view is null/undefined');
-  if (!inputs) console.warn('[pdf/html] buildPrintHtml: inputs is null/undefined');
-  if (!logoDataUri) console.warn('[pdf/html] buildPrintHtml: logoDataUri empty');
-
   const htmlRoot = path.join(distDir, 'html');
   const sectionsDir = path.join(htmlRoot, 'sections');
 
+  // Carga única de vendor scripts (evita doble Chart/Mermaid)
   const vendorChartPath   = path.join(htmlRoot, 'assets', 'js', 'vendor', 'chart.umd.js');
   const vendorMermaidPath = path.join(htmlRoot, 'assets', 'js', 'vendor', 'mermaid.min.js');
 
-  // Carga única (guard) para evitar doble evaluación de Chart/Mermaid
   const chartTag = exists(vendorChartPath) ? `
 <script>
   if (!window.__CHART_JS_INCLUDED__) {
@@ -572,69 +571,99 @@ async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
   }
 </script>` : '';
 
-  // Cover + TOC
+  // Cover
   let bodyInner = coverHtml({
     repo: view?.repo,
     base: view?.base,
     head: view?.head,
-    inputs: inputs || {},            // ← AHORA ES PARÁMETRO
+    inputs: inputs || {},
     generatedAt: view?.generatedAt,
     logoDataUri
   });
 
-  bodyInner += '\n' + tocHtml(view?.repo);
+  // TOC (2º)
+  bodyInner += '\n' + tocHtml();
 
-  const diff = await loadDiff(distDir);
-  const items = (view && Array.isArray(view.items)) ? view.items : (diff?.items || []);
+  // 1. Introduction
+  bodyInner += '\n' + introHtml(view);
 
-  // ==== Sección 3: Results tables (Diff/Base/Head) ====
+  // 2. Summary (limpiando “### …” y “Generated at …”)
+  if (exists(path.join(sectionsDir, 'summary.html'))) {
+    let summaryHtml = await readTextSafe(path.join(sectionsDir, 'summary.html'));
+    summaryHtml = summaryHtml
+      .replace(/\s*<p>\s*Generated at\s+[^<]*<\/p>/i, '')           // quitar “Generated at …” redundante
+      .replace(/>###\s*Tools</gi, '>Tools')
+      .replace(/>###\s*Inputs</gi, '>Inputs')
+      .replace(/>###\s*Base</gi, '>Base')
+      .replace(/>###\s*Head</gi, '>Head');
+
+    bodyInner += '\n' + sectionWrapper({
+      id: 'summary',
+      title: '2. Summary',
+      num: 2,
+      innerHtml: summaryHtml
+    });
+  }
+
+  // 3. Results tables (3.1 / 3.2 / 3.3)
+  bodyInner += '\n' + (await buildResultsTablesHtml(distDir));
+
+  // 4. Dashboard (marcamos ready al final por si no hay scripts activos)
+  const dash = computeDashData((await loadDiff(distDir))?.items || []);
+  let dashboardHtml = buildPdfDashboardHtml(dash, view);
+  dashboardHtml += `
+<script>try{window.__chartsReady=true;window.__mermaidReady=true;}catch(e){}</script>`;
   bodyInner += '\n' + sectionWrapper({
-    id: 'results-tables',
-    title: 'Results tables',
-    num: 3,
-    innerHtml: await buildResultsTablesHtml(distDir),
+    id: 'dashboard',
+    title: '4. Dashboard',
+    num: 4,
+    innerHtml: dashboardHtml
   });
 
-  // Resto de secciones
-  for (const s of sectionPlan().filter(x => x.num !== 3)) {
-    let inner = '';
-    if (s.id === 'dashboard') {
-      const dash = computeDashData(diff?.items || []);
-      inner = buildPdfDashboardHtml(dash, view);
-      // Señales para el exportador, por si no hay scripts activos
-      inner += `
-<script>try{window.__chartsReady=true;window.__mermaidReady=true;}catch(e){}</script>`;
-    } else if (s.id === 'dep-paths-base') {
-      inner = buildDependencyPathsSection(items, 'base');
-    } else if (s.id === 'dep-paths-head') {
-      inner = buildDependencyPathsSection(items, 'head');
-    } else if (s.id === 'fix-insights') {
-      inner = await buildFixInsightsFromJson(distDir);
-    } else {
-      const file = s.file ? path.join(sectionsDir, s.file) : null;
-      inner = file ? await readTextSafe(file) : '';
-      if (s.id === 'summary') {
-        // quita "Generated at ..." redundante
-        inner = inner
-          .replace(/<h3[^>]*>\s*Tools\s*<\/h3>/i, '\n\n### Tools\n\n')
-          .replace(/<h3[^>]*>\s*Inputs\s*<\/h3>/i, '\n\n### Inputs\n\n')
-          .replace(/<h3[^>]*>\s*Base\s*<\/h3>/i, '\n\n### Base\n\n')
-          .replace(/<h3[^>]*>\s*Head\s*<\/h3>/i, '\n\n### Head\n\n')
-          .replace(/\s*<p>\s*Generated at\s+[^<]*<\/p>/i, '');
-      }
-    }
+  // 5 y 6: Dependency Graphs (secciones existentes del bundle)
+  for (const s of sectionPlan().filter(x => x.id === 'dep-graph-base' || x.id === 'dep-graph-head')) {
+    const file = s.file ? path.join(sectionsDir, s.file) : null;
+    let inner = file ? await readTextSafe(file) : '';
     bodyInner += '\n' + sectionWrapper({ id: s.id, title: s.title, num: s.num, innerHtml: inner });
   }
 
-  const printCssHref = './assets/print.css';
+  // 7 y 8: Dependency Paths (aplicamos contenedor anti-corte)
+  const diff = await loadDiff(distDir);
+  const items = Array.isArray(view?.items) ? view.items : (diff?.items || []);
+  const depBase = buildDependencyPathsSection(items, 'base');
+  const depHead = buildDependencyPathsSection(items, 'head');
 
-  console.log('[pdf/html] buildPrintHtml: done');
+  bodyInner += '\n' + sectionWrapper({
+    id: 'dep-paths-base',
+    title: '7. Dependency Paths — Base',
+    num: 7,
+    innerHtml: depBase.replace(/<h4([^>]*)>/g, '<div class="dep-block"><h4$1>').replace(/<\/table>/g, '</table></div>')
+  });
+  bodyInner += '\n' + sectionWrapper({
+    id: 'dep-paths-head',
+    title: '8. Dependency Paths — Head',
+    num: 8,
+    innerHtml: depHead.replace(/<h4([^>]*)>/g, '<div class="dep-block"><h4$1>').replace(/<\/table>/g, '</table></div>')
+  });
+
+  // 9. Fix Insights (tal como lo generas ahora)
+  if (exists(path.join(sectionsDir, 'fix-insights.html'))) {
+    const fixHtml = await readTextSafe(path.join(sectionsDir, 'fix-insights.html'));
+    bodyInner += '\n' + sectionWrapper({
+      id: 'fix-insights',
+      title: '9. Fix Insights',
+      num: 9,
+      innerHtml: fixHtml
+    });
+  }
+
+  const printCssHref = './assets/print.css';
   return `
 <!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Vulnerability Diff Report — ${view?.repo}</title>
+  <title>Vulnerability Diff Report — ${view?.repo || ''}</title>
   <link rel="stylesheet" href="${printCssHref}">
   ${chartTag}
   ${mermaidTag}
@@ -645,7 +674,6 @@ async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
 </html>
   `.trim();
 }
-
 
 // -------------------------------------------------------------
 // Orquestador PDF

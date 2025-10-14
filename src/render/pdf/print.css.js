@@ -81,6 +81,14 @@ function makePrintCss() {
 
   /* Fix Insights totals box */
   .fix-totals { border:1px solid #e5e7eb; border-radius:8px; padding:8px; margin:8px 0 12px; }
+
+    .page-break-before { page-break-before: always !important; break-before: page !important; }
+    .toc ol { font-size: 15px !important; line-height: 1.9 !important; } /* TOC legible */
+
+    /* Evitar que título quede al final y tabla salte (Dependency Paths) */
+    .dep-block { break-inside: avoid !important; page-break-inside: avoid !important; margin-bottom: 10px; }
+    .dep-block h4 { margin: 0 0 6px 0; }
+
   `.trim();
 }
 
