@@ -12,6 +12,13 @@ const { headerTemplate, footerTemplate, getLogoDataUri } = require('./sections/h
 // -------------------------------------------------------------
 // Utils
 // -------------------------------------------------------------
+function stripVendorScripts(html = '') {
+  // Elimina cualquier <script ... chart.umd.js> o <script ... mermaid*.js> embebido en secciones HTML
+  return String(html)
+    .replace(/<script[^>]+chart\.umd\.js[^>]*><\/script>/ig, '')
+    .replace(/<script[^>]+mermaid(\.min)?\.js[^>]*><\/script>/ig, '');
+}
+
 const exists = (p) => { try { fs.accessSync(p); return true; } catch { return false; } };
 const readTextSafe = async (p) => { try { return await fsp.readFile(p, 'utf8'); } catch { return ''; } };
 const loadDiff = async (distDir) => {
@@ -151,12 +158,17 @@ function buildVulnTableGeneric(items, filterFn, title) {
 // Dashboard (añade tablas por módulo)
 // -------------------------------------------------------------
 function buildPdfDashboardHtml(dash, view) {
-  const dataJson = JSON.stringify(dash);
+  // Datos a usar por el script inline (serializamos lo mínimo)
+  const dataJson = JSON.stringify({
+    stateTotals: dash?.stateTotals || [],
+    newVsRemoved: dash?.newVsRemoved || [],
+    stacked: dash?.stacked || [],
+  });
 
-  // Tablas numéricas (sin filas/cols de totales “extra”)
+  // Tablas numéricas
   const states = ['NEW','REMOVED','UNCHANGED'];
   const stateTotalsRows = states.map((s, i) => {
-    const v = (dash.stateTotals && dash.stateTotals[i]) || 0;
+    const v = (dash?.stateTotals && dash.stateTotals[i]) || 0;
     return `<tr><td>${s}</td><td>${v}</td></tr>`;
   }).join('');
   const stateTotalsTable = `
@@ -167,24 +179,24 @@ function buildPdfDashboardHtml(dash, view) {
   `.trim();
 
   const nvrHeader = `<thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th></tr></thead>`;
-  const nvrRows = (dash.newVsRemoved || []).map(row => {
+  const nvrRows = (dash?.newVsRemoved || []).map(row => {
     const n = row.NEW || 0, r = row.REMOVED || 0;
     return `<tr><td>${row.sev}</td><td>${n}</td><td>${r}</td></tr>`;
   }).join('');
   const nvrTable = `<table>${nvrHeader}<tbody>${nvrRows}</tbody></table>`;
 
   const stkHeader = `<thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>`;
-  const stkRows = (dash.stacked || []).map(row => {
+  const stkRows = (dash?.stacked || []).map(row => {
     const n = row.NEW || 0, r = row.REMOVED || 0, u = row.UNCHANGED || 0;
     return `<tr><td>${row.sev}</td><td>${n}</td><td>${r}</td><td>${u}</td></tr>`;
   }).join('');
   const stkTable = `<table>${stkHeader}<tbody>${stkRows}</tbody></table>`;
 
-  // --- Tablas por módulo (view.precomputed.aggregates.by_module_severity_state) ---
+  // Per-module numeric tables (si tu precompute las expone así)
   let moduleTablesHtml = '';
   const byMod = view?.precomputed?.aggregates?.by_module_severity_state || {};
-  const sevOrderArr = Object.keys(SEV_ORDER).sort((a,b)=>SEV_ORDER[b]-SEV_ORDER[a]);
-
+  const sevOrder = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0 };
+  const sevOrderArr = Object.keys(sevOrder).sort((a,b)=>sevOrder[b]-sevOrder[a]);
   const modNames = Object.keys(byMod).sort((a,b)=>a.localeCompare(b, 'en', {sensitivity:'base'}));
   if (modNames.length) {
     const tables = modNames.map(mod => {
@@ -239,44 +251,82 @@ ${moduleTablesHtml}
 <script>
   (function(){
     var DASH = ${dataJson};
+
     function ready(){
       try{
-        if (typeof Chart === 'undefined') { window.__chartsReady = true; return; }
-        var ctx1 = document.getElementById('chart-state-totals').getContext('2d');
-        new Chart(ctx1, { type: 'bar',
-          data: { labels: ['NEW','REMOVED','UNCHANGED'], datasets: [{ label: 'Count', data: DASH.stateTotals }] },
-          options: { responsive:false, animation:false }
-        });
+        if (typeof Chart === 'undefined') {
+          // Si no hay Chart.js, marcamos listo igualmente
+          window.__chartsReady = true;
+          window.__mermaidReady = true;
+          return;
+        }
 
-        var labels2 = (DASH.newVsRemoved || []).map(function(x){ return x.sev; });
-        var dataNew = (DASH.newVsRemoved || []).map(function(x){ return x.NEW || 0; });
-        var dataRemoved = (DASH.newVsRemoved || []).map(function(x){ return x.REMOVED || 0; });
-        var ctx2 = document.getElementById('chart-new-removed').getContext('2d');
-        new Chart(ctx2, {
-          type: 'bar',
-          data: { labels: labels2, datasets: [{ label: 'NEW', data: dataNew }, { label: 'REMOVED', data: dataRemoved }] },
-          options: { responsive:false, animation:false }
-        });
+        // Chart 1: Distribution by State
+        try {
+          var ctx1 = document.getElementById('chart-state-totals').getContext('2d');
+          new Chart(ctx1, {
+            type: 'bar',
+            data: { labels: ['NEW','REMOVED','UNCHANGED'], datasets: [{ label: 'Count', data: DASH.stateTotals }] },
+            options: { responsive:false, animation:false }
+          });
+        } catch(e){}
 
-        var labels3 = (DASH.stacked || []).map(function(x){ return x.sev; });
-        var dNew = (DASH.stacked || []).map(function(x){ return x.NEW || 0; });
-        var dRem = (DASH.stacked || []).map(function(x){ return x.REMOVED || 0; });
-        var dUnc = (DASH.stacked || []).map(function(x){ return x.UNCHANGED || 0; });
-        var ctx3 = document.getElementById('chart-stacked').getContext('2d');
-        new Chart(ctx3, {
-          type: 'bar',
-          data: { labels: labels3, datasets: [{ label:'NEW', data:dNew }, { label:'REMOVED', data:dRem }, { label:'UNCHANGED', data:dUnc }] },
-          options: { responsive:false, animation:false, plugins:{ legend:{ position:'top' } }, scales:{ x:{ stacked:true }, y:{ stacked:true } } }
-        });
-        setTimeout(function(){ window.__chartsReady = true; }, 50);
-      } catch(e){ window.__chartsReady = true; }
+        // Chart 2: NEW vs REMOVED by Severity
+        try {
+          var labels2 = (DASH.newVsRemoved || []).map(function(x){ return x.sev; });
+          var dataNew = (DASH.newVsRemoved || []).map(function(x){ return x.NEW || 0; });
+          var dataRemoved = (DASH.newVsRemoved || []).map(function(x){ return x.REMOVED || 0; });
+          var ctx2 = document.getElementById('chart-new-removed').getContext('2d');
+          new Chart(ctx2, {
+            type: 'bar',
+            data: { labels: labels2, datasets: [{ label:'NEW', data:dataNew }, { label:'REMOVED', data:dataRemoved }] },
+            options: { responsive:false, animation:false }
+          });
+        } catch(e){}
+
+        // Chart 3: By Severity & State (stacked)
+        try {
+          var labels3 = (DASH.stacked || []).map(function(x){ return x.sev; });
+          var dNew = (DASH.stacked || []).map(function(x){ return x.NEW || 0; });
+          var dRem = (DASH.stacked || []).map(function(x){ return x.REMOVED || 0; });
+          var dUnc = (DASH.stacked || []).map(function(x){ return x.UNCHANGED || 0; });
+          var ctx3 = document.getElementById('chart-stacked').getContext('2d');
+          new Chart(ctx3, {
+            type: 'bar',
+            data: { labels: labels3, datasets: [{ label:'NEW', data:dNew }, { label:'REMOVED', data:dRem }, { label:'UNCHANGED', data:dUnc }] },
+            options: {
+              responsive:false, animation:false,
+              plugins:{ legend:{ position:'top' } },
+              scales:{ x:{ stacked:true }, y:{ stacked:true } }
+            }
+          });
+        } catch(e){}
+
+        // Señales para el exportador
+        setTimeout(function(){
+          window.__chartsReady = true;
+          window.__mermaidReady = true;
+        }, 50);
+      } catch(e){
+        window.__chartsReady = true;
+        window.__mermaidReady = true;
+      }
     }
-    if (typeof Chart !== 'undefined') { ready(); }
-    else { var t=setInterval(function(){ if (typeof Chart !== 'undefined'){clearInterval(t); ready();}},50); setTimeout(function(){clearInterval(t); window.__chartsReady=true;},5000); }
+
+    if (typeof Chart !== 'undefined') {
+      ready();
+    } else {
+      // Espera muy corta si Chart.js se inyecta en <head> con document.write
+      var t = setInterval(function(){
+        if (typeof Chart !== 'undefined') { clearInterval(t); ready(); }
+      }, 50);
+      setTimeout(function(){ clearInterval(t); window.__chartsReady = true; window.__mermaidReady = true; }, 5000);
+    }
   })();
 </script>
 `.trim();
 }
+
 
 // -------------------------------------------------------------
 // Dependency Paths (column order: Vulnerability - Package - Module → tail)
@@ -495,8 +545,23 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
 
   const vendorChartPath   = path.join(htmlRoot, 'assets', 'js', 'vendor', 'chart.umd.js');
   const vendorMermaidPath = path.join(htmlRoot, 'assets', 'js', 'vendor', 'mermaid.min.js');
-  const chartTag   = exists(vendorChartPath)   ? `<script src="file://${vendorChartPath}"></script>`   : '';
-  const mermaidTag = exists(vendorMermaidPath) ? `<script src="file://${vendorMermaidPath}"></script>` : '';
+
+  // Carga única (guard) para evitar evaluar 2 veces y romper Chart (Ae before initialization)
+  const chartTag = exists(vendorChartPath) ? `
+  <script>
+    if (!window.__CHART_JS_INCLUDED__) {
+      window.__CHART_JS_INCLUDED__ = true;
+      document.write('<script src="../html/assets/js/vendor/chart.umd.js"><\\/script>');
+    }
+  </script>` : '';
+
+  const mermaidTag = exists(vendorMermaidPath) ? `
+  <script>
+    if (!window.__MERMAID_INCLUDED__) {
+      window.__MERMAID_INCLUDED__ = true;
+      document.write('<script src="../html/assets/js/vendor/mermaid.min.js"><\\/script>');
+    }
+  </script>` : '';
 
   // Cover + TOC
   let bodyInner = coverHtml({
@@ -535,6 +600,8 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
     } else {
       const file = s.file ? path.join(sectionsDir, s.file) : null;
       inner = file ? await readTextSafe(file) : '';
+      inner = stripVendorScripts(inner);
+
       if (s.id === 'summary') {
         // quita "Generated at ..." redundante
         inner = inner
@@ -611,14 +678,13 @@ async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
   // Genera CSS de impresión en disco (no se inyecta inline para mantener tu ruta existente)
   await fsp.writeFile(path.join(assetsDir, 'print.css'), makePrintCss(), 'utf8');
 
-  // Logo -> data URI
-  const inputs = (view && view.inputs) ? view.inputs : {};
-  const logoDataUri = await getLogoDataUri(inputs.html_logo_url || '', distDir);
+    // View (Fase-3)
+    const view = buildView(absDist);
 
+    // Inputs + Logo -> data URI
+    const inputs = (view && view.inputs) ? view.inputs : {};
+    const logoDataUri = await getLogoDataUri(inputs.html_logo_url || '', distDir);
 
-
-  // View (Fase-3)
-  const view = buildView(absDist);
 
   // HTML completo para imprimir
   const html = await buildPrintHtml({ distDir: absDist, view, logoDataUri });
