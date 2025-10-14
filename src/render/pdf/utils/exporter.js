@@ -36,9 +36,13 @@ async function renderPdf({
   gotoTimeoutMs = 120000,  // timeout de carga
   visualsTimeoutMs = 60000 // timeout de charts/mermaid
 }) {
+
+
+  const executablePath = await puppeteer.executablePath();
   const browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-gpu', '--font-render-hinting=none']
+    executablePath,
+    args: ['--no-sandbox', '--disable-gpu', '--font-render-hinting=none'],
   });
 
   try {

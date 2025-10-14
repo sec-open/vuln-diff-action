@@ -13,7 +13,8 @@
   "scripts": {
     "build": "ncc build src/index.js -o .bundle --minify",
     "phase1": "node src/index.js",
-    "test": "echo \"No tests yet for Phase 1\""
+    "test": "echo \"No tests yet for Phase 1\"",
+    "postinstall": "puppeteer browsers install chrome@stable"
   },
   "engines": {
     "node": ">=18"
