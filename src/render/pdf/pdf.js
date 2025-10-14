@@ -539,40 +539,50 @@ function computeDashData(items = []) {
 // -------------------------------------------------------------
 // HTML completo para imprimir
 // -------------------------------------------------------------
-async function buildPrintHtml({ distDir, view, logoDataUri }) {
+// -------------------------------------------------------------
+// HTML completo para imprimir
+// -------------------------------------------------------------
+async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
+  // LOGS defensivos
+  console.log('[pdf/html] buildPrintHtml: start');
+  if (!view) console.warn('[pdf/html] buildPrintHtml: view is null/undefined');
+  if (!inputs) console.warn('[pdf/html] buildPrintHtml: inputs is null/undefined');
+  if (!logoDataUri) console.warn('[pdf/html] buildPrintHtml: logoDataUri empty');
+
   const htmlRoot = path.join(distDir, 'html');
   const sectionsDir = path.join(htmlRoot, 'sections');
 
   const vendorChartPath   = path.join(htmlRoot, 'assets', 'js', 'vendor', 'chart.umd.js');
   const vendorMermaidPath = path.join(htmlRoot, 'assets', 'js', 'vendor', 'mermaid.min.js');
 
-  // Carga única (guard) para evitar evaluar 2 veces y romper Chart (Ae before initialization)
+  // Carga única (guard) para evitar doble evaluación de Chart/Mermaid
   const chartTag = exists(vendorChartPath) ? `
-  <script>
-    if (!window.__CHART_JS_INCLUDED__) {
-      window.__CHART_JS_INCLUDED__ = true;
-      document.write('<script src="../html/assets/js/vendor/chart.umd.js"><\\/script>');
-    }
-  </script>` : '';
+<script>
+  if (!window.__CHART_JS_INCLUDED__) {
+    window.__CHART_JS_INCLUDED__ = true;
+    document.write('<script src="../html/assets/js/vendor/chart.umd.js"><\\/script>');
+  }
+</script>` : '';
 
   const mermaidTag = exists(vendorMermaidPath) ? `
-  <script>
-    if (!window.__MERMAID_INCLUDED__) {
-      window.__MERMAID_INCLUDED__ = true;
-      document.write('<script src="../html/assets/js/vendor/mermaid.min.js"><\\/script>');
-    }
-  </script>` : '';
+<script>
+  if (!window.__MERMAID_INCLUDED__) {
+    window.__MERMAID_INCLUDED__ = true;
+    document.write('<script src="../html/assets/js/vendor/mermaid.min.js"><\\/script>');
+  }
+</script>` : '';
 
   // Cover + TOC
   let bodyInner = coverHtml({
-    repo: view.repo,
-    base: view.base,
-    head: view.head,
-    inputs, // <-- usa inputs.baseRef / inputs.headRef
-    generatedAt: view.generatedAt,
+    repo: view?.repo,
+    base: view?.base,
+    head: view?.head,
+    inputs: inputs || {},            // ← AHORA ES PARÁMETRO
+    generatedAt: view?.generatedAt,
     logoDataUri
   });
-  bodyInner += '\n' + tocHtml(view.repo);
+
+  bodyInner += '\n' + tocHtml(view?.repo);
 
   const diff = await loadDiff(distDir);
   const items = (view && Array.isArray(view.items)) ? view.items : (diff?.items || []);
@@ -585,12 +595,15 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
     innerHtml: await buildResultsTablesHtml(distDir),
   });
 
-  // Resto de secciones plan
+  // Resto de secciones
   for (const s of sectionPlan().filter(x => x.num !== 3)) {
     let inner = '';
     if (s.id === 'dashboard') {
       const dash = computeDashData(diff?.items || []);
       inner = buildPdfDashboardHtml(dash, view);
+      // Señales para el exportador, por si no hay scripts activos
+      inner += `
+<script>try{window.__chartsReady=true;window.__mermaidReady=true;}catch(e){}</script>`;
     } else if (s.id === 'dep-paths-base') {
       inner = buildDependencyPathsSection(items, 'base');
     } else if (s.id === 'dep-paths-head') {
@@ -600,16 +613,14 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
     } else {
       const file = s.file ? path.join(sectionsDir, s.file) : null;
       inner = file ? await readTextSafe(file) : '';
-      inner = stripVendorScripts(inner);
-
       if (s.id === 'summary') {
         // quita "Generated at ..." redundante
         inner = inner
-          .replace(/<h3[^>]*>\s*Tools\s*<\/h3>/i, '<h3 class="subsection-title">Tools</h3>')
-          .replace(/<h3[^>]*>\s*Inputs\s*<\/h3>/i, '<h3 class="subsection-title">Inputs</h3>')
-          .replace(/<h3[^>]*>\s*Base\s*<\/h3>/i, '<h3 class="subsection-title">Base</h3>')
-          .replace(/<h3[^>]*>\s*Head\s*<\/h3>/i, '<h3 class="subsection-title">Head</h3>')
-          .replace(/<p>\s*Generated at\s+[^<]*<\/p>/i, '');
+          .replace(/<h3[^>]*>\s*Tools\s*<\/h3>/i, '\n\n### Tools\n\n')
+          .replace(/<h3[^>]*>\s*Inputs\s*<\/h3>/i, '\n\n### Inputs\n\n')
+          .replace(/<h3[^>]*>\s*Base\s*<\/h3>/i, '\n\n### Base\n\n')
+          .replace(/<h3[^>]*>\s*Head\s*<\/h3>/i, '\n\n### Head\n\n')
+          .replace(/\s*<p>\s*Generated at\s+[^<]*<\/p>/i, '');
       }
     }
     bodyInner += '\n' + sectionWrapper({ id: s.id, title: s.title, num: s.num, innerHtml: inner });
@@ -617,94 +628,77 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
 
   const printCssHref = './assets/print.css';
 
-  const mermaidInit = `
-<script>
-  (function(){
-    function bootstrapMermaid() {
-      try {
-        if (!window.mermaid) { window.__mermaidReady = true; return; }
-        window.mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' });
-        var blocks = Array.from(document.querySelectorAll('.mermaid, pre code.language-mermaid'));
-        blocks.forEach(function(el){
-          if (el.tagName && el.tagName.toLowerCase() === 'code') {
-            var code = el.textContent;
-            var host = document.createElement('div');
-            host.className = 'mermaid';
-            host.textContent = code;
-            el.parentElement.replaceWith(host);
-          }
-        });
-        window.mermaid.run().then(function(){ window.__mermaidReady = true; })
-                           .catch(function(){ window.__mermaidReady = true; });
-      } catch(e) { window.__mermaidReady = true; }
-    }
-    if (window.mermaid) { bootstrapMermaid(); }
-    else {
-      var tries = 0, max = 100, t = setInterval(function(){
-        if (window.mermaid) { clearInterval(t); bootstrapMermaid(); }
-        else if (++tries >= max) { clearInterval(t); window.__mermaidReady = true; }
-      }, 50);
-    }
-  })();
-</script>`.trim();
-
+  console.log('[pdf/html] buildPrintHtml: done');
   return `
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8"/>
+  <meta charset="utf-8" />
+  <title>Vulnerability Diff Report — ${view?.repo}</title>
   <link rel="stylesheet" href="${printCssHref}">
   ${chartTag}
   ${mermaidTag}
-  <title>Vulnerability Diff Report — ${view.repo}</title>
 </head>
 <body>
-${bodyInner}
-${mermaidInit}
+  ${bodyInner}
 </body>
 </html>
-`.trim();
+  `.trim();
 }
+
 
 // -------------------------------------------------------------
 // Orquestador PDF
 // -------------------------------------------------------------
+// -------------------------------------------------------------
+// Orquestador PDF
+// -------------------------------------------------------------
 async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
+  console.log('[pdf/orch] start');
   const absDist = path.resolve(distDir);
   const pdfDir = path.join(absDist, 'pdf');
   const assetsDir = path.join(pdfDir, 'assets');
   await fsp.mkdir(assetsDir, { recursive: true });
 
-  // Genera CSS de impresión en disco (no se inyecta inline para mantener tu ruta existente)
+  // Genera CSS de impresión en disco (ruta existente: ./dist/pdf/assets/print.css)
   await fsp.writeFile(path.join(assetsDir, 'print.css'), makePrintCss(), 'utf8');
 
-    // View (Fase-3)
-    const view = buildView(absDist);
+  // View (Fase-3)
+  const view = buildView(absDist);
+  if (!view) {
+    console.error('[pdf/orch] buildView returned null/undefined');
+  }
 
-    // Inputs + Logo -> data URI
-    const inputs = (view && view.inputs) ? view.inputs : {};
-    const logoDataUri = await getLogoDataUri(inputs.html_logo_url || '', distDir);
-
+  // Inputs + logo (data URI)
+  const inputs = (view && view.inputs) ? view.inputs : {};
+  if (!inputs || Object.keys(inputs).length === 0) {
+    console.warn('[pdf/inputs] view.inputs is empty/undefined');
+  }
+  // prioriza el input directo si te llega como param, si no, el de view.inputs
+  const logoSource = html_logo_url || inputs.html_logo_url || '';
+  const logoDataUri = await getLogoDataUri(logoSource, distDir);
+  if (!logoDataUri) console.warn('[pdf/inputs] logoDataUri is empty (logo may be missing in cover/header/footer)');
 
   // HTML completo para imprimir
-  const html = await buildPrintHtml({ distDir: absDist, view, logoDataUri });
+  const html = await buildPrintHtml({ distDir: absDist, view, inputs, logoDataUri });
   const printHtmlPath = path.join(pdfDir, 'print.html');
   await fsp.writeFile(printHtmlPath, html, 'utf8');
 
-   // --- Exportación a PDF con puppeteer (utils/exporter.js) ---
+  // Exportación a PDF
+  try {
     await renderPdf({
       printHtmlPath,
       pdfDir,
       headerHtml: headerTemplate({
         logoDataUri,
-        repo: view.repo,
-        generatedAt: view.generatedAt
+        repo: view?.repo,
+        generatedAt: view?.generatedAt
       }),
       footerHtml: footerTemplate({
         logoDataUri,
-        baseRef: inputs.baseRef || view.base.ref,   // <-- inputs
-        headRef: inputs.headRef || view.head.ref,   // <-- inputs
-        generatedAt: view.generatedAt
+        baseRef: inputs.baseRef || view?.base?.ref,
+        headRef: inputs.headRef || view?.head?.ref,
+        generatedAt: view?.generatedAt
       }),
       marginTop: '60px',
       marginBottom: '60px',
@@ -713,8 +707,12 @@ async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
       gotoTimeoutMs: 120000,
       visualsTimeoutMs: 60000
     });
-
-
+    console.log('[pdf/orch] done');
+  } catch (e) {
+    console.error('[pdf/orch] renderPdf failed:', e && e.message ? e.message : e);
+    throw new Error(`[vuln-diff] Render failed in pdf_init: ${e && e.message ? e.message : e}`);
+  }
 }
+
 
 module.exports = { pdf_init };
