@@ -45,26 +45,6 @@ const vulnLink = (it) => {
   return url ? `<a href="${url}">${id}</a>` : id;
 };
 
-// TOC — títulos actualizados (3 = Results tables)
-function tocHtml(repo) {
-  return `
-<div class="page section-wrap toc">
-  <h2>Table of Contents — ${repo}</h2>
-  <ol>
-    <li>1. Introduction</li>
-    <li>2. Summary</li>
-    <li>3. Results tables</li>
-    <li>4. Dashboard</li>
-    <li>5. Dependency Graph — Base</li>
-    <li>6. Dependency Graph — Head</li>
-    <li>7. Dependency Paths — Base</li>
-    <li>8. Dependency Paths — Head</li>
-    <li>9. Fix Insights</li>
-  </ol>
-</div>
-`.trim();
-}
-
 // -------------------------------------------------------------
 // Secciones
 // -------------------------------------------------------------
