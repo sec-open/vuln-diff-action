@@ -2,40 +2,38 @@
 /* eslint-disable no-console */
 const path = require('path');
 const fs = require('fs');
-const cp = require('child_process');
-const os = require('os');
 const fsp = fs.promises;
+
 const puppeteer = require('puppeteer');
+const { install, computeExecutablePath } = require('@puppeteer/browsers');
 const { PDFDocument } = require('pdf-lib');
 
-
 async function ensureChromePath() {
-  // Intenta localizar el ejecutable que Puppeteer haya instalado
-  try {
-    const p = await puppeteer.executablePath();
-    if (p && fs.existsSync(p)) return p;
-  } catch (_) { /* seguimos */ }
+  // 0) Si el runner te da un binario explícito, úsalo
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    const p = process.env.PUPPETEER_EXECUTABLE_PATH;
+    try { fs.accessSync(p, fs.constants.X_OK); return p; } catch {}
+  }
 
-  // Si no existe, instalamos en runtime Chrome for Testing estable, en una cache que controlamos
+  // 1) Instalar Chrome for Testing en una caché controlada por el repo
   const cacheDir = path.join(process.cwd(), '.puppeteer-cache');
-  const env = { ...process.env, PUPPETEER_CACHE_DIR: cacheDir };
+  const browser = 'chrome';     // Chrome for Testing
+  const buildId = 'stable';     // canal estable
 
+  // Si ya existe en cacheDir, computeExecutablePath lo devolverá
   try {
-    // Instalación silenciosa y reproducible
-    cp.execSync('npx puppeteer browsers install chrome@stable --cache-dir "' + cacheDir + '"', {
-      stdio: 'inherit',
-      env,
-    });
+    // Asegura que exista (idempotente): si ya está, no volverá a descargar
+    await install({ cacheDir, browser, buildId, downloadProgressCallback: () => {} });
   } catch (e) {
-    throw new Error(`[pdf] Failed to install Chrome for Puppeteer: ${e?.message || e}`);
+    throw new Error(`[pdf] Failed to install Chrome for Testing: ${e?.message || e}`);
   }
 
-  // Resuelve de nuevo el ejecutable
-  const p = await puppeteer.executablePath();
-  if (!p || !fs.existsSync(p)) {
-    throw new Error('[pdf] Chrome executable not found after install.');
+  // 2) Resolver la ruta del ejecutable dentro de esa caché
+  const execPath = computeExecutablePath({ cacheDir, browser, buildId });
+  if (!execPath || !fs.existsSync(execPath)) {
+    throw new Error(`[pdf] Chrome executable not found in cache: ${execPath || '(empty)'} (cacheDir=${cacheDir})`);
   }
-  return p;
+  return execPath;
 }
 
 async function waitForVisuals(page, { timeout = 60000 } = {}) {
@@ -71,11 +69,13 @@ async function renderPdf({
 
 
     const executablePath = await ensureChromePath();
+
     const browser = await puppeteer.launch({
       headless: true,
       executablePath,
       args: ['--no-sandbox', '--disable-gpu', '--font-render-hinting=none'],
     });
+
 
 
   try {

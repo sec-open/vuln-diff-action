@@ -13,8 +13,7 @@
   "scripts": {
     "build": "ncc build src/index.js -o .bundle --minify",
     "phase1": "node src/index.js",
-    "test": "echo \"No tests yet for Phase 1\"",
-    "postinstall": "puppeteer browsers install chrome@stable"
+    "test": "echo \"No tests yet for Phase 1\""
   },
   "engines": {
     "node": ">=18"
@@ -24,7 +23,8 @@
     "@actions/core": "^1.11.1",
     "@actions/github": "^6.0.0",
     "puppeteer": "^24.15.0",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "@puppeteer/browsers": "^2.4.1"
   },
   "devDependencies": {
     "@vercel/ncc": "^0.38.3"
