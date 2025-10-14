@@ -11,6 +11,8 @@ const { headerTemplate, footerTemplate, getLogoDataUri } = require('./sections/h
 const { tocHtml } = require('./sections/toc');
 const { introHtml } = require('./sections/introduction');
 const { buildResultsTablesHtml } = require('./sections/results');
+const core = require('@actions/core');
+
 // -------------------------------------------------------------
 // Utils
 // -------------------------------------------------------------
@@ -636,10 +638,25 @@ async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
   await fsp.writeFile(path.join(assetsDir, 'print.css'), makePrintCss(), 'utf8');
 
   // View (Fase-3)
+  // View (Fase-3)
   const view = buildView(absDist);
-  if (!view) {
-    console.error('[pdf/orch] buildView returned null/undefined');
-  }
+    if (!view) {
+      console.error('[pdf/orch] buildView returned null/undefined');
+    }
+  // Inputs + logo (data URI)
+  const inputs = (view && view.inputs) ? view.inputs : {};
+
+  // lee el input del Action (y fallbacks), NO viene en view.inputs
+  const logoSource =
+    core.getInput('html_logo_url') ||           // ← LA CLAVE
+    inputs.html_logo_url || inputs.htmlLogoUrl || // por si en el futuro lo añades al view
+    process.env.INPUT_HTML_LOGO_URL ||          // GH Actions expone los "with:" como env
+    '';
+
+  const logoDataUri = await getLogoDataUri(logoSource, distDir);
+  if (!logoDataUri) console.warn('[pdf/inputs] logoDataUri is empty (logo may be missing in cover/header/footer)');
+
+
 
   // Inputs + logo (data URI)
   const inputs = (view && view.inputs) ? view.inputs : {};
