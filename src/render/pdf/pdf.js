@@ -658,15 +658,6 @@ async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
 
 
 
-  // Inputs + logo (data URI)
-  if (!inputs || Object.keys(inputs).length === 0) {
-    console.warn('[pdf/inputs] view.inputs is empty/undefined');
-  }
-  // prioriza el input directo si te llega como param, si no, el de view.inputs
-  const logoSource = html_logo_url || inputs.html_logo_url || '';
-  const logoDataUri = await getLogoDataUri(logoSource, distDir);
-  if (!logoDataUri) console.warn('[pdf/inputs] logoDataUri is empty (logo may be missing in cover/header/footer)');
-
   // HTML completo para imprimir
   const html = await buildPrintHtml({ distDir: absDist, view, inputs, logoDataUri });
   const printHtmlPath = path.join(pdfDir, 'print.html');
