@@ -22,7 +22,8 @@
     "@actions/artifact": "^2.2.1",
     "@actions/core": "^1.11.1",
     "@actions/github": "^6.0.0",
-    "playwright": "^1.48.0",
+    "puppeteer-core": "^24.15.0",
+    "@puppeteer/browsers": "^2.4.1",
     "pdf-lib": "^1.17.1"
   },
   "devDependencies": {

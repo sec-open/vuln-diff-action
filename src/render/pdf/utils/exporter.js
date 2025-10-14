@@ -3,8 +3,41 @@
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
-const { chromium } = require('playwright'); // ← Playwright
+
+const puppeteer = require('puppeteer-core');
+const { install, computeExecutablePath } = require('@puppeteer/browsers');
 const { PDFDocument } = require('pdf-lib');
+
+/**
+ * Descarga (si hace falta) y devuelve el ejecutable de **Chrome for Testing (stable)**
+ * en una caché LOCAL del repo, independiente del runner.
+ */
+async function ensureChromeForPuppeteer() {
+  const cacheDir = path.join(process.cwd(), '.chrome-for-testing');
+
+  // Si el runner te da un binario, úsalo
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    const p = process.env.PUPPETEER_EXECUTABLE_PATH;
+    try { fs.accessSync(p, fs.constants.X_OK); return p; } catch { /* seguimos */ }
+  }
+
+  const browser = 'chrome';   // Chrome for Testing
+  const buildId = 'stable';   // canal estable (no snapshots)
+
+  // Idempotente: si ya está cacheado, NO descarga de nuevo
+  await install({
+    cacheDir,
+    browser,
+    buildId,
+    downloadProgressCallback: () => {}, // silencio en CI
+  });
+
+  const execPath = computeExecutablePath({ cacheDir, browser, buildId });
+  if (!execPath || !fs.existsSync(execPath)) {
+    throw new Error(`[pdf] Chrome executable not found in ${cacheDir}`);
+  }
+  return execPath;
+}
 
 async function waitForVisuals(page, { timeout = 60000 } = {}) {
   try {
@@ -12,17 +45,16 @@ async function waitForVisuals(page, { timeout = 60000 } = {}) {
       () => (window.__chartsReady === true) && (window.__mermaidReady === true),
       { timeout }
     );
-    await page.waitForTimeout(250); // pequeño settle
+    await page.waitForTimeout(250);
   } catch {
     // continuar aunque no estén listos
   }
 }
 
 /**
- * Renderiza print.html en dos pasadas:
- *   1) Portada (pág.1) sin header/footer
- *   2) Resto (pág.2..n) con header/footer
- * Une ambos en dist/pdf/report.pdf
+ * Renderiza print.html en dos pasadas y une:
+ *  1) Portada (pág.1) sin header/footer
+ *  2) Resto (pág.2..n) con header/footer
  */
 async function renderPdf({
   printHtmlPath,
@@ -36,49 +68,46 @@ async function renderPdf({
   gotoTimeoutMs = 120000,
   visualsTimeoutMs = 60000,
 }) {
-  // Playwright trae su propio Chromium (descargado en la instalación de la lib)
-  const browser = await chromium.launch({
+  const executablePath = await ensureChromeForPuppeteer();
+
+  const browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox'],
+    executablePath,
+    args: ['--no-sandbox', '--disable-gpu', '--font-render-hinting=none'],
   });
 
   try {
-    const context = await browser.newContext({
-      viewport: null,              // usa tamaño del contenido/CSS @page
-      deviceScaleFactor: 1,
-    });
-    const page = await context.newPage();
-
+    const page = await browser.newPage();
     await page.goto(`file://${printHtmlPath}`, { waitUntil: 'load', timeout: gotoTimeoutMs });
 
-    // Esperar a charts/mermaid como en Puppeteer
+    // Esperar charts/mermaid
     await waitForVisuals(page, { timeout: visualsTimeoutMs });
 
-    // 1) Portada (sin header/footer)
+    // 1) Portada sin header/footer
     const coverTmp = path.join(pdfDir, 'cover.tmp.pdf');
     await page.pdf({
-      path: coverTmp,
       printBackground: true,
+      preferCSSPageSize: true,
       displayHeaderFooter: false,
       pageRanges: '1',
-      preferCSSPageSize: true,
+      path: coverTmp,
       margin: { top: marginTop, bottom: marginBottom, left: marginLeft, right: marginRight },
     });
 
-    // 2) Resto (con header/footer)
+    // 2) Resto con header/footer
     const restTmp = path.join(pdfDir, 'rest.tmp.pdf');
     await page.pdf({
-      path: restTmp,
       printBackground: true,
+      preferCSSPageSize: true,
       displayHeaderFooter: true,
       headerTemplate: headerHtml,
       footerTemplate: footerHtml,
       pageRanges: '2-',
-      preferCSSPageSize: true,
+      path: restTmp,
       margin: { top: marginTop, bottom: marginBottom, left: marginLeft, right: marginRight },
     });
 
-    // 3) Unir PDFs con pdf-lib (igual que tenías)
+    // 3) Unir PDFs con pdf-lib
     const coverDoc = await PDFDocument.load(await fsp.readFile(coverTmp));
     const restDoc  = await PDFDocument.load(await fsp.readFile(restTmp));
     const out = await PDFDocument.create();
