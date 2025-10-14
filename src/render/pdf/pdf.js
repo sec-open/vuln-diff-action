@@ -503,7 +503,7 @@ async function buildPrintHtml({ distDir, view, logoDataUri }) {
     repo: view.repo,
     base: view.base,
     head: view.head,
-    inputs: view.inputs, // <-- usa inputs.baseRef / inputs.headRef
+    inputs, // <-- usa inputs.baseRef / inputs.headRef
     generatedAt: view.generatedAt,
     logoDataUri
   });
@@ -612,7 +612,9 @@ async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
   await fsp.writeFile(path.join(assetsDir, 'print.css'), makePrintCss(), 'utf8');
 
   // Logo -> data URI
- const logoDataUri = await getLogoDataUri(inputs?.html_logo_url || '', distDir);
+  const inputs = (view && view.inputs) ? view.inputs : {};
+  const logoDataUri = await getLogoDataUri(inputs.html_logo_url || '', distDir);
+
 
 
   // View (Fase-3)
@@ -624,23 +626,28 @@ async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
   await fsp.writeFile(printHtmlPath, html, 'utf8');
 
    // --- Exportación a PDF con puppeteer (utils/exporter.js) ---
-   await renderPdf({
-     printHtmlPath,
-     pdfDir,
-     headerHtml: headerTemplate({ logoDataUri, repo: view.repo, generatedAt: view.generatedAt }),
-     footerHtml: footerTemplate({
-       logoDataUri,
-       baseRef: view.inputs?.baseRef || view.base.ref,
-       headRef: view.inputs?.headRef || view.head.ref,
-       generatedAt: view.generatedAt
-     }),
-     marginTop: '60px',
-     marginBottom: '60px',
-     marginLeft: '14mm',
-     marginRight: '14mm',
-     gotoTimeoutMs: 120000,
-     visualsTimeoutMs: 60000
-   });
+    await renderPdf({
+      printHtmlPath,
+      pdfDir,
+      headerHtml: headerTemplate({
+        logoDataUri,
+        repo: view.repo,
+        generatedAt: view.generatedAt
+      }),
+      footerHtml: footerTemplate({
+        logoDataUri,
+        baseRef: inputs.baseRef || view.base.ref,   // <-- inputs
+        headRef: inputs.headRef || view.head.ref,   // <-- inputs
+        generatedAt: view.generatedAt
+      }),
+      marginTop: '60px',
+      marginBottom: '60px',
+      marginLeft: '14mm',
+      marginRight: '14mm',
+      gotoTimeoutMs: 120000,
+      visualsTimeoutMs: 60000
+    });
+
 
 }
 
