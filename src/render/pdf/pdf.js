@@ -3,10 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
 const { fileURLToPath } = require('url');
-const { install, computeExecutablePath } = require('@puppeteer/browsers');
-const puppeteer = require('puppeteer-core');
 const { buildView } = require('../common/view');
-
+const { renderPdf } = require('./utils/exporter');
 // -------------------------------------------------------------
 // Utils
 // -------------------------------------------------------------
@@ -790,28 +788,6 @@ ${mermaidInit}
 `.trim();
 }
 
-
-async function ensureChromium() {
-  const cacheDir = path.join(process.cwd(), '.chromium-cache');
-
-  // 1) Si el runner ya aporta un Chrome/Chromium, úsalo
-  const execFromEnv = process.env.PUPPETEER_EXECUTABLE_PATH;
-  if (execFromEnv) {
-    try { fs.accessSync(execFromEnv, fs.constants.X_OK); return execFromEnv; } catch { /* seguir */ }
-  }
-
-  // 2) Chrome for Testing estable (fiable, sin 404)
-  const browser = 'chrome';
-  const buildId = 'stable';
-  await install({ cacheDir, browser, buildId, downloadProgressCallback: () => {} });
-
-  const executablePath = computeExecutablePath({ cacheDir, browser, buildId });
-  if (!executablePath) throw new Error(`[pdf] No executablePath for ${browser}@${buildId}`);
-  return executablePath;
-}
-
-
-
 // -------------------------------------------------------------
 // Orquestador PDF
 // -------------------------------------------------------------
@@ -853,73 +829,25 @@ async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
   const printHtmlPath = path.join(pdfDir, 'print.html');
   await fsp.writeFile(printHtmlPath, html, 'utf8');
 
-  // Puppeteer (Chromium portable)
-  const executablePath = await ensureChromium();
-  const browser = await puppeteer.launch({
-    headless: true,
-    executablePath,
-    args: ['--no-sandbox', '--disable-gpu', '--font-render-hinting=none'],
-  });
-  const page = await browser.newPage();
-  await page.goto(`file://${printHtmlPath}`, { waitUntil: 'load', timeout: 120000 });
+   // --- Exportación a PDF con puppeteer (utils/exporter.js) ---
+   await renderPdf({
+     printHtmlPath,
+     pdfDir,
+     headerHtml: headerTemplate({ logoDataUri, repo: view.repo, generatedAt: view.generatedAt }),
+     footerHtml: footerTemplate({
+       logoDataUri,
+       baseRef: view.inputs?.baseRef || view.base.ref,
+       headRef: view.inputs?.headRef || view.head.ref,
+       generatedAt: view.generatedAt
+     }),
+     marginTop: '60px',
+     marginBottom: '60px',
+     marginLeft: '14mm',
+     marginRight: '14mm',
+     gotoTimeoutMs: 120000,
+     visualsTimeoutMs: 60000
+   });
 
-  // Esperar gráficos/mermaid
-  try {
-    await page.waitForFunction(() => (window.__chartsReady === true) && (window.__mermaidReady === true), { timeout: 60000 });
-    await page.waitForTimeout(250);
-  } catch { /* continuar */ }
-
-  // Primera página sin header/footer
-  const coverPdf = await page.pdf({
-    printBackground: true,
-    preferCSSPageSize: true,
-    displayHeaderFooter: false,
-    pageRanges: '1',
-    path: path.join(pdfDir, 'cover.tmp.pdf'),
-  });
-
-  // Resto con header/footer (refs desde inputs)
-  const header = headerTemplate({ logoDataUri, repo: view.repo, generatedAt: view.generatedAt });
-  const footer = footerTemplate({
-    logoDataUri,
-    baseRef: view.inputs?.baseRef || view.base.ref,
-    headRef: view.inputs?.headRef || view.head.ref,
-    generatedAt: view.generatedAt
-  });
-
-  const restPdf = await page.pdf({
-    printBackground: true,
-    preferCSSPageSize: true,
-    displayHeaderFooter: true,
-    headerTemplate: header,
-    footerTemplate: footer,
-    margin: { top: '60px', bottom: '60px', left: '14mm', right: '14mm' },
-    pageRanges: '2-',
-    path: path.join(pdfDir, 'rest.tmp.pdf'),
-  });
-
-  await browser.close();
-
-  // Unir PDFs (portada + resto) con pdf-lib
-  const { PDFDocument } = require('pdf-lib');
-  const coverDoc = await PDFDocument.load(await fsp.readFile(path.join(pdfDir, 'cover.tmp.pdf')));
-  const restDoc  = await PDFDocument.load(await fsp.readFile(path.join(pdfDir, 'rest.tmp.pdf')));
-  const out = await PDFDocument.create();
-  const [coverPage] = await out.copyPages(coverDoc, [0]);
-  out.addPage(coverPage);
-  const restPages = await out.copyPages(restDoc, restDoc.getPageIndices());
-  restPages.forEach((p) => out.addPage(p));
-  const bytes = await out.save();
-  const outPath = path.join(pdfDir, 'report.pdf');
-  await fsp.writeFile(outPath, bytes);
-
-  // limpiar temporales
-  await Promise.allSettled([
-    fsp.unlink(path.join(pdfDir, 'cover.tmp.pdf')),
-    fsp.unlink(path.join(pdfDir, 'rest.tmp.pdf')),
-  ]);
-
-  console.log(`[pdf] written: ${outPath}`);
 }
 
 module.exports = { pdf_init };
