@@ -9,34 +9,65 @@ const { install, computeExecutablePath } = require('@puppeteer/browsers');
 const { PDFDocument } = require('pdf-lib');
 
 /**
- * Descarga (si hace falta) y devuelve el ejecutable de **Chrome for Testing (stable)**
- * en una caché LOCAL del repo, independiente del runner.
+ * Devuelve una ruta ejecutable si existe y es ejecutable.
  */
-async function ensureChromeForPuppeteer() {
+function isExecutable(p) {
+  try { fs.accessSync(p, fs.constants.X_OK); return true; } catch { return false; }
+}
+
+/**
+ * Intenta resolver un Chrome/Chromium ya presente en el runner.
+ */
+function resolveSystemChrome() {
+  const candidates = [
+    process.env.PUPPETEER_EXECUTABLE_PATH, // si el workflow la define
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser'
+  ].filter(Boolean);
+
+  for (const p of candidates) {
+    if (isExecutable(p)) return p;
+  }
+  return null;
+}
+
+/**
+ * Descarga (si hace falta) y devuelve el ejecutable de **Chrome for Testing (stable)**
+ * en una caché LOCAL del repo. Si falla con 404, devuelve null (no rompe).
+ */
+async function resolveChromeForTesting() {
   const cacheDir = path.join(process.cwd(), '.chrome-for-testing');
+  const browser = 'chrome';
+  const buildId = 'stable';
 
-  // Si el runner te da un binario, úsalo
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    const p = process.env.PUPPETEER_EXECUTABLE_PATH;
-    try { fs.accessSync(p, fs.constants.X_OK); return p; } catch { /* seguimos */ }
+  try {
+    await install({ cacheDir, browser, buildId, downloadProgressCallback: () => {} });
+    const execPath = computeExecutablePath({ cacheDir, browser, buildId });
+    if (execPath && fs.existsSync(execPath)) return execPath;
+  } catch (e) {
+    // No abortamos por 404 ni por bloqueos de red; seguimos con otros métodos
+    console.warn('[pdf] Chrome for Testing install failed or unavailable:', e?.message || e);
   }
+  return null;
+}
 
-  const browser = 'chrome';   // Chrome for Testing
-  const buildId = 'stable';   // canal estable (no snapshots)
+/**
+ * Resuelve la ruta del ejecutable de navegador a usar con puppeteer-core,
+ * priorizando: 1) sistema  2) Chrome for Testing (stable).
+ */
+async function ensureBrowserPath() {
+  // 1) Chrome del sistema (más fiable en runners, evita 404)
+  const sys = resolveSystemChrome();
+  if (sys) return sys;
 
-  // Idempotente: si ya está cacheado, NO descarga de nuevo
-  await install({
-    cacheDir,
-    browser,
-    buildId,
-    downloadProgressCallback: () => {}, // silencio en CI
-  });
+  // 2) Chrome for Testing (stable) cacheado localmente
+  const cft = await resolveChromeForTesting();
+  if (cft) return cft;
 
-  const execPath = computeExecutablePath({ cacheDir, browser, buildId });
-  if (!execPath || !fs.existsSync(execPath)) {
-    throw new Error(`[pdf] Chrome executable not found in ${cacheDir}`);
-  }
-  return execPath;
+  // Si llegamos aquí, no hay navegador usable
+  throw new Error('[pdf] No Chrome/Chromium executable available (system not found, Chrome for Testing download failed).');
 }
 
 async function waitForVisuals(page, { timeout = 60000 } = {}) {
@@ -45,9 +76,9 @@ async function waitForVisuals(page, { timeout = 60000 } = {}) {
       () => (window.__chartsReady === true) && (window.__mermaidReady === true),
       { timeout }
     );
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(250); // pequeño settle
   } catch {
-    // continuar aunque no estén listos
+    // Continuar aunque no estén listos (no rompemos)
   }
 }
 
@@ -68,7 +99,7 @@ async function renderPdf({
   gotoTimeoutMs = 120000,
   visualsTimeoutMs = 60000,
 }) {
-  const executablePath = await ensureChromeForPuppeteer();
+  const executablePath = await ensureBrowserPath();
 
   const browser = await puppeteer.launch({
     headless: true,
@@ -80,10 +111,10 @@ async function renderPdf({
     const page = await browser.newPage();
     await page.goto(`file://${printHtmlPath}`, { waitUntil: 'load', timeout: gotoTimeoutMs });
 
-    // Esperar charts/mermaid
+    // Esperar charts/mermaid (si están)
     await waitForVisuals(page, { timeout: visualsTimeoutMs });
 
-    // 1) Portada sin header/footer
+    // 1) Portada (sin header/footer)
     const coverTmp = path.join(pdfDir, 'cover.tmp.pdf');
     await page.pdf({
       printBackground: true,
@@ -94,7 +125,7 @@ async function renderPdf({
       margin: { top: marginTop, bottom: marginBottom, left: marginLeft, right: marginRight },
     });
 
-    // 2) Resto con header/footer
+    // 2) Resto (con header/footer)
     const restTmp = path.join(pdfDir, 'rest.tmp.pdf');
     await page.pdf({
       printBackground: true,
