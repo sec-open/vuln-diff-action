@@ -70,48 +70,66 @@ async function getLogoDataUri(logoInput, distDir) {
     return '';
   }
 }
-
-/** Header con banda oscura (SVG) + logo como background-image */
+// Reemplaza SOLO esta función
 function headerTemplate({ logoDataUri, repo, generatedAt }) {
   const band = '#0b0f16';
   const logoBlock = logoDataUri
     ? `<div style="width:120px;height:18px;background-image:url('${logoDataUri}');
-                    background-size:contain;background-repeat:no-repeat;background-position:left center;margin-right:8px;"></div>`
+                    background-size:contain;background-repeat:no-repeat;background-position:left center;margin-right:10px;flex:0 0 auto;"></div>`
     : '';
-
-  // SVG como banda de fondo: fiable en Puppeteer
-  const bandSvg = `<svg width="100%" height="36" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="36" fill="${band}"/></svg>`;
-
+  // Contenedor = la propia banda (altura fija). Flex para centrar verticalmente.
   return `
-  <div style="font-size:10px; color:#e5e7eb; width:100%;">
-    <div style="position:absolute; left:0; right:0; top:0; height:36px; z-index:0;">${bandSvg}</div>
-    <div style="position:relative; z-index:1; padding:8px 12px; display:flex; align-items:center; justify-content:space-between;">
-      <div style="display:flex; align-items:center;">${logoBlock}<span>Vulnerability Diff Report — ${repo || ''}</span></div>
-      <div>${generatedAt || ''}</div>
+  <div style="width:100%;">
+    <div style="
+      background:${band};
+      color:#e5e7eb;
+      height:36px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 12px;
+      font-size:10px;
+      line-height:1;
+    ">
+      <div style="display:flex;align-items:center;min-width:0;">
+        ${logoBlock}
+        <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+          Vulnerability Diff Report — ${repo || ''}
+        </span>
+      </div>
+      <div style="white-space:nowrap; margin-left:12px;">${generatedAt || ''}</div>
     </div>
   </div>
   `.trim();
 }
 
-/** Footer con banda oscura (SVG) + logo + page x/total */
+// Reemplaza SOLO esta función
 function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
   const band = '#0b0f16';
   const logoBlock = logoDataUri
     ? `<div style="width:100px;height:14px;background-image:url('${logoDataUri}');
-                    background-size:contain;background-repeat:no-repeat;background-position:left center;margin-right:8px;"></div>`
+                    background-size:contain;background-repeat:no-repeat;background-position:left center;margin-right:8px;flex:0 0 auto;"></div>`
     : '';
-
-  const bandSvg = `<svg width="100%" height="32" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="32" fill="${band}"/></svg>`;
-
   return `
-  <div style="font-size:10px; color:#e5e7eb; width:100%;">
-    <div style="position:absolute; left:0; right:0; bottom:0; height:32px; z-index:0;">${bandSvg}</div>
-    <div style="position:relative; z-index:1; padding:6px 12px; display:flex; align-items:center; justify-content:space-between;">
-      <div style="display:flex; align-items:center;">
+  <div style="width:100%;">
+    <div style="
+      background:${band};
+      color:#e5e7eb;
+      height:32px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 12px;
+      font-size:10px;
+      line-height:1;
+    ">
+      <div style="display:flex;align-items:center;min-width:0;">
         ${logoBlock}
-        <span>BASE: ${baseRef || ''} → HEAD: ${headRef || ''}</span>
+        <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+          BASE: ${baseRef || ''} → HEAD: ${headRef || ''}
+        </span>
       </div>
-      <div>
+      <div style="white-space:nowrap; margin-left:12px;">
         ${generatedAt || ''} &nbsp;—&nbsp;
         <span class="pageNumber"></span>/<span class="totalPages"></span>
       </div>
@@ -119,5 +137,6 @@ function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
   </div>
   `.trim();
 }
+
 
 module.exports = { headerTemplate, footerTemplate, getLogoDataUri };
