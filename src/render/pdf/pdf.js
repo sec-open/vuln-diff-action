@@ -462,42 +462,6 @@ async function buildFixInsightsFromJson(distDir) {
 }
 
 // -------------------------------------------------------------
-// Sección 3 (Results tables): 3.1 Diff, 3.2 Base, 3.3 Head
-// -------------------------------------------------------------
-async function buildResultsTablesHtml(distDir) {
-  const diff = await loadDiff(distDir);
-  const items = Array.isArray(diff?.items) ? diff.items : [];
-
-  const diffHtml = await buildVulnTableDiffOrFallback(distDir);
-
-  const baseHtml = buildVulnTableGeneric(
-    items,
-    (it) => {
-      const st = String(it.state || '').toUpperCase();
-      return st === 'REMOVED' || st === 'UNCHANGED';
-    },
-    '3.2 Vulnerability Base Table'
-  );
-
-  const headHtml = buildVulnTableGeneric(
-    items,
-    (it) => {
-      const st = String(it.state || '').toUpperCase();
-      return st === 'NEW' || st === 'UNCHANGED';
-    },
-    '3.3 Vulnerability Head Table'
-  );
-
-  // Encabezado de la sección 3
-  return `
-    <h3 class="subsection-title">3.1 Vulnerability Diff Table</h3>
-    ${diffHtml}
-    ${baseHtml}
-    ${headHtml}
-  `.trim();
-}
-
-// -------------------------------------------------------------
 // Dashboard data (igual que tu lógica actual)
 // -------------------------------------------------------------
 function computeDashData(items = []) {
