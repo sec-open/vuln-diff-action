@@ -1,47 +1,48 @@
+// src/render/pdf/sections/cover.js
 function coverHtml({ repo, base, head, inputs, generatedAt, logoDataUri }) {
-  const baseShaShort = base?.shaShort || '';
-  const headShaShort = head?.shaShort || '';
-  const baseShaLong = base?.sha || base?.commit || '';
-  const headShaLong = head?.sha || head?.commit || '';
-  const gen = new Date(generatedAt).toLocaleString('en-GB', {
-    timeZone: 'Europe/London',
-    weekday: 'short',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZoneName: 'short'
-  }).replace(',', '');
-  const logo = logoDataUri
-    ? `<img src="${logoDataUri}" style="height:36px;"/>`
-    : '';
+  const baseRef = inputs?.baseRef || base.ref;
+  const headRef = inputs?.headRef || head.ref;
 
   return `
-<section class="page cover">
-  <div class="cover-wrap">
-    <div class="cover-top">
-      ${logo}
-      <h1>Vulnerability Diff Report</h1>
-      <h2>${repo || ''}</h2>
-    </div>
-    <div class="cover-meta">
-      <div class="row">
-        <span>Base:</span>
-        <strong title="${baseShaLong}">${baseShaShort}</strong>
+    <section class="cover-page">
+      <div class="cover-top">
+        <div class="cover-brand">
+          ${logoDataUri ? `<img src="${logoDataUri}" alt="logo" />` : ''}
+        </div>
+        <div class="cover-meta">
+          <div class="cover-meta-ts">${generatedAt}</div>
+        </div>
       </div>
-      <div class="row">
-        <span>Head:</span>
-        <strong title="${headShaLong}">${headShaShort}</strong>
+
+      <div class="cover-title">
+        <div class="line1">Vulnerability Diff Report</div>
+        <div class="line2">${repo}</div>
       </div>
-      <div class="row">
-        <span>Generated:</span>
-        <strong>${gen}</strong>
+
+      <div class="cover-cards">
+        <div class="card-dark">
+          <div class="card-title">Base</div>
+          <div class="kv">
+            <div>Ref</div><div class="wrap">${baseRef || '—'}</div>
+            <div>SHA</div><div class="wrap">${base.shaShort}</div>
+            <div>Author</div><div class="wrap">${base.author}</div>
+            <div>Authored at</div><div class="wrap">${base.authoredAt}</div>
+            <div>Commit</div><div class="wrap">${base.commitSubject}</div>
+          </div>
+        </div>
+        <div class="card-dark">
+          <div class="card-title">Head</div>
+          <div class="kv">
+            <div>Ref</div><div class="wrap">${headRef || '—'}</div>
+            <div>SHA</div><div class="wrap">${head.shaShort}</div>
+            <div>Author</div><div class="wrap">${head.author}</div>
+            <div>Authored at</div><div class="wrap">${head.authoredAt}</div>
+            <div>Commit</div><div class="wrap">${head.commitSubject}</div>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
-</section>
-`.trim();
+    </section>
+  `.trim();
 }
 
 module.exports = { coverHtml };
