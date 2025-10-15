@@ -16,6 +16,7 @@ const { dashboardHtml } = require('./sections/dashboard');
 const { dependencyGraphsHtml } = require('./sections/dependencyGraphs');
 const { dependencyPathsHtml } = require('./sections/depPaths');
 const core = require('@actions/core');
+const { fixHtml } = require('./sections/fix');
 
 // -------------------------------------------------------------
 // Utils
@@ -533,11 +534,8 @@ async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
   bodyInner += '\n' + sectionWrapper({ id: 'dep-paths-base', title: '7. Dependency Paths — Base', num: 7, innerHtml: depBaseInner });
   bodyInner += '\n' + sectionWrapper({ id: 'dep-paths-head', title: '8. Dependency Paths — Head', num: 8, innerHtml: depHeadInner });
 
-  if (exists(path.join(sectionsDir, 'fix-insights.html'))) {
-    const fixHtml = await readTextSafe(path.join(sectionsDir, 'fix-insights.html'));
-    bodyInner += '\n' + sectionWrapper({ id: 'fix-insights', title: '9. Fix Insights', num: 9, innerHtml: fixHtml }) + '\n' +
-`<script>(function(){ if (window.__requireReady) window.__requireReady('fix-insights'); if (window.__markSectionReady) window.__markSectionReady('fix-insights'); })();</script>`;
-  }
+  const fixSection = await fixHtml(distDir);
+  bodyInner += '\n' + fixSection;
 
   const css = makePrintCss();
   const html =
