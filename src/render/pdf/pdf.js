@@ -485,7 +485,6 @@ function computeDashData(items = []) {
   const stacked = Object.keys(bySev).map(sev => ({ sev, ...bySev[sev] }));
   return { stateTotals, newVsRemoved, stacked };
 }
-
 async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
   const htmlRoot = path.join(distDir, 'html');
   const sectionsDir = path.join(htmlRoot, 'sections');
@@ -499,7 +498,7 @@ async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
 
   bodyInner += '\n' + summaryHtml(view);
 
-  bodyInner += '\n' + (await buildResultsTablesHtml(distDir));
+  bodyInner += '\n' + (await resultsHtml(distDir, view));
 
   const diff = await loadDiff(distDir);
   const dash = computeDashData((diff && Array.isArray(diff.items)) ? diff.items : []);
@@ -540,7 +539,6 @@ ${bodyInner}
 
   return html;
 }
-
 
 
 async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {

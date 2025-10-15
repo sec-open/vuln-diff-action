@@ -1,96 +1,107 @@
 // src/render/pdf/sections/results.js
 const fs = require('fs');
-const fsp = fs.promises;
 const path = require('path');
 
-const SEV_ORDER = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, UNKNOWN: 1 };
-const STATE_ORDER = { NEW: 3, REMOVED: 2, UNCHANGED: 1 };
-
-function safeGAV(pkg = {}) {
-  const g = pkg.groupId || '';
-  const a = pkg.artifactId || pkg.name || '';
-  const v = pkg.version ? `:${pkg.version}` : '';
-  return g ? `${g}:${a}${v}` : `${a}${v}`;
+function readJsonSafe(p) {
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
 }
 
-function linkCell(item) {
-  const id = item?.id || item?.vulnId || '';
-  const url = item?.url || '';
-  return url ? `<a href="${url}">${id}</a>` : id;
+function sevKey(s) { return String(s || 'UNKNOWN').toUpperCase(); }
+function stateKey(s) { return String(s || '').toUpperCase(); }
+function pkgStr(p) {
+  if (!p) return '';
+  if (typeof p === 'string') return p;
+  const n = p.name || '';
+  const v = p.version || '';
+  return v ? `${n}:${v}` : n;
 }
 
-function tableHtml(title, rows) {
-  const head = `
-    <thead>
-      <tr>
-        <th>Severity</th>
-        <th>Vulnerability</th>
-        <th>Package</th>
-        <th>State</th>
-      </tr>
-    </thead>`;
-  const body = rows.map(r => `
-      <tr>
-        <td>${r.severity}</td>
-        <td>${linkCell(r)}</td>
-        <td>${safeGAV(r.package || {})}</td>
-        <td>${r.state}</td>
-      </tr>`).join('');
-  return `
-    <h3 class="subsection-title">${title}</h3>
-    <table>${head}<tbody>${body || '<tr><td colspan="4">No vulnerabilities to display</td></tr>'}</tbody></table>
-  `.trim();
-}
+const SEV_ORDER = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0 };
 
-async function loadDiff(distDir) {
-  try {
-    const p = path.join(distDir, 'diff.json');
-    const raw = await fsp.readFile(p, 'utf8');
-    return JSON.parse(raw);
-  } catch { return null; }
-}
-
-function sortItems(items = []) {
-  return [...items].sort((a, b) => {
-    const sa = SEV_ORDER[a.severity] || 0;
-    const sb = SEV_ORDER[b.severity] || 0;
-    if (sa !== sb) return sb - sa; // desc severity
-    const ca = STATE_ORDER[a.state] || 0;
-    const cb = STATE_ORDER[b.state] || 0;
-    if (ca !== cb) return cb - ca; // NEW > REMOVED > UNCHANGED
-    const pa = safeGAV(a.package || {}).toLowerCase();
-    const pb = safeGAV(b.package || {}).toLowerCase();
-    return pa.localeCompare(pb);
+function sortRows(rows) {
+  return rows.sort((a, b) => {
+    const sa = SEV_ORDER[sevKey(a.severity)] || 0;
+    const sb = SEV_ORDER[sevKey(b.severity)] || 0;
+    if (sb !== sa) return sb - sa;
+    const ia = String(a.id || a.vulnerabilityId || '');
+    const ib = String(b.id || b.vulnerabilityId || '');
+    if (ia !== ib) return ia.localeCompare(ib, 'en', { sensitivity: 'base' });
+    const pa = pkgStr(a.package);
+    const pb = pkgStr(b.package);
+    if (pa !== pb) return pa.localeCompare(pb, 'en', { sensitivity: 'base' });
+    const sta = stateKey(a.state);
+    const stb = stateKey(b.state);
+    return sta.localeCompare(stb, 'en', { sensitivity: 'base' });
   });
 }
 
-async function buildResultsTablesHtml(distDir) {
-  const diff = await loadDiff(distDir);
-  const all = sortItems(diff?.items || []);
-
-  const diffRows = all; // 3.1: todos (diff)
-  const baseRows = all.filter(x => x.state === 'UNCHANGED' || x.state === 'REMOVED'); // 3.2
-  const headRows = all.filter(x => x.state === 'UNCHANGED' || x.state === 'NEW');     // 3.3
-
-  const sec31 = `
-<section class="page">
-  <h2 class="section-title">3.1 Vulnerability Diff Table</h2>
-  ${tableHtml('Vulnerability Diff Table', diffRows)}
-</section>`.trim();
-
-  const sec32 = `
-<section class="page page-break-before">
-  <h2 class="section-title">3.2 Vulnerability Base Table</h2>
-  ${tableHtml('Vulnerability Base Table', baseRows)}
-</section>`.trim();
-
-  const sec33 = `
-<section class="page page-break-before">
-  <h2 class="section-title">3.3 Vulnerability Head Table</h2>
-  ${tableHtml('Vulnerability Head Table', headRows)}
-</section>`.trim();
-
-  return [sec31, sec32, sec33].join('\n');
+function tableHtml(headers, rows) {
+  const thead = `<thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>`;
+  const tbody = rows.map(r => {
+    return `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`;
+  }).join('');
+  return `<table class="compact">${thead}<tbody>${tbody}</tbody></table>`;
 }
 
-module.exports = { buildResultsTablesHtml };
+function makeRow(o) {
+  const sev = sevKey(o.severity);
+  const id = o.id || o.vulnerabilityId || '';
+  const pkg = pkgStr(o.package);
+  const st = stateKey(o.state);
+  return [sev, id, pkg, st];
+}
+
+function buildDiffRows(items) {
+  return sortRows(items.slice());
+}
+
+function buildBaseRows(items) {
+  return sortRows(items.filter(x => {
+    const st = stateKey(x.state);
+    return st === 'REMOVED' || st === 'UNCHANGED';
+  }));
+}
+
+function buildHeadRows(items) {
+  return sortRows(items.filter(x => {
+    const st = stateKey(x.state);
+    return st === 'NEW' || st === 'UNCHANGED';
+  }));
+}
+
+async function resultsHtml(distDir, view) {
+  const diff = readJsonSafe(path.join(distDir, 'diff.json')) || {};
+  const items = Array.isArray(diff.items) ? diff.items : (Array.isArray(view?.diff?.items) ? view.diff.items : []);
+
+  const diffRows = buildDiffRows(items).map(makeRow);
+  const baseRows = buildBaseRows(items).map(makeRow);
+  const headRows = buildHeadRows(items).map(makeRow);
+
+  const headers = ['Severity','Vulnerability','Package','State'];
+
+  const sec3_1 = `
+<section class="page" id="results">
+  <h2>3. Vulnerability tables</h2>
+  <h3>3.1 Vulnerability Diff Table</h3>
+  ${tableHtml(headers, diffRows)}
+</section>
+`.trim();
+
+  const sec3_2 = `
+<section class="page" id="results-base">
+  <h3>3.2 Vulnerability Base Table</h3>
+  ${tableHtml(headers, baseRows)}
+</section>
+`.trim();
+
+  const sec3_3 = `
+<section class="page" id="results-head">
+  <h3>3.3 Vulnerability Head Table</h3>
+  ${tableHtml(headers, headRows)}
+</section>
+`.trim();
+
+  return `${sec3_1}\n${sec3_2}\n${sec3_3}`;
+}
+
+module.exports = { resultsHtml };
