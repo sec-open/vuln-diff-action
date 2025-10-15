@@ -35,11 +35,6 @@ function introHtml(view) {
   Node.js: <code>${tools.node || '-'}</code><br>
   Action: <code>sec-open/vuln-diff-action ${action.version || '-'}</code> (<code>${action.commit || '-'}</code>)</p>
 
-  <p><strong>Ficha resumen</strong><br>
-  - Diff totals: número de vulnerabilidades por estado (NEW, REMOVED, UNCHANGED).<br>
-  - Ramas: dos tarjetas, una por cada rama, con ref, SHA corto, y tabla de severidades (CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN).<br>
-  - Parámetros de entrada: tabla clave/valor con los parámetros del Action usados en la ejecución.
-  </p>
 </section>
   `.trim();
 

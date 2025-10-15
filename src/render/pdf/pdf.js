@@ -486,23 +486,9 @@ function computeDashData(items = []) {
   return { stateTotals, newVsRemoved, stacked };
 }
 
-// -------------------------------------------------------------
-// HTML completo para imprimir
-// -------------------------------------------------------------
-// -------------------------------------------------------------
-// HTML completo para imprimir
-// -------------------------------------------------------------
-// -------------------------------------------------------------
-// HTML completo para imprimir (reemplazo)
-// -------------------------------------------------------------
 async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
   const htmlRoot = path.join(distDir, 'html');
   const sectionsDir = path.join(htmlRoot, 'sections');
-
-  const vendorChartPath = path.join(htmlRoot, 'assets', 'js', 'vendor', 'chart.umd.js');
-  const vendorMermaidPath = path.join(htmlRoot, 'assets', 'js', 'vendor', 'mermaid.min.js');
-  const chartTag = exists(vendorChartPath) ? `<script src="file://${vendorChartPath}"></script>` : '';
-  const mermaidTag = exists(vendorMermaidPath) ? `<script src="file://${vendorMermaidPath}"></script>` : '';
 
   let bodyInner = '';
   bodyInner += coverHtml({ repo: view?.repo, base: view?.base, head: view?.head, inputs: inputs || {}, generatedAt: view?.generatedAt, logoDataUri });
@@ -518,7 +504,6 @@ async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
   const diff = await loadDiff(distDir);
   const dash = computeDashData((diff && Array.isArray(diff.items)) ? diff.items : []);
   let dashboardHtml = buildPdfDashboardHtml(dash, view);
-  dashboardHtml += `${chartTag}${mermaidTag}`;
   bodyInner += '\n' + sectionWrapper({ id: 'dashboard', title: '4. Dashboard', num: 4, innerHtml: dashboardHtml });
 
   for (const s of sectionPlan().filter(x => x.id === 'dep-graph-base' || x.id === 'dep-graph-head')) {
@@ -555,6 +540,7 @@ ${bodyInner}
 
   return html;
 }
+
 
 
 async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
