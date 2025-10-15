@@ -97,7 +97,16 @@ async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
 })();</script>`;
 
   bodyInner += readyBoot + '\n';
+  const vendorDir = path.join(distDir, 'html', 'assets', 'js', 'vendor');
+  const chartJs = path.join(vendorDir, 'chart.umd.js');
+  const datalabelsJs = path.join(vendorDir, 'chartjs-plugin-datalabels.min.js');
+  const fileUrl = p => 'file://' + p.replace(/\\/g, '/');
 
+  let vendorTags = '';
+  try { if (fs.existsSync(chartJs))       vendorTags += `<script src="${fileUrl(chartJs)}"></script>\n`; } catch {}
+  try { if (fs.existsSync(datalabelsJs))  vendorTags += `<script src="${fileUrl(datalabelsJs)}"></script>\n`; } catch {}
+
+  bodyInner += vendorTags;
   bodyInner += coverHtml({ repo: view?.repo, base: view?.base, head: view?.head, inputs: inputs || {}, generatedAt: view?.generatedAt, logoDataUri });
 
   bodyInner += '\n' + tocHtml();
