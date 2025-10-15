@@ -12,6 +12,7 @@ const { tocHtml } = require('./sections/toc');
 const { introHtml } = require('./sections/introduction');
 const { resultsHtml } = require('./sections/results');
 const { summaryHtml } = require('./sections/summary');
+const { dashboardHtml } = require('./sections/dashboard');
 
 const core = require('@actions/core');
 
@@ -500,10 +501,7 @@ async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
 
   bodyInner += '\n' + (await resultsHtml(distDir, view));
 
-  const diff = await loadDiff(distDir);
-  const dash = computeDashData((diff && Array.isArray(diff.items)) ? diff.items : []);
-  let dashboardHtml = buildPdfDashboardHtml(dash, view);
-  bodyInner += '\n' + sectionWrapper({ id: 'dashboard', title: '4. Dashboard', num: 4, innerHtml: dashboardHtml });
+  bodyInner += '\n' + dashboardHtml(view);
 
   for (const s of sectionPlan().filter(x => x.id === 'dep-graph-base' || x.id === 'dep-graph-head')) {
     const file = s.file ? path.join(sectionsDir, s.file) : null;
@@ -511,6 +509,7 @@ async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
     bodyInner += '\n' + sectionWrapper({ id: s.id, title: s.title, num: s.num, innerHtml: inner });
   }
 
+  const diff = await loadDiff(distDir);
   const items = Array.isArray(diff?.items) ? diff.items : [];
   const depBase = buildDependencyPathsSection(items, 'base');
   const depHead = buildDependencyPathsSection(items, 'head');
@@ -539,6 +538,7 @@ ${bodyInner}
 
   return html;
 }
+
 
 
 async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
