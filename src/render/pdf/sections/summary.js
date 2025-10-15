@@ -31,9 +31,7 @@ function aggregatesByModuleSeverityState(items = []) {
     const sev = sevKey(it.severity);
     const st = stateKey(it.state);
     const mp = it.module_paths || {};
-    const modules = Object.keys(mp);
-    if (modules.length === 0 && it.module) modules.push(String(it.module));
-    if (modules.length === 0) modules.push('—');
+    const modules = Object.keys(mp).length ? Object.keys(mp) : (it.module ? [String(it.module)] : ['—']);
     for (const m of modules) {
       out[m] = out[m] || {};
       out[m][sev] = out[m][sev] || { NEW:0, REMOVED:0, UNCHANGED:0 };
@@ -54,8 +52,7 @@ function renderToolsTable(tools = {}, action = {}) {
     <tr><td>Node.js</td><td><code>${tools.node || '-'}</code></td></tr>
     <tr><td>Action</td><td><code>sec-open/vuln-diff-action ${action.version || '-'}</code> (<code>${action.commit || '-'}</code>)</td></tr>
   </tbody>
-</table>
-`.trim();
+</table>`.trim();
 }
 
 function renderInputsTable(inputs = {}) {
@@ -65,8 +62,7 @@ function renderInputsTable(inputs = {}) {
 <table class="compact">
   <thead><tr><th>Input</th><th>Value</th></tr></thead>
   <tbody>${rows || '<tr><td colspan="2">—</td></tr>'}</tbody>
-</table>
-`.trim();
+</table>`.trim();
 }
 
 function renderRefsTable({ baseRef, baseShaShort, headRef, headShaShort }) {
@@ -77,8 +73,7 @@ function renderRefsTable({ baseRef, baseShaShort, headRef, headShaShort }) {
     <tr><td>Head</td><td><code>${headRef || '-'}</code></td><td><code>${headShaShort || '-'}</code></td></tr>
     <tr><td>Base</td><td><code>${baseRef || '-'}</code></td><td><code>${baseShaShort || '-'}</code></td></tr>
   </tbody>
-</table>
-`.trim();
+</table>`.trim();
 }
 
 function renderTotalsByStateTable(totals) {
@@ -86,8 +81,7 @@ function renderTotalsByStateTable(totals) {
 <table class="compact">
   <thead><tr><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>
   <tbody><tr><td><strong>${safeNum(totals.NEW)}</strong></td><td><strong>${safeNum(totals.REMOVED)}</strong></td><td><strong>${safeNum(totals.UNCHANGED)}</strong></td></tr></tbody>
-</table>
-`.trim();
+</table>`.trim();
 }
 
 function renderSevByStateTable(bySevState) {
@@ -100,27 +94,21 @@ function renderSevByStateTable(bySevState) {
 <table class="compact">
   <thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>
   <tbody>${rows}</tbody>
-</table>
-`.trim();
+</table>`.trim();
 }
 
-function renderModuleMatrixTables(byModuleSevState) {
+function renderModuleMatrixTable(mod, mData) {
   const sevOrder = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
-  const mods = Object.keys(byModuleSevState || {}).sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
-  if (!mods.length) return '<p>No module-level data available.</p>';
-  return mods.map(mod => {
-    const rows = sevOrder.map(sev => {
-      const r = (byModuleSevState[mod] || {})[sev] || { NEW:0, REMOVED:0, UNCHANGED:0 };
-      return `<tr><td>${sev}</td><td>${safeNum(r.NEW)}</td><td>${safeNum(r.REMOVED)}</td><td>${safeNum(r.UNCHANGED)}</td></tr>`;
-    }).join('');
-    return `
-<h4>${mod}</h4>
+  const rows = sevOrder.map(sev => {
+    const r = (mData || {})[sev] || { NEW:0, REMOVED:0, UNCHANGED:0 };
+    return `<tr><td>${sev}</td><td>${safeNum(r.NEW)}</td><td>${safeNum(r.REMOVED)}</td><td>${safeNum(r.UNCHANGED)}</td></tr>`;
+  }).join('');
+  return `
+<h4>2.2.1 ${mod}</h4>
 <table class="compact no-break">
   <thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>
   <tbody>${rows}</tbody>
-</table>
-`.trim();
-  }).join('\n');
+</table>`.trim();
 }
 
 function summaryHtml(view) {
@@ -141,9 +129,11 @@ function summaryHtml(view) {
   const sevMatrix = renderSevByStateTable(bySevState);
   const toolsTable = renderToolsTable(tools, action);
   const inputsTable = renderInputsTable(view?.inputs || {});
-  const modulesTables = renderModuleMatrixTables(byModuleSevState);
 
-  return `
+  const modules = Object.keys(byModuleSevState || {}).sort((a,b)=>a.localeCompare(b,'en',{sensitivity:'base'}));
+
+  // 2 (Summary) + 2.1 Overview — en la misma página
+  const sec2_and_2_1 = `
 <section class="page" id="summary">
   <h2>2. Summary</h2>
 
@@ -173,13 +163,35 @@ function summaryHtml(view) {
       </div>
     </div>
   </div>
+</section>`.trim();
 
+  // 2.2 Modules — página nueva con 2.2.1 en la misma página
+  const firstMod = modules[0];
+  const sec2_2 = `
+<section class="page" id="summary-modules">
   <h3>2.2 Modules vulnerabilities</h3>
-  <div class="no-break">
-    ${modulesTables}
-  </div>
-</section>
-`.trim();
+  ${firstMod ? renderModuleMatrixTable(firstMod, byModuleSevState[firstMod]) : '<p>No module-level data available.</p>'}
+</section>`.trim();
+
+  // 2.2.2+ — cada módulo en su propia página
+  const rest = modules.slice(1);
+  const perModule = rest.map((m, i) => {
+    const data = byModuleSevState[m];
+    const rows = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'].map(sev => {
+      const r = (data || {})[sev] || { NEW:0, REMOVED:0, UNCHANGED:0 };
+      return `<tr><td>${sev}</td><td>${safeNum(r.NEW)}</td><td>${safeNum(r.REMOVED)}</td><td>${safeNum(r.UNCHANGED)}</td></tr>`;
+    }).join('');
+    return `
+<section class="page" id="summary-mod-${i+2}">
+  <h4>2.2.${i + 2} ${m}</h4>
+  <table class="compact no-break">
+    <thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+</section>`.trim();
+  }).join('\n');
+
+  return [sec2_and_2_1, sec2_2, perModule].join('\n');
 }
 
 module.exports = { summaryHtml };

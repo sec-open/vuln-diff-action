@@ -14,7 +14,7 @@ const { resultsHtml } = require('./sections/results');
 const { summaryHtml } = require('./sections/summary');
 const { dashboardHtml } = require('./sections/dashboard');
 const { dependencyGraphsHtml } = require('./sections/dependencyGraphs');
-
+const { dependencyPathsHtml } = require('./sections/depPaths');
 const core = require('@actions/core');
 
 // -------------------------------------------------------------
@@ -528,10 +528,10 @@ async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
   const diffOnce = await loadDiff(distDir);
   const items = Array.isArray(diffOnce?.items) ? diffOnce.items : [];
 
-  const depPathsBase = sectionWrapper({ id: 'dep-paths-base', title: '7. Dependency Paths — Base', num: 7, innerHtml: buildDependencyPathsSection(items, 'base') });
-  const depPathsHead = sectionWrapper({ id: 'dep-paths-head', title: '8. Dependency Paths — Head', num: 8, innerHtml: buildDependencyPathsSection(items, 'head') });
-  bodyInner += '\n' + depPathsBase + '\n' + depPathsHead + '\n' +
-`<script>(function(){ if (window.__requireReady) window.__requireReady('dep-paths'); if (window.__markSectionReady) window.__markSectionReady('dep-paths'); })();</script>`;
+  const depBaseInner = dependencyPathsHtml(items, 'base');
+  const depHeadInner = dependencyPathsHtml(items, 'head');
+  bodyInner += '\n' + sectionWrapper({ id: 'dep-paths-base', title: '7. Dependency Paths — Base', num: 7, innerHtml: depBaseInner });
+  bodyInner += '\n' + sectionWrapper({ id: 'dep-paths-head', title: '8. Dependency Paths — Head', num: 8, innerHtml: depHeadInner });
 
   if (exists(path.join(sectionsDir, 'fix-insights.html'))) {
     const fixHtml = await readTextSafe(path.join(sectionsDir, 'fix-insights.html'));
