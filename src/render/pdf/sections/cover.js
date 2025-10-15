@@ -9,14 +9,12 @@ function coverHtml({ repo, base, head, inputs, generatedAt, logoDataUri }) {
         <div class="cover-brand">
           ${logoDataUri ? `<img src="${logoDataUri}" alt="logo" />` : ''}
         </div>
-        <div class="cover-meta">
-          <div class="cover-meta-ts">${generatedAt}</div>
-        </div>
       </div>
 
       <div class="cover-title">
         <div class="line1">Vulnerability Diff Report</div>
         <div class="line2">${repo}</div>
+        <div class="cover-meta-ts">${generatedAt}</div>
       </div>
 
       <div class="cover-cards">

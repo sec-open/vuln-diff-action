@@ -21,11 +21,10 @@ function makePrintCss() {
   }
   .cover-top{ display:flex; justify-content:space-between; align-items:flex-start; }
   .cover-brand img{ max-height:52px; }
-  .cover-meta{ text-align:right; color:#9ca3af; font-size:12px; }
-  .cover-meta-ts{ font-weight:600; }
   .cover-title{ margin-top:40mm; }
   .cover-title .line1{ font-size:22px; font-weight:700; margin:0 0 6px 0; }
   .cover-title .line2{ font-size:18px; color:#cbd5e1; }
+  .cover-title .cover-meta-ts{ color:#9ca3af; font-size:12px; }
 
   /* Tarjetas Base/Head: corrige corte y wrap de SHA largo */
   .cover-cards{
@@ -89,17 +88,6 @@ function makePrintCss() {
     .dep-block { break-inside: avoid !important; page-break-inside: avoid !important; margin-bottom: 10px; }
     .dep-block h4 { margin: 0 0 6px 0; }
 
-    .cover-top {
-      display: flex !important;
-      flex-direction: column !important;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .cover-brand img {
-      display: block;
-      max-height: 36px;
-    }
   `.trim();
 }
 

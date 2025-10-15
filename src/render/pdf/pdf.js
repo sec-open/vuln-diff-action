@@ -11,6 +11,8 @@ const { headerTemplate, footerTemplate, getLogoDataUri } = require('./sections/h
 const { tocHtml } = require('./sections/toc');
 const { introHtml } = require('./sections/introduction');
 const { buildResultsTablesHtml } = require('./sections/results');
+const { summaryHtml } = require('./sections/summary');
+
 const core = require('@actions/core');
 
 // -------------------------------------------------------------
@@ -497,136 +499,64 @@ async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
   const htmlRoot = path.join(distDir, 'html');
   const sectionsDir = path.join(htmlRoot, 'sections');
 
-  // Carga única de vendor scripts (evita doble Chart/Mermaid)
-  const vendorChartPath   = path.join(htmlRoot, 'assets', 'js', 'vendor', 'chart.umd.js');
+  const vendorChartPath = path.join(htmlRoot, 'assets', 'js', 'vendor', 'chart.umd.js');
   const vendorMermaidPath = path.join(htmlRoot, 'assets', 'js', 'vendor', 'mermaid.min.js');
+  const chartTag = exists(vendorChartPath) ? `<script src="file://${vendorChartPath}"></script>` : '';
+  const mermaidTag = exists(vendorMermaidPath) ? `<script src="file://${vendorMermaidPath}"></script>` : '';
 
-  const chartTag = exists(vendorChartPath) ? `
-<script>
-  if (!window.__CHART_JS_INCLUDED__) {
-    window.__CHART_JS_INCLUDED__ = true;
-    document.write('<script src="../html/assets/js/vendor/chart.umd.js"><\\/script>');
-  }
-</script>` : '';
+  let bodyInner = '';
+  bodyInner += coverHtml({ repo: view?.repo, base: view?.base, head: view?.head, inputs: inputs || {}, generatedAt: view?.generatedAt, logoDataUri });
 
-  const mermaidTag = exists(vendorMermaidPath) ? `
-<script>
-  if (!window.__MERMAID_INCLUDED__) {
-    window.__MERMAID_INCLUDED__ = true;
-    document.write('<script src="../html/assets/js/vendor/mermaid.min.js"><\\/script>');
-  }
-</script>` : '';
-
-  // Cover
-  let bodyInner = coverHtml({
-    repo: view?.repo,
-    base: view?.base,
-    head: view?.head,
-    inputs: inputs || {},
-    generatedAt: view?.generatedAt,
-    logoDataUri
-  });
-
-  // TOC (2º)
   bodyInner += '\n' + tocHtml();
 
-  // 1. Introduction
   bodyInner += '\n' + introHtml(view);
 
-  // 2. Summary (limpiando “### …” y “Generated at …”)
-  if (exists(path.join(sectionsDir, 'summary.html'))) {
-    let summaryHtml = await readTextSafe(path.join(sectionsDir, 'summary.html'));
-    summaryHtml = summaryHtml
-      .replace(/\s*<p>\s*Generated at\s+[^<]*<\/p>/i, '')           // quitar “Generated at …” redundante
-      .replace(/>###\s*Tools</gi, '>Tools')
-      .replace(/>###\s*Inputs</gi, '>Inputs')
-      .replace(/>###\s*Base</gi, '>Base')
-      .replace(/>###\s*Head</gi, '>Head');
+  bodyInner += '\n' + summaryHtml(view);
 
-    bodyInner += '\n' + sectionWrapper({
-      id: 'summary',
-      title: '2. Summary',
-      num: 2,
-      innerHtml: summaryHtml
-    });
-  }
-
-  // 3. Results tables (3.1 / 3.2 / 3.3)
   bodyInner += '\n' + (await buildResultsTablesHtml(distDir));
 
-  // 4. Dashboard (marcamos ready al final por si no hay scripts activos)
-  const dash = computeDashData((await loadDiff(distDir))?.items || []);
+  const diff = await loadDiff(distDir);
+  const dash = computeDashData((diff && Array.isArray(diff.items)) ? diff.items : []);
   let dashboardHtml = buildPdfDashboardHtml(dash, view);
-  dashboardHtml += `
-<script>try{window.__chartsReady=true;window.__mermaidReady=true;}catch(e){}</script>`;
-  bodyInner += '\n' + sectionWrapper({
-    id: 'dashboard',
-    title: '4. Dashboard',
-    num: 4,
-    innerHtml: dashboardHtml
-  });
+  dashboardHtml += `${chartTag}${mermaidTag}`;
+  bodyInner += '\n' + sectionWrapper({ id: 'dashboard', title: '4. Dashboard', num: 4, innerHtml: dashboardHtml });
 
-  // 5 y 6: Dependency Graphs (secciones existentes del bundle)
   for (const s of sectionPlan().filter(x => x.id === 'dep-graph-base' || x.id === 'dep-graph-head')) {
     const file = s.file ? path.join(sectionsDir, s.file) : null;
-    let inner = file ? await readTextSafe(file) : '';
+    const inner = file ? await readTextSafe(file) : '';
     bodyInner += '\n' + sectionWrapper({ id: s.id, title: s.title, num: s.num, innerHtml: inner });
   }
 
-  // 7 y 8: Dependency Paths (aplicamos contenedor anti-corte)
-  const diff = await loadDiff(distDir);
-  const items = Array.isArray(view?.items) ? view.items : (diff?.items || []);
+  const items = Array.isArray(diff?.items) ? diff.items : [];
   const depBase = buildDependencyPathsSection(items, 'base');
   const depHead = buildDependencyPathsSection(items, 'head');
+  bodyInner += '\n' + sectionWrapper({ id: 'dep-paths-base', title: '7. Dependency Paths — Base', num: 7, innerHtml: depBase });
+  bodyInner += '\n' + sectionWrapper({ id: 'dep-paths-head', title: '8. Dependency Paths — Head', num: 8, innerHtml: depHead });
 
-  bodyInner += '\n' + sectionWrapper({
-    id: 'dep-paths-base',
-    title: '7. Dependency Paths — Base',
-    num: 7,
-    innerHtml: depBase.replace(/<h4([^>]*)>/g, '<div class="dep-block"><h4$1>').replace(/<\/table>/g, '</table></div>')
-  });
-  bodyInner += '\n' + sectionWrapper({
-    id: 'dep-paths-head',
-    title: '8. Dependency Paths — Head',
-    num: 8,
-    innerHtml: depHead.replace(/<h4([^>]*)>/g, '<div class="dep-block"><h4$1>').replace(/<\/table>/g, '</table></div>')
-  });
-
-  // 9. Fix Insights (tal como lo generas ahora)
   if (exists(path.join(sectionsDir, 'fix-insights.html'))) {
     const fixHtml = await readTextSafe(path.join(sectionsDir, 'fix-insights.html'));
-    bodyInner += '\n' + sectionWrapper({
-      id: 'fix-insights',
-      title: '9. Fix Insights',
-      num: 9,
-      innerHtml: fixHtml
-    });
+    bodyInner += '\n' + sectionWrapper({ id: 'fix-insights', title: '9. Fix Insights', num: 9, innerHtml: fixHtml });
   }
 
-  const printCssHref = './assets/print.css';
-  return `
+  const css = makePrintCss();
+  const html = `
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <title>Vulnerability Diff Report — ${view?.repo || ''}</title>
-  <link rel="stylesheet" href="${printCssHref}">
-  ${chartTag}
-  ${mermaidTag}
+<meta charset="utf-8"/>
+<title>Vulnerability Diff Report — ${view?.repo || ''}</title>
+<style>${css}</style>
 </head>
 <body>
-  ${bodyInner}
+${bodyInner}
+<script>document.documentElement.lang='en';</script>
 </body>
-</html>
-  `.trim();
+</html>`.trim();
+
+  return html;
 }
 
-// -------------------------------------------------------------
-// Orquestador PDF
-// -------------------------------------------------------------
-// -------------------------------------------------------------
-// Orquestador PDF
-// -------------------------------------------------------------
+
 async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
   console.log('[pdf/orch] start');
   const absDist = path.resolve(distDir);
