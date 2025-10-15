@@ -70,26 +70,29 @@ async function getLogoDataUri(logoInput, distDir) {
     return '';
   }
 }
-// Reemplaza SOLO esta función
+
 function headerTemplate({ logoDataUri, repo, generatedAt }) {
+  const H = 36; // altura banda
   const band = '#0b0f16';
   const logoBlock = logoDataUri
     ? `<div style="width:120px;height:18px;background-image:url('${logoDataUri}');
                     background-size:contain;background-repeat:no-repeat;background-position:left center;margin-right:10px;flex:0 0 auto;"></div>`
     : '';
-  // Contenedor = la propia banda (altura fija). Flex para centrar verticalmente.
+
   return `
-  <div style="width:100%;">
+  <div style="position:relative;width:100%;height:${H}px;">
+    <!-- Banda como SVG: siempre se imprime -->
+    <div style="position:absolute;inset:0;z-index:0">
+      <svg width="100%" height="${H}" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100%" height="${H}" fill="${band}"/>
+      </svg>
+    </div>
+
+    <!-- Contenido superpuesto, centrado verticalmente -->
     <div style="
-      background:${band};
-      color:#e5e7eb;
-      height:36px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      padding:0 12px;
-      font-size:10px;
-      line-height:1;
+      position:relative;z-index:1;height:${H}px;
+      display:flex;align-items:center;justify-content:space-between;
+      padding:0 12px;color:#e5e7eb;font-size:10px;line-height:1;
     ">
       <div style="display:flex;align-items:center;min-width:0;">
         ${logoBlock}
@@ -97,31 +100,35 @@ function headerTemplate({ logoDataUri, repo, generatedAt }) {
           Vulnerability Diff Report — ${repo || ''}
         </span>
       </div>
-      <div style="white-space:nowrap; margin-left:12px;">${generatedAt || ''}</div>
+      <div style="white-space:nowrap;margin-left:12px;">${generatedAt || ''}</div>
     </div>
   </div>
   `.trim();
 }
 
-// Reemplaza SOLO esta función
+
 function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
+  const H = 32; // altura banda
   const band = '#0b0f16';
   const logoBlock = logoDataUri
     ? `<div style="width:100px;height:14px;background-image:url('${logoDataUri}');
                     background-size:contain;background-repeat:no-repeat;background-position:left center;margin-right:8px;flex:0 0 auto;"></div>`
     : '';
+
   return `
-  <div style="width:100%;">
+  <div style="position:relative;width:100%;height:${H}px;">
+    <!-- Banda SVG -->
+    <div style="position:absolute;inset:0;z-index:0">
+      <svg width="100%" height="${H}" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100%" height="${H}" fill="${band}"/>
+      </svg>
+    </div>
+
+    <!-- Contenido -->
     <div style="
-      background:${band};
-      color:#e5e7eb;
-      height:32px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      padding:0 12px;
-      font-size:10px;
-      line-height:1;
+      position:relative;z-index:1;height:${H}px;
+      display:flex;align-items:center;justify-content:space-between;
+      padding:0 12px;color:#e5e7eb;font-size:10px;line-height:1;
     ">
       <div style="display:flex;align-items:center;min-width:0;">
         ${logoBlock}
@@ -129,9 +136,8 @@ function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
           BASE: ${baseRef || ''} → HEAD: ${headRef || ''}
         </span>
       </div>
-      <div style="white-space:nowrap; margin-left:12px;">
-        ${generatedAt || ''} &nbsp;—&nbsp;
-        <span class="pageNumber"></span>/<span class="totalPages"></span>
+      <div style="white-space:nowrap;margin-left:12px;">
+        ${generatedAt || ''} &nbsp;—&nbsp; <span class="pageNumber"></span>/<span class="totalPages"></span>
       </div>
     </div>
   </div>
