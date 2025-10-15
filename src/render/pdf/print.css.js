@@ -89,6 +89,17 @@ function makePrintCss() {
     .dep-block { break-inside: avoid !important; page-break-inside: avoid !important; margin-bottom: 10px; }
     .dep-block h4 { margin: 0 0 6px 0; }
 
+    .cover-top {
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .cover-brand img {
+      display: block;
+      max-height: 36px;
+    }
   `.trim();
 }
 
