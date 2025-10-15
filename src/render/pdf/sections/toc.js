@@ -4,7 +4,7 @@ function tocHtml() {
   const items = [
     'Introduction',
     'Summary',
-    'Results tables',
+    'Vulnerability tables',
     'Dashboard',
     'Dependency Graph — Base',
     'Dependency Graph — Head',
