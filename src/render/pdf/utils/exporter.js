@@ -71,16 +71,55 @@ async function ensureBrowserPath() {
 }
 
 async function waitForVisuals(page, { timeout = 60000 } = {}) {
+  const predicate = `
+    (function () {
+      var q = document.querySelector.bind(document);
+      var qa = function(sel){ return Array.prototype.slice.call(document.querySelectorAll(sel)); };
+
+      // CHARTS
+      var hasCharts = qa('canvas[id^="chart-"]').length > 0;
+      var chartsOk =
+        (window.__chartsReady === true) ||
+        !hasCharts ||
+        qa('canvas[id^="chart-"]').every(function(c){ return (c.width || 0) > 0 && (c.height || 0) > 0; });
+
+      // MERMAID
+      var mermaidBlocks = qa('pre code.language-mermaid, .language-mermaid, pre.mermaid, .mermaid');
+      var hasMermaid = mermaidBlocks.length > 0;
+      var mermaidOk =
+        (window.__mermaidReady === true) ||
+        !hasMermaid ||
+        (qa('svg[id^="mmsvg-"]').length >= mermaidBlocks.length);
+
+      // FIX INSIGHTS
+      var fixEl = q('#fix-insights');
+      var fixOk =
+        (window.__fixInsightsReady === true) ||
+        !fixEl ||
+        !/Loading…|Loading\\.\\.\\.|Loading/i.test(fixEl.textContent || '');
+
+      // DEP PATHS
+      var depBase = q('#dep-paths-base');
+      var depHead = q('#dep-paths-head');
+      var depOk =
+        (window.__depPathsReady === true) ||
+        (!depBase && !depHead) ||
+        (q('#dep-paths-base table, #dep-paths-head table') !== null);
+
+      // IMÁGENES (logos header/footer y otras)
+      var imagesOk = Array.prototype.every.call(document.images || [], function(img){ return img.complete; });
+
+      return chartsOk && mermaidOk && fixOk && depOk && imagesOk;
+    })()
+  `;
   try {
-    await page.waitForFunction(
-      () => (window.__chartsReady === true) && (window.__mermaidReady === true),
-      { timeout }
-    );
-    await page.waitForTimeout(250); // pequeño settle
+    await page.waitForFunction(predicate, { timeout });
+    await page.waitForTimeout(150); // pequeño settle
   } catch {
-    // Continuar aunque no estén listos (no rompemos)
+    // No bloquea: si no llega a ready, seguimos igualmente (tu comportamiento actual)
   }
 }
+
 
 /**
  * Renderiza print.html en dos pasadas y une:

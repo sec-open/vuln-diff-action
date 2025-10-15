@@ -44,8 +44,7 @@ function buildMermaidFromPaths(items) {
 function renderGraphCard(title, mermaidCode) {
   return `
 <div class="card">
-  <h2 id="section-title">${title}</h2>
-  <p class="small">Graph built from dependency <em>paths</em> provided by Phase 2 (no extra calculations performed).</p>
+  <p class="small">Graph built from calculated dependency <em>paths</em>.</p>
   <pre class="mermaid">${mermaidCode}</pre>
 </div>`;
 }
