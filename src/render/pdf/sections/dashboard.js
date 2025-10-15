@@ -99,12 +99,15 @@ function dashboardHtml(view) {
 </section>
 `.trim();
 
-  const moduleSections = modules.map((m, i) => `
-<section class="page" id="dashboard-mod-${slugify(m)}">
-  <h3>4.2.${i + 1} ${m}</h3>
-  ${chartsBlock(\`chart-\${slugify(m)}\`, '')}
-</section>
-`.trim()).join('\n');
+  const moduleSections = modules.map((m, i) => {
+    const s = slugify(m);
+    return (
+      '<section class="page" id="dashboard-mod-' + s + '">' +
+      '<h3>4.2.' + (i + 1) + ' ' + m + '</h3>' +
+      chartsBlock('chart-' + s, '') +
+      '</section>'
+    ).trim();
+  }).join('\n');
 
   const payload = {
     SEV_ORDER, STATE_ORDER,
@@ -113,20 +116,23 @@ function dashboardHtml(view) {
       newVsRemovedBySeverity: agg.overview.newVsRemovedBySeverity,
       matrixSevState: agg.overview.matrixSevState
     },
-    modules: modules.map(m => ({
-      name: m,
-      slug: slugify(m),
-      totalsByState: agg.modules[m].totalsByState,
-      newVsRemovedBySeverity: agg.modules[m].newVsRemovedBySeverity,
-      matrixSevState: agg.modules[m].matrixSevState
-    }))
+    modules: modules.map(m => {
+      const s = slugify(m);
+      return {
+        name: m,
+        slug: s,
+        totalsByState: agg.modules[m].totalsByState,
+        newVsRemovedBySeverity: agg.modules[m].newVsRemovedBySeverity,
+        matrixSevState: agg.modules[m].matrixSevState
+      };
+    })
   };
 
   const inlineScript = `
 <script>
 (function(){
   var data = ${JSON.stringify(payload)};
-  if (!window || !document) return;
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
   if (!window.Chart) return;
   if (window.Chart.defaults && window.Chart.defaults.animation != null) {
     window.Chart.defaults.animation = false;
