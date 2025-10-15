@@ -12,8 +12,8 @@ function stateKey(s) { return String(s || '').toUpperCase(); }
 function gavStr(p) {
   if (!p) return '';
   if (typeof p === 'string') return p;
-  const g = p.group || p.groupId || p.namespace || '';
-  const a = p.artifact || p.name || p.package || '';
+  const g = p.groupId || p.group || p.namespace || '';
+  const a = p.artifactId || p.artifact || p.name || p.package || '';
   const v = p.version || '';
   const ga = [g, a].filter(Boolean).join(':');
   return v ? (ga ? `${ga}:${v}` : v) : ga;
@@ -21,7 +21,7 @@ function gavStr(p) {
 
 const SEV_ORDER = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0 };
 
-function sortRows(items) {
+function sortItems(items) {
   return items.sort((a, b) => {
     const sa = SEV_ORDER[sevKey(a.severity)] || 0;
     const sb = SEV_ORDER[sevKey(b.severity)] || 0;
@@ -45,29 +45,24 @@ function tableHtml(headers, rows) {
 }
 
 function makeRow(o) {
-  const sev = sevKey(o.severity);
-  const id = o.id || o.vulnerabilityId || '';
-  const pkg = gavStr(o.package);
-  const st = stateKey(o.state);
-  return [sev, id, pkg, st];
+  return [
+    sevKey(o.severity),
+    o.id || o.vulnerabilityId || '',
+    gavStr(o.package),
+    stateKey(o.state)
+  ];
 }
 
 function rowsDiff(items) {
-  return sortRows(items.slice()).map(makeRow);
+  return sortItems(items.slice()).map(makeRow);
 }
-
 function rowsBase(items) {
-  return sortRows(items.filter(x => {
-    const st = stateKey(x.state);
-    return st === 'REMOVED' || st === 'UNCHANGED';
-  })).map(makeRow);
+  const f = items.filter(x => ['REMOVED','UNCHANGED'].includes(stateKey(x.state)));
+  return sortItems(f).map(makeRow);
 }
-
 function rowsHead(items) {
-  return sortRows(items.filter(x => {
-    const st = stateKey(x.state);
-    return st === 'NEW' || st === 'UNCHANGED';
-  })).map(makeRow);
+  const f = items.filter(x => ['NEW','UNCHANGED'].includes(stateKey(x.state)));
+  return sortItems(f).map(makeRow);
 }
 
 async function resultsHtml(distDir, view) {
