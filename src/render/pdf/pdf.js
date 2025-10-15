@@ -10,7 +10,7 @@ const { makePrintCss } = require('./print.css'); // js
 const { headerTemplate, footerTemplate, getLogoDataUri } = require('./sections/headerFooter');
 const { tocHtml } = require('./sections/toc');
 const { introHtml } = require('./sections/introduction');
-const { buildResultsTablesHtml } = require('./sections/results');
+const { resultsHtml } = require('./sections/results');
 const { summaryHtml } = require('./sections/summary');
 
 const core = require('@actions/core');
