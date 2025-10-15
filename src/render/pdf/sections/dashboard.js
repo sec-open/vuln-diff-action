@@ -137,81 +137,83 @@ function dashboardHtml(view){
   };
 
   const script = `
-<script>(function(){
-  if (typeof window==='undefined' || typeof document==='undefined') return;
-  if (!window.Chart) return;
-  if (window.Chart.defaults && window.Chart.defaults.animation!=null) window.Chart.defaults.animation = false;
-  if (!window.__requireReady) window.__requireReady = function(){};
-  if (!window.__markSectionReady) window.__markSectionReady = function(){};
-  try { window.__requireReady('dashboard'); } catch(e){}
+  <script>(function(){
+    if (typeof window==='undefined' || typeof document==='undefined') return;
+    if (!window.Chart) { window.__chartsReady = true; return; }  // <-- señal para waitForVisuals si no hay Chart
+    if (window.Chart.defaults && window.Chart.defaults.animation!=null) window.Chart.defaults.animation = false;
+    if (!window.__requireReady) window.__requireReady = function(){};
+    if (!window.__markSectionReady) window.__markSectionReady = function(){};
+    try { window.__requireReady('dashboard'); } catch(e){}
 
-  var data = ${JSON.stringify(payload)};
+    var data = ${JSON.stringify(payload)};
 
-  function draw(id, cfg){ var el = document.getElementById(id); if (!el) return; try { new Chart(el.getContext('2d'), cfg); } catch(e){} }
+    function draw(id, cfg){ var el = document.getElementById(id); if (!el) return; try { new Chart(el.getContext('2d'), cfg); } catch(e){} }
 
-  function drawOverview(){
-    var o = data.overview;
-    draw('chart-overview-state', {
-      type:'bar',
-      data:{ labels:data.STATE_ORDER, datasets:[{label:'Count', data:data.STATE_ORDER.map(function(s){return o.totalsByState[s]||0;})}] },
-      options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}}, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
-    });
-    draw('chart-overview-new-removed', {
-      type:'bar',
-      data:{ labels:data.SEV_ORDER, datasets:[
-        {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=o.newVsRemovedBySeverity[s]||{};return r.NEW||0;})},
-        {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=o.newVsRemovedBySeverity[s]||{};return r.REMOVED||0;})}
-      ]},
-      options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
-    });
-    draw('chart-overview-sev-state', {
-      type:'bar',
-      data:{ labels:data.SEV_ORDER, datasets:[
-        {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.NEW||0;}), stack:'s1'},
-        {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.REMOVED||0;}), stack:'s1'},
-        {label:'UNCHANGED', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.UNCHANGED||0;}), stack:'s1'}
-      ]},
-      options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}} }
-    });
-  }
+    function drawOverview(){
+      var o = data.overview;
+      draw('chart-overview-state', {
+        type:'bar',
+        data:{ labels:data.STATE_ORDER, datasets:[{label:'Count', data:data.STATE_ORDER.map(function(s){return o.totalsByState[s]||0;})}] },
+        options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}}, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
+      });
+      draw('chart-overview-new-removed', {
+        type:'bar',
+        data:{ labels:data.SEV_ORDER, datasets:[
+          {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=o.newVsRemovedBySeverity[s]||{};return r.NEW||0;})},
+          {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=o.newVsRemovedBySeverity[s]||{};return r.REMOVED||0;})}
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
+      });
+      draw('chart-overview-sev-state', {
+        type:'bar',
+        data:{ labels:data.SEV_ORDER, datasets:[
+          {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.NEW||0;}), stack:'s1'},
+          {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.REMOVED||0;}), stack:'s1'},
+          {label:'UNCHANGED', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.UNCHANGED||0;}), stack:'s1'}
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}} }
+      });
+    }
 
-  function drawModule(mod){
-    var base = 'chart-' + mod.slug;
-    var m = mod.data || { totalsByState:{}, newVsRemovedBySeverity:{}, matrixSevState:{} };
-    draw(base + '-state', {
-      type:'bar',
-      data:{ labels:data.STATE_ORDER, datasets:[{label:'Count', data:data.STATE_ORDER.map(function(s){return (m.totalsByState||{})[s]||0;})}] },
-      options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}}, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
-    });
-    draw(base + '-new-removed', {
-      type:'bar',
-      data:{ labels:data.SEV_ORDER, datasets:[
-        {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=(m.newVsRemovedBySeverity||{})[s]||{};return r.NEW||0;})},
-        {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=(m.newVsRemovedBySeverity||{})[s]||{};return r.REMOVED||0;})}
-      ]},
-      options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
-    });
-    draw(base + '-sev-state', {
-      type:'bar',
-      data:{ labels:data.SEV_ORDER, datasets:[
-        {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.NEW||0;}), stack:'s1'},
-        {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.REMOVED||0;}), stack:'s1'},
-        {label:'UNCHANGED', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.UNCHANGED||0;}), stack:'s1'}
-      ]},
-      options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}} }
-    });
-  }
+    function drawModule(mod){
+      var base = 'chart-' + mod.slug;
+      var m = mod.data || { totalsByState:{}, newVsRemovedBySeverity:{}, matrixSevState:{} };
+      draw(base + '-state', {
+        type:'bar',
+        data:{ labels:data.STATE_ORDER, datasets:[{label:'Count', data:data.STATE_ORDER.map(function(s){return (m.totalsByState||{})[s]||0;})}] },
+        options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}}, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
+      });
+      draw(base + '-new-removed', {
+        type:'bar',
+        data:{ labels:data.SEV_ORDER, datasets:[
+          {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=(m.newVsRemovedBySeverity||{})[s]||{};return r.NEW||0;})},
+          {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=(m.newVsRemovedBySeverity||{})[s]||{};return r.REMOVED||0;})}
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
+      });
+      draw(base + '-sev-state', {
+        type:'bar',
+        data:{ labels:data.SEV_ORDER, datasets:[
+          {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.NEW||0;}), stack:'s1'},
+          {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.REMOVED||0;}), stack:'s1'},
+          {label:'UNCHANGED', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.UNCHANGED||0;}), stack:'s1'}
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}} }
+      });
+    }
 
-  try {
-    drawOverview();
-    (data.modules||[]).forEach(drawModule);
-  } finally {
-    try { window.__markSectionReady('dashboard'); } catch(e){}
-    // Señales genéricas por si el waitForVisuals las observa:
-    window.__ALL_SECTIONS_READY = true;
-    window.PDF_READY = true;
-  }
-})();</script>`.trim();
+    try {
+      drawOverview();
+      (data.modules||[]).forEach(drawModule);
+    } finally {
+      try { window.__markSectionReady('dashboard'); } catch(e){}
+      // Señales que espera tu waitForVisuals
+      window.__chartsReady = true;          // <-- clave para waitForVisuals
+      window.__ALL_SECTIONS_READY = true;   // (opcional, ya lo usabas)
+      window.PDF_READY = true;              // (opcional, compat)
+    }
+  })();</script>`.trim();
+
 
   return [sec4_overview, sec4_2_header_and_first, perModule, script].join('\n');
 }
