@@ -66,28 +66,37 @@ function tableFromArray(headers, rows){
   return `<table class="compact">${thead}<tbody>${tbody}</tbody></table>`;
 }
 
-function tablesBlock(agg){
+function tablesBlock3(agg){
   const totals = tableFromArray(['NEW','REMOVED','UNCHANGED'], [[
     agg.totalsByState.NEW, agg.totalsByState.REMOVED, agg.totalsByState.UNCHANGED
   ]]);
+
+  const nrRows = SEV_ORDER.map(sev => {
+    const r = agg.newVsRemovedBySeverity[sev] || { NEW:0, REMOVED:0 };
+    return [sev, r.NEW, r.REMOVED];
+  });
+  const newRemovedTbl = tableFromArray(['Severity','NEW','REMOVED'], nrRows);
+
   const sevRows = SEV_ORDER.map(sev => {
     const r = agg.matrixSevState[sev] || { NEW:0, REMOVED:0, UNCHANGED:0 };
     return [sev, r.NEW, r.REMOVED, r.UNCHANGED];
   });
   const sevTbl = tableFromArray(['Severity','NEW','REMOVED','UNCHANGED'], sevRows);
+
   return `
-<div class="tables-2 no-break">
+<div class="dash tables-3 no-break">
   <div><h4>Totals by State</h4>${totals}</div>
+  <div><h4>NEW vs REMOVED by Severity</h4>${newRemovedTbl}</div>
   <div><h4>Severity × State</h4>${sevTbl}</div>
 </div>`.trim();
 }
 
 function chartsBlock(idPrefix){
   return `
-<div class="charts-3 no-break">
-  <div><h4>Distribution by State</h4><canvas class="chart-compact" id="${idPrefix}-state"></canvas></div>
-  <div><h4>NEW vs REMOVED by Severity</h4><canvas class="chart-compact" id="${idPrefix}-new-removed"></canvas></div>
-  <div><h4>By Severity &amp; State (stacked)</h4><canvas class="chart-compact" id="${idPrefix}-sev-state"></canvas></div>
+<div class="dash charts-3 no-break">
+  <div class="chart-box"><h4>Distribution by State</h4><canvas class="chart-compact" id="${idPrefix}-state"></canvas></div>
+  <div class="chart-box"><h4>NEW vs REMOVED by Severity</h4><canvas class="chart-compact" id="${idPrefix}-new-removed"></canvas></div>
+  <div class="chart-box"><h4>By Severity &amp; State (stacked)</h4><canvas class="chart-compact" id="${idPrefix}-sev-state"></canvas></div>
 </div>`.trim();
 }
 
@@ -98,27 +107,27 @@ function dashboardHtml(view){
 
   const style = `
 <style>
-  /* compact layout for PDF */
+  /* Layout compacto y fijo para caber en una página A4 */
   #dashboard, [id^="dashboard-mod"] { break-inside: avoid; page-break-inside: avoid; }
-  .charts-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 6px 0 8px; }
-  .tables-2 { display:grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 4px 0 0; }
-  .chart-compact { width: 100%; height: 140px; display:block; }
-  #dashboard table.compact, [id^="dashboard-mod"] table.compact { font-size: 11px; }
-  #dashboard h4, [id^="dashboard-mod"] h4 { margin: 6px 0 4px; }
-  /* avoid breaking tables in the middle */
+  .dash h4 { margin: 4px 0 4px; font-size: 11px; }
+  .charts-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 4px 0 6px; }
+  .tables-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 4px 0 0; }
+  .chart-box { display:flex; flex-direction:column; gap:4px; overflow:hidden; }
+  .chart-compact { width: 100%; height: 120px; display:block; }
+  #dashboard table.compact, [id^="dashboard-mod"] table.compact { font-size: 10px; }
   .no-break, .no-break * { break-inside: avoid; page-break-inside: avoid; }
 </style>`.trim();
 
-  // 4 + 4.1 Overview — UNA página
+  // 4 + 4.1 Overview — misma página
   const sec4_overview = `
 <section class="page" id="dashboard">
   <h2>4. Dashboard</h2>
   <h3>4.1 Overview</h3>
   ${chartsBlock('chart-overview')}
-  ${tablesBlock(agg.overview)}
+  ${tablesBlock3(agg.overview)}
 </section>`.trim();
 
-  // 4.2 Modules — página nueva con 4.2.1 en la misma
+  // 4.2 Modules — nueva página, con 4.2.1 en la misma
   const firstMod = modules[0];
   const firstSlug = slugify(firstMod || 'module0');
   const sec4_2_header_and_first = `
@@ -126,20 +135,19 @@ function dashboardHtml(view){
   <h3>4.2 Modules</h3>
   <h4>4.2.1 ${firstMod || '—'}</h4>
   ${chartsBlock('chart-' + firstSlug)}
-  ${firstMod ? tablesBlock(agg.modules[firstMod]) : ''}
+  ${firstMod ? tablesBlock3(agg.modules[firstMod]) : ''}
 </section>`.trim();
 
   // 4.2.2… — cada módulo en su propia página
   const rest = modules.slice(1);
   const perModule = rest.map((m,i)=>{
     const s = slugify(m);
-    return (
-      '<section class="page" id="dashboard-mod-' + s + '">' +
-      '<h4>4.2.' + (i+2) + ' ' + m + '</h4>' +
-      chartsBlock('chart-' + s) +
-      tablesBlock(agg.modules[m]) +
-      '</section>'
-    ).trim();
+    return `
+<section class="page" id="dashboard-mod-${s}">
+  <h4>4.2.${i + 2} ${m}</h4>
+  ${chartsBlock('chart-' + s)}
+  ${tablesBlock3(agg.modules[m])}
+</section>`.trim();
   }).join('\n');
 
   // Payload para pintar
@@ -158,9 +166,23 @@ function dashboardHtml(view){
 
   var data = ${JSON.stringify(payload)};
 
+  function fixCanvasSize(el){
+    if (!el) return;
+    // Fijamos TAMBIÉN atributos para que Chart.js respete el alto
+    try {
+      el.height = 120;                    // <- alto real del bitmap
+      if (!el.width || el.width < 220) {  // ancho mínimo para que no crezca la altura
+        el.width = Math.max(220, el.clientWidth || 220);
+      }
+      el.style.height = '120px';
+      el.style.width = '100%';
+    } catch(e){}
+  }
+
   function draw(id, cfg){
     var el = document.getElementById(id);
     if (!el) return;
+    fixCanvasSize(el);
     try { new Chart(el.getContext('2d'), cfg); } catch(e){}
   }
 
