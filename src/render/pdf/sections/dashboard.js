@@ -94,9 +94,9 @@ function tablesBlock3(agg){
 function chartsBlock(idPrefix){
   return `
 <div class="dash charts-3 no-break">
-  <div class="chart-box"><h4>Distribution by State</h4><canvas class="chart-compact" id="${idPrefix}-state"></canvas></div>
-  <div class="chart-box"><h4>NEW vs REMOVED by Severity</h4><canvas class="chart-compact" id="${idPrefix}-new-removed"></canvas></div>
-  <div class="chart-box"><h4>By Severity &amp; State (stacked)</h4><canvas class="chart-compact" id="${idPrefix}-sev-state"></canvas></div>
+  <div class="chart-box"><h4>Distribution by State</h4><canvas class="chart-compact" id="${idPrefix}-state" width="220" height="90"></canvas></div>
+  <div class="chart-box"><h4>NEW vs REMOVED by Severity</h4><canvas class="chart-compact" id="${idPrefix}-new-removed" width="220" height="90"></canvas></div>
+  <div class="chart-box"><h4>By Severity &amp; State (stacked)</h4><canvas class="chart-compact" id="${idPrefix}-sev-state" width="220" height="90"></canvas></div>
 </div>`.trim();
 }
 
@@ -107,18 +107,20 @@ function dashboardHtml(view){
 
   const style = `
 <style>
-  /* Layout compacto y fijo para caber en una página A4 */
+  /* Todo este bloque cabe en una página A4 con márgenes estándar */
   #dashboard, [id^="dashboard-mod"] { break-inside: avoid; page-break-inside: avoid; }
-  .dash h4 { margin: 4px 0 4px; font-size: 11px; }
-  .charts-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 4px 0 6px; }
-  .tables-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 4px 0 0; }
-  .chart-box { display:flex; flex-direction:column; gap:4px; overflow:hidden; }
-  .chart-compact { width: 100%; height: 120px; display:block; }
-  #dashboard table.compact, [id^="dashboard-mod"] table.compact { font-size: 10px; }
+  .dash h4 { margin: 3px 0 3px; font-size: 10px; line-height: 1.15; }
+  .charts-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 2px 0 6px; }
+  .tables-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0; }
+  .chart-box { display:flex; flex-direction:column; gap:3px; overflow:hidden; }
+  .chart-compact { width: 220px; height: 90px; display:block; }
+  #dashboard table.compact, [id^="dashboard-mod"] table.compact { font-size: 9px; line-height: 1.25; }
+  #dashboard table.compact th, #dashboard table.compact td,
+  [id^="dashboard-mod"] table.compact th, [id^="dashboard-mod"] table.compact td { padding: 3px 6px; }
   .no-break, .no-break * { break-inside: avoid; page-break-inside: avoid; }
 </style>`.trim();
 
-  // 4 + 4.1 Overview — misma página
+  // 4 + 4.1 Overview — una sola página
   const sec4_overview = `
 <section class="page" id="dashboard">
   <h2>4. Dashboard</h2>
@@ -150,39 +152,38 @@ function dashboardHtml(view){
 </section>`.trim();
   }).join('\n');
 
-  // Payload para pintar
   const payload = {
     SEV_ORDER, STATE_ORDER,
     overview: agg.overview,
     modules: modules.map((m, idx)=>({ name:m, slug:slugify(m||('module'+idx)), data: agg.modules[m] }))
   };
 
-  // Script Chart.js + señales waitForVisuals
   const script = `
 <script>(function(){
   if (typeof window==='undefined' || typeof document==='undefined') return;
   if (!window.Chart) { window.__chartsReady = true; return; }
-  if (window.Chart.defaults && window.Chart.defaults.animation!=null) window.Chart.defaults.animation = false;
+
+  // Nada de responsive para que no crezca; bitmap fijo y DPI plano
+  try {
+    window.Chart.defaults.responsive = false;
+    window.Chart.defaults.maintainAspectRatio = false;
+    Object.defineProperty(window, 'devicePixelRatio', { value: 1, configurable: true });
+  } catch(e){}
 
   var data = ${JSON.stringify(payload)};
 
-  function fixCanvasSize(el){
+  function lockCanvas(el){
     if (!el) return;
-    // Fijamos TAMBIÉN atributos para que Chart.js respete el alto
-    try {
-      el.height = 120;                    // <- alto real del bitmap
-      if (!el.width || el.width < 220) {  // ancho mínimo para que no crezca la altura
-        el.width = Math.max(220, el.clientWidth || 220);
-      }
-      el.style.height = '120px';
-      el.style.width = '100%';
-    } catch(e){}
+    el.style.width = '220px';
+    el.style.height = '90px';
+    if (el.width !== 220) el.width = 220;
+    if (el.height !== 90) el.height = 90;
   }
 
   function draw(id, cfg){
     var el = document.getElementById(id);
     if (!el) return;
-    fixCanvasSize(el);
+    lockCanvas(el);
     try { new Chart(el.getContext('2d'), cfg); } catch(e){}
   }
 
@@ -191,7 +192,7 @@ function dashboardHtml(view){
     draw('chart-overview-state', {
       type:'bar',
       data:{ labels:data.STATE_ORDER, datasets:[{label:'Count', data:data.STATE_ORDER.map(function(s){return o.totalsByState[s]||0;})}] },
-      options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}}, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
+      options:{ animation:false, plugins:{legend:{display:false}}, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
     });
     draw('chart-overview-new-removed', {
       type:'bar',
@@ -199,7 +200,7 @@ function dashboardHtml(view){
         {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=o.newVsRemovedBySeverity[s]||{};return r.NEW||0;})},
         {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=o.newVsRemovedBySeverity[s]||{};return r.REMOVED||0;})}
       ]},
-      options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
+      options:{ animation:false, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
     });
     draw('chart-overview-sev-state', {
       type:'bar',
@@ -208,7 +209,7 @@ function dashboardHtml(view){
         {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.REMOVED||0;}), stack:'s1'},
         {label:'UNCHANGED', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.UNCHANGED||0;}), stack:'s1'}
       ]},
-      options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}} }
+      options:{ animation:false, scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}} }
     });
   }
 
@@ -218,7 +219,7 @@ function dashboardHtml(view){
     draw(base + '-state', {
       type:'bar',
       data:{ labels:data.STATE_ORDER, datasets:[{label:'Count', data:data.STATE_ORDER.map(function(s){return (m.totalsByState||{})[s]||0;})}] },
-      options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}}, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
+      options:{ animation:false, plugins:{legend:{display:false}}, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
     });
     draw(base + '-new-removed', {
       type:'bar',
@@ -226,7 +227,7 @@ function dashboardHtml(view){
         {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=(m.newVsRemovedBySeverity||{})[s]||{};return r.NEW||0;})},
         {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=(m.newVsRemovedBySeverity||{})[s]||{};return r.REMOVED||0;})}
       ]},
-      options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
+      options:{ animation:false, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
     });
     draw(base + '-sev-state', {
       type:'bar',
@@ -235,7 +236,7 @@ function dashboardHtml(view){
         {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.REMOVED||0;}), stack:'s1'},
         {label:'UNCHANGED', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.UNCHANGED||0;}), stack:'s1'}
       ]},
-      options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}} }
+      options:{ animation:false, scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}} }
     });
   }
 
