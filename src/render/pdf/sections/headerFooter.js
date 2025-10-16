@@ -74,10 +74,19 @@ async function getLogoDataUri(logoInput, distDir) {
 function headerTemplate({ logoDataUri, repo, generatedAt }) {
   const H = 36; // altura banda
   const band = '#0b0f16';
-  const logoBlock = logoDataUri
-    ? `<div style="width:120px;height:18px;background-image:url('${logoDataUri}');
-                    background-size:contain;background-repeat:no-repeat;background-position:left center;margin-right:10px;flex:0 0 auto;"></div>`
-    : '';
+// en headerTemplate(...)
+    const logoBlock = logoDataUri
+      ? `<div style="
+            width:120px;height:18px;
+            background-image:url('${logoDataUri}');
+            background-size:contain;background-repeat:no-repeat;background-position:left center;
+            margin-right:10px;flex:0 0 auto;
+            background-color:transparent !important;
+            -webkit-print-color-adjust:exact; print-color-adjust:exact;
+            image-rendering:auto; filter:none; box-shadow:none;
+         "></div>`
+      : '';
+
 
   return `
   <div style="position:relative;width:100%;height:${H}px;">
@@ -110,10 +119,19 @@ function headerTemplate({ logoDataUri, repo, generatedAt }) {
 function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
   const H = 32; // altura banda
   const band = '#0b0f16';
-  const logoBlock = logoDataUri
-    ? `<div style="width:100px;height:14px;background-image:url('${logoDataUri}');
-                    background-size:contain;background-repeat:no-repeat;background-position:left center;margin-right:8px;flex:0 0 auto;"></div>`
-    : '';
+// en footerTemplate(...)
+const logoBlock = logoDataUri
+  ? `<div style="
+        width:100px;height:14px;
+        background-image:url('${logoDataUri}');
+        background-size:contain;background-repeat:no-repeat;background-position:left center;
+        margin-right:8px;flex:0 0 auto;
+        background-color:transparent !important;
+        -webkit-print-color-adjust:exact; print-color-adjust:exact;
+        image-rendering:auto; filter:none; box-shadow:none;
+     "></div>`
+  : '';
+
 
   return `
   <div style="position:relative;width:100%;height:${H}px;">
