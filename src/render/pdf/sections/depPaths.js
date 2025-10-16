@@ -64,7 +64,7 @@ function section(id, title, inner){
   return `<section class="page" id="${id}"><h2>${title}</h2>${inner}</section>`;
 }
 
-function depPathsHtml(view){
+function dependencyPathsHtml(view){
   const baseItems = Array.isArray(view?.base?.items) ? view.base.items : [];
   const headItems = Array.isArray(view?.head?.items) ? view.head.items : [];
   // fallback si no llegan base/head:
@@ -103,4 +103,4 @@ function depPathsHtml(view){
   ].join('\n');
 }
 
-module.exports = { depPathsHtml };
+module.exports = { dependencyPathsHtml };
