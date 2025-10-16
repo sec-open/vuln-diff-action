@@ -124,10 +124,21 @@ async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
   const diffOnce = await loadDiff(distDir);
   const items = Array.isArray(diffOnce?.items) ? diffOnce.items : [];
 
-  const depBaseInner = dependencyPathsHtml(items, 'base');
-  const depHeadInner = dependencyPathsHtml(items, 'head');
-  bodyInner += '\n' + sectionWrapper({ id: 'dep-paths-base', title: '7. Dependency Paths — Base', num: 7, innerHtml: depBaseInner });
-  bodyInner += '\n' + sectionWrapper({ id: 'dep-paths-head', title: '8. Dependency Paths — Head', num: 8, innerHtml: depHeadInner });
+ const depBaseInner = dependencyPathsHtml(items, 'base');
+ const depHeadInner = dependencyPathsHtml(items, 'head');
+
+ bodyInner += '\n' + sectionWrapper({
+   id: 'dep-paths-base',
+   title: 'Dependency Paths — Base',
+   num: 7,
+   innerHtml: depBaseInner
+ });
+ bodyInner += '\n' + sectionWrapper({
+   id: 'dep-paths-head',
+   title: 'Dependency Paths — Head',
+   num: 8,
+   innerHtml: depHeadInner
+ });
 
   const fixSection = await fixHtml(distDir);
   bodyInner += '\n' + fixSection;
