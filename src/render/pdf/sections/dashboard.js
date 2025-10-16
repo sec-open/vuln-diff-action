@@ -107,20 +107,26 @@ function dashboardHtml(view){
 
   const style = `
 <style>
-  /* Todo este bloque cabe en una página A4 con márgenes estándar */
+  /* Evitar cortes y definir layout */
   #dashboard, [id^="dashboard-mod"] { break-inside: avoid; page-break-inside: avoid; }
   .dash h4 { margin: 3px 0 3px; font-size: 10px; line-height: 1.15; }
-  .charts-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 2px 0 6px; }
-  .tables-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0; }
-  .chart-box { display:flex; flex-direction:column; gap:3px; overflow:hidden; }
+
+  /* ➜ Gráficas en TRES FILAS (una debajo de otra) */
+  .charts-3 { display:grid; grid-template-columns: 1fr; grid-auto-rows: auto; gap: 8px; margin: 4px 0 8px; }
+
+  /* Tablas se mantienen en 3 columnas */
+  .tables-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+
+  .chart-box { display:flex; flex-direction:column; gap:4px; overflow:hidden; }
   .chart-compact { width: 660px; height: 270px; display:block; }
+
   #dashboard table.compact, [id^="dashboard-mod"] table.compact { font-size: 9px; line-height: 1.25; }
   #dashboard table.compact th, #dashboard table.compact td,
   [id^="dashboard-mod"] table.compact th, [id^="dashboard-mod"] table.compact td { padding: 3px 6px; }
   .no-break, .no-break * { break-inside: avoid; page-break-inside: avoid; }
 </style>`.trim();
 
-  // 4 + 4.1 Overview — una sola página
+  // 4 + 4.1 Overview — una sola página (si la altura total lo permite)
   const sec4_overview = `
 <section class="page" id="dashboard">
   <h2>4. Dashboard</h2>
@@ -163,7 +169,6 @@ function dashboardHtml(view){
   if (typeof window==='undefined' || typeof document==='undefined') return;
   if (!window.Chart) { window.__chartsReady = true; return; }
 
-  // Nada de responsive para que no crezca; bitmap fijo y DPI plano
   try {
     window.Chart.defaults.responsive = false;
     window.Chart.defaults.maintainAspectRatio = false;
