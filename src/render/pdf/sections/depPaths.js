@@ -1,106 +1,144 @@
 // src/render/pdf/sections/depPaths.js
 
-function parsePurlToGAV(purl){
-  try{
-    if (!purl || typeof purl !== 'string') return purl || '';
-    const m = purl.match(/^pkg:maven\/([^/]+)\/([^@]+)@([^?]+)/i);
-    if (m) return `${m[1]}:${m[2]}:${m[3]}`;
-  }catch(_){}
-  return purl || '';
-}
+const SEV_ORDER = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, UNKNOWN:1 };
+const STATE_ORDER = { NEW:3, REMOVED:2, UNCHANGED:1 };
 
-function toGAV(pkg){
-  if (!pkg) return '';
-  const g = pkg.groupId || pkg.group || pkg.namespace || '';
-  const a = pkg.artifactId || pkg.artifact || pkg.name || '';
-  const v = pkg.version || '';
-  const ga = [g,a].filter(Boolean).join(':');
-  return v ? (ga ? `${ga}:${v}` : v) : ga;
-}
+// ---------- helpers idénticos a los que funcionaban ----------
+const pkgStr = (p) => {
+  if (!p) return '—';
+  const g = p.groupId || ''; const a = p.artifactId || ''; const v = p.version || '';
+  if (g && a && v) return `${g}:${a}:${v}`;
+  if (a && v) return `${a}:${v}`;
+  return a || v || '—';
+};
 
-function makeTable(headers, rows){
-  const thead = `<thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>`;
-  const tbody = rows.length
-    ? rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')
-    : `<tr><td colspan="${headers.length}">—</td></tr>`;
-  return `<table class="compact">${thead}<tbody>${tbody}</tbody></table>`;
-}
+const vulnLink = (it) => {
+  const url = Array.isArray(it.urls) && it.urls[0] ? it.urls[0] : (it.url || '');
+  const id = it.id || it.vulnerabilityId || '—';
+  return url ? `<a href="${url}">${id}</a>` : id;
+};
 
-function rowsFromItems(items = []){
-  const out = [];
-  for (const it of items){
-    const vulnId = it.id || it.vulnerabilityId || it.ghsa || it.cve || '-';
-    const pkgGav = toGAV(it.package || {});
-    const mp = it.module_paths || {};                 // { "<module>": [ [purl, ...], ... ] }
-    const fallbackModule = it.module ? String(it.module) : null;
-    const modules = Object.keys(mp || {});
-    if (modules.length === 0 && Array.isArray(it.paths) && fallbackModule){
-      // fallback: algunos normalizadores usan `paths` y `module`
-      for (const p of it.paths){
-        const hops = (Array.isArray(p) ? p : []).map(parsePurlToGAV).filter(Boolean);
-        out.push([vulnId, pkgGav, fallbackModule, [fallbackModule].concat(hops).join(' → ')]);
-      }
+// ---------- renderer por lado (BASE/HEAD) ----------
+function buildDependencyPathsSection(items, side) {
+  const keep = (it) => {
+    const st = String(it.state || '').toUpperCase();
+    if (side === 'base') return st === 'REMOVED' || st === 'UNCHANGED';
+    if (side === 'head') return st === 'NEW' || st === 'UNCHANGED';
+    return true;
+  };
+
+  const triples = [];
+  for (const it of (items || [])) {
+    if (!keep(it)) continue;
+    const sev = String(it.severity || 'UNKNOWN').toUpperCase();
+    const gav = pkgStr(it.package);
+    const vhtml = vulnLink(it);
+    const vid = it.id || it.vulnerabilityId || '';
+    const mp = it.module_paths || {};
+    const mods = Object.keys(mp);
+
+    if (!mods.length) {
+      triples.push({ sev, module:'', tail:'', gav, vhtml, vid });
       continue;
     }
-    for (const mod of modules){
-      const paths = Array.isArray(mp[mod]) ? mp[mod] : [];
-      for (const p of paths){
-        const hops = (Array.isArray(p) ? p : []).map(parsePurlToGAV).filter(Boolean);
-        let finalHops = hops.slice();
-        if (finalHops.length && typeof finalHops[0] === 'string' && finalHops[0].startsWith(mod + ':')){
-          finalHops = finalHops.slice(1);
+
+    for (const mod of mods) {
+      const tails = Array.isArray(mp[mod]) ? mp[mod] : [];
+      if (!tails.length) {
+        triples.push({ sev, module:mod, tail:'', gav, vhtml, vid });
+      } else {
+        for (const t of tails) {
+          const tail = t || '';
+          triples.push({ sev, module:mod, tail, gav, vhtml, vid });
         }
-        out.push([vulnId, pkgGav, mod, [mod].concat(finalHops).join(' → ')]);
       }
     }
   }
-  // dedup
-  const seen = new Set(); const dedup = [];
-  for (const r of out){ const k = r.join('||'); if (!seen.has(k)){ seen.add(k); dedup.push(r); } }
-  return dedup;
+
+  // dedupe intra-vuln
+  const uniq = new Map();
+  for (const r of triples) {
+    const key = `${r.vid}||${r.module}||${Array.isArray(r.tail) ? r.tail.join('>') : r.tail}`;
+    if (!uniq.has(key)) uniq.set(key, r);
+  }
+  const rows = Array.from(uniq.values());
+  if (!rows.length) return `<p>No dependency paths to display for ${side === 'base' ? 'Base' : 'Head'}.</p>`;
+
+  // orden: severidad desc, luego vuln, pkg, módulo, path
+  rows.sort((a, b) => {
+    const ra = SEV_ORDER[a.sev] || 0, rb = SEV_ORDER[b.sev] || 0;
+    if (ra !== rb) return rb - ra;
+    const ia = a.vid||'', ib = b.vid||''; if (ia!==ib) return ia.localeCompare(ib,'en',{sensitivity:'base'});
+    const pa = a.gav||'', pb = b.gav||''; if (pa!==pb) return pa.localeCompare(pb,'en',{sensitivity:'base'});
+    const ma = a.module||'', mb = b.module||''; if (ma!==mb) return ma.localeCompare(mb,'en',{sensitivity:'base'});
+    const ta = Array.isArray(a.tail) ? a.tail.join('>') : (a.tail||'');
+    const tb = Array.isArray(b.tail) ? b.tail.join('>') : (b.tail||'');
+    return ta.localeCompare(tb,'en',{sensitivity:'base'});
+  });
+
+  // agrupa por severidad
+  const groups = rows.reduce((acc, r) => ((acc[r.sev] ||= []).push(r), acc), {});
+  const sevOrderArr = Object.keys(SEV_ORDER).sort((s1, s2) => (SEV_ORDER[s2] - SEV_ORDER[s1]));
+
+  const sections = sevOrderArr
+    .filter(sev => Array.isArray(groups[sev]) && groups[sev].length)
+    .map(sev => {
+      const trs = groups[sev].map(r => {
+        // “poner en primera posición el módulo y el resto de hop detrás del artifactId que coincide con el módulo”
+        // Aquí la ‘tail’ viene tal cual desde diff (array o string). Si es array, pintamos tal cual detrás del módulo.
+        const tailStr = Array.isArray(r.tail) ? r.tail.join(' -> ') : (r.tail || '');
+        const right = tailStr ? `${r.module} -> ${tailStr}` : (r.module || '—');
+        return `<tr>
+          <td>${r.vhtml}</td>
+          <td>${r.gav}</td>
+          <td>${right}</td>
+        </tr>`;
+      }).join('');
+
+      return `
+        <h4 class="subsection-title">${sev}</h4>
+        <table class="dep-paths-table">
+          <thead><tr><th>Vulnerability</th><th>Package</th><th>Module → Path tail</th></tr></thead>
+          <tbody>${trs}</tbody>
+        </table>
+      `;
+    }).join('\n');
+
+  return `<div class="dep-paths">${sections}</div>`;
 }
 
-function section(id, title, inner){
-  return `<section class="page" id="${id}"><h2>${title}</h2>${inner}</section>`;
-}
+// ---------- orquestador: devuelve las DOS secciones completas (7 y 8) ----------
+function dependencyPathsHtml(itemsOrView) {
+  // acepta directamente items[] o un objeto { diff: { items: [...] } }
+  const items = Array.isArray(itemsOrView)
+    ? itemsOrView
+    : (Array.isArray(itemsOrView?.diff?.items) ? itemsOrView.diff.items : []);
 
-function dependencyPathsHtml(view){
-  const baseItems = Array.isArray(view?.base?.items) ? view.base.items : [];
-  const headItems = Array.isArray(view?.head?.items) ? view.head.items : [];
-  // fallback si no llegan base/head:
-  const diffItems = Array.isArray(view?.diff?.items) ? view.diff.items : [];
+  const depBase = buildDependencyPathsSection(items, 'base');
+  const depHead = buildDependencyPathsSection(items, 'head');
 
-  const headers = ['Vulnerability','Package','Module','Dependency Path'];
-  const baseRows = rowsFromItems(baseItems);
-  const headRows = rowsFromItems(headItems.length ? headItems : diffItems);
-
-  const style = `
+  const css = `
 <style>
-  #dep-paths { page-break-inside: avoid; break-inside: avoid; }
-  #dep-paths .block { margin: 10px 0 14px; page-break-inside: avoid; break-inside: avoid; }
-  #dep-paths table.compact { font-size: 10px; }
-  #dep-paths th, #dep-paths td { padding: 3px 6px; vertical-align: top; }
+  .section-wrap { page-break-inside: avoid; break-inside: avoid; }
+  h2.section-title { margin: 0 0 8px 0; }
+  .dep-paths-table { width: 100%; border-collapse: collapse; }
+  .dep-paths-table th, .dep-paths-table td { padding: 4px 8px; font-size: 10px; line-height: 1.25; border-bottom: 1px solid #e5e7eb; }
+  .subsection-title { margin: 10px 0 6px 0; font-size: 12px; }
 </style>`.trim();
 
-  const baseHtml = `
-<div class="block" id="dep-paths-base">
-  <h3>7. Dependency Paths (BASE)</h3>
-  ${makeTable(headers, baseRows)}
+  const sec7 = `
+<div class="page section-wrap" id="dep-paths-base">
+  <h2 class="section-title">7. Dependency Paths — Base</h2>
+  ${depBase}
 </div>`.trim();
 
-  const headHtml = `
-<div class="block" id="dep-paths-head">
-  <h3>8. Dependency Paths (HEAD)</h3>
-  ${makeTable(headers, headRows)}
+  const sec8 = `
+<div class="page section-wrap" id="dep-paths-head">
+  <h2 class="section-title">8. Dependency Paths — Head</h2>
+  ${depHead}
 </div>`.trim();
 
-  return [
-    `<section class="page" id="dep-paths"><h2>7–8. Dependency Paths</h2>`,
-    style,
-    baseHtml,
-    headHtml,
-    `</section>`
-  ].join('\n');
+  return [css, sec7, sec8].join('\n');
 }
 
 module.exports = { dependencyPathsHtml };
