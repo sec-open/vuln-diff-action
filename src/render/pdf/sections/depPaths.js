@@ -3,7 +3,6 @@
 function parsePurlToGAV(purl){
   try{
     if (!purl || typeof purl !== 'string') return purl || '';
-    // pkg:maven/group/artifact@version?...
     const m = purl.match(/^pkg:maven\/([^/]+)\/([^@]+)@([^?]+)/i);
     if (m) return `${m[1]}:${m[2]}:${m[3]}`;
   }catch(_){}
@@ -27,49 +26,57 @@ function makeTable(headers, rows){
   return `<table class="compact">${thead}<tbody>${tbody}</tbody></table>`;
 }
 
-function extractRowsFromItems(items = []){
+function rowsFromItems(items = []){
   const out = [];
   for (const it of items){
     const vulnId = it.id || it.vulnerabilityId || it.ghsa || it.cve || '-';
     const pkgGav = toGAV(it.package || {});
-    const mp = it.module_paths || {}; // { "<module>": [ [purl, ...], ... ] }
-    for (const mod of Object.keys(mp || {})){
+    const mp = it.module_paths || {};                 // { "<module>": [ [purl, ...], ... ] }
+    const fallbackModule = it.module ? String(it.module) : null;
+    const modules = Object.keys(mp || {});
+    if (modules.length === 0 && Array.isArray(it.paths) && fallbackModule){
+      // fallback: algunos normalizadores usan `paths` y `module`
+      for (const p of it.paths){
+        const hops = (Array.isArray(p) ? p : []).map(parsePurlToGAV).filter(Boolean);
+        out.push([vulnId, pkgGav, fallbackModule, [fallbackModule].concat(hops).join(' → ')]);
+      }
+      continue;
+    }
+    for (const mod of modules){
       const paths = Array.isArray(mp[mod]) ? mp[mod] : [];
-      for (const pathArr of paths){
-        const hops = (Array.isArray(pathArr) ? pathArr : []).map(parsePurlToGAV).filter(Boolean);
-        // si el primer hop repite el módulo, lo omitimos
+      for (const p of paths){
+        const hops = (Array.isArray(p) ? p : []).map(parsePurlToGAV).filter(Boolean);
         let finalHops = hops.slice();
         if (finalHops.length && typeof finalHops[0] === 'string' && finalHops[0].startsWith(mod + ':')){
           finalHops = finalHops.slice(1);
         }
-        const pathStr = [mod].concat(finalHops).join(' → ');
-        out.push([vulnId, pkgGav, mod, pathStr]);
+        out.push([vulnId, pkgGav, mod, [mod].concat(finalHops).join(' → ')]);
       }
     }
   }
-  // dedup por fila completa
-  const seen = new Set();
-  const dedup = [];
-  for (const r of out){
-    const k = r.join('||');
-    if (!seen.has(k)){ seen.add(k); dedup.push(r); }
-  }
+  // dedup
+  const seen = new Set(); const dedup = [];
+  for (const r of out){ const k = r.join('||'); if (!seen.has(k)){ seen.add(k); dedup.push(r); } }
   return dedup;
+}
+
+function section(id, title, inner){
+  return `<section class="page" id="${id}"><h2>${title}</h2>${inner}</section>`;
 }
 
 function depPathsHtml(view){
   const baseItems = Array.isArray(view?.base?.items) ? view.base.items : [];
   const headItems = Array.isArray(view?.head?.items) ? view.head.items : [];
-
-  const baseRows = extractRowsFromItems(baseItems);
-  const headRows = extractRowsFromItems(headItems);
+  // fallback si no llegan base/head:
+  const diffItems = Array.isArray(view?.diff?.items) ? view.diff.items : [];
 
   const headers = ['Vulnerability','Package','Module','Dependency Path'];
+  const baseRows = rowsFromItems(baseItems);
+  const headRows = rowsFromItems(headItems.length ? headItems : diffItems);
 
   const style = `
 <style>
   #dep-paths { page-break-inside: avoid; break-inside: avoid; }
-  #dep-paths h2 { margin-bottom: 8px; }
   #dep-paths .block { margin: 10px 0 14px; page-break-inside: avoid; break-inside: avoid; }
   #dep-paths table.compact { font-size: 10px; }
   #dep-paths th, #dep-paths td { padding: 3px 6px; vertical-align: top; }
@@ -87,14 +94,13 @@ function depPathsHtml(view){
   ${makeTable(headers, headRows)}
 </div>`.trim();
 
-  // devolvemos sección completa sin helpers externos (evita colisiones)
-  return `
-<section class="page" id="dep-paths">
-  <h2>7–8. Dependency Paths</h2>
-  ${style}
-  ${baseHtml}
-  ${headHtml}
-</section>`.trim();
+  return [
+    `<section class="page" id="dep-paths"><h2>7–8. Dependency Paths</h2>`,
+    style,
+    baseHtml,
+    headHtml,
+    `</section>`
+  ].join('\n');
 }
 
 module.exports = { depPathsHtml };
