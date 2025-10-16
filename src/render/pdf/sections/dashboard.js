@@ -76,7 +76,7 @@ function tablesBlock(agg){
   });
   const sevTbl = tableFromArray(['Severity','NEW','REMOVED','UNCHANGED'], sevRows);
   return `
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0;">
+<div class="tables-2 no-break">
   <div><h4>Totals by State</h4>${totals}</div>
   <div><h4>Severity × State</h4>${sevTbl}</div>
 </div>`.trim();
@@ -84,10 +84,10 @@ function tablesBlock(agg){
 
 function chartsBlock(idPrefix){
   return `
-<div style="display:grid;grid-template-columns:1fr;gap:14px;">
-  <div><h4>Distribution by State</h4><canvas id="${idPrefix}-state" style="width:100%;height:280px;"></canvas></div>
-  <div><h4>NEW vs REMOVED by Severity</h4><canvas id="${idPrefix}-new-removed" style="width:100%;height:280px;"></canvas></div>
-  <div><h4>By Severity &amp; State (stacked)</h4><canvas id="${idPrefix}-sev-state" style="width:100%;height:280px;"></canvas></div>
+<div class="charts-3 no-break">
+  <div><h4>Distribution by State</h4><canvas class="chart-compact" id="${idPrefix}-state"></canvas></div>
+  <div><h4>NEW vs REMOVED by Severity</h4><canvas class="chart-compact" id="${idPrefix}-new-removed"></canvas></div>
+  <div><h4>By Severity &amp; State (stacked)</h4><canvas class="chart-compact" id="${idPrefix}-sev-state"></canvas></div>
 </div>`.trim();
 }
 
@@ -95,6 +95,19 @@ function dashboardHtml(view){
   const items = Array.isArray(view?.diff?.items) ? view.diff.items : (Array.isArray(view?.items) ? view.items : []);
   const agg = aggregate(items);
   const modules = Object.keys(agg.modules).sort((a,b)=>a.localeCompare(b,'en',{sensitivity:'base'}));
+
+  const style = `
+<style>
+  /* compact layout for PDF */
+  #dashboard, [id^="dashboard-mod"] { break-inside: avoid; page-break-inside: avoid; }
+  .charts-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 6px 0 8px; }
+  .tables-2 { display:grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 4px 0 0; }
+  .chart-compact { width: 100%; height: 140px; display:block; }
+  #dashboard table.compact, [id^="dashboard-mod"] table.compact { font-size: 11px; }
+  #dashboard h4, [id^="dashboard-mod"] h4 { margin: 6px 0 4px; }
+  /* avoid breaking tables in the middle */
+  .no-break, .no-break * { break-inside: avoid; page-break-inside: avoid; }
+</style>`.trim();
 
   // 4 + 4.1 Overview — UNA página
   const sec4_overview = `
@@ -129,93 +142,90 @@ function dashboardHtml(view){
     ).trim();
   }).join('\n');
 
-  // Script de Chart.js (no toca exporter; sólo emite señales compatibles)
+  // Payload para pintar
   const payload = {
     SEV_ORDER, STATE_ORDER,
     overview: agg.overview,
     modules: modules.map((m, idx)=>({ name:m, slug:slugify(m||('module'+idx)), data: agg.modules[m] }))
   };
 
+  // Script Chart.js + señales waitForVisuals
   const script = `
-  <script>(function(){
-    if (typeof window==='undefined' || typeof document==='undefined') return;
-    if (!window.Chart) { window.__chartsReady = true; return; }  // <-- señal para waitForVisuals si no hay Chart
-    if (window.Chart.defaults && window.Chart.defaults.animation!=null) window.Chart.defaults.animation = false;
-    if (!window.__requireReady) window.__requireReady = function(){};
-    if (!window.__markSectionReady) window.__markSectionReady = function(){};
-    try { window.__requireReady('dashboard'); } catch(e){}
+<script>(function(){
+  if (typeof window==='undefined' || typeof document==='undefined') return;
+  if (!window.Chart) { window.__chartsReady = true; return; }
+  if (window.Chart.defaults && window.Chart.defaults.animation!=null) window.Chart.defaults.animation = false;
 
-    var data = ${JSON.stringify(payload)};
+  var data = ${JSON.stringify(payload)};
 
-    function draw(id, cfg){ var el = document.getElementById(id); if (!el) return; try { new Chart(el.getContext('2d'), cfg); } catch(e){} }
+  function draw(id, cfg){
+    var el = document.getElementById(id);
+    if (!el) return;
+    try { new Chart(el.getContext('2d'), cfg); } catch(e){}
+  }
 
-    function drawOverview(){
-      var o = data.overview;
-      draw('chart-overview-state', {
-        type:'bar',
-        data:{ labels:data.STATE_ORDER, datasets:[{label:'Count', data:data.STATE_ORDER.map(function(s){return o.totalsByState[s]||0;})}] },
-        options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}}, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
-      });
-      draw('chart-overview-new-removed', {
-        type:'bar',
-        data:{ labels:data.SEV_ORDER, datasets:[
-          {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=o.newVsRemovedBySeverity[s]||{};return r.NEW||0;})},
-          {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=o.newVsRemovedBySeverity[s]||{};return r.REMOVED||0;})}
-        ]},
-        options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
-      });
-      draw('chart-overview-sev-state', {
-        type:'bar',
-        data:{ labels:data.SEV_ORDER, datasets:[
-          {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.NEW||0;}), stack:'s1'},
-          {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.REMOVED||0;}), stack:'s1'},
-          {label:'UNCHANGED', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.UNCHANGED||0;}), stack:'s1'}
-        ]},
-        options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}} }
-      });
-    }
+  function drawOverview(){
+    var o = data.overview;
+    draw('chart-overview-state', {
+      type:'bar',
+      data:{ labels:data.STATE_ORDER, datasets:[{label:'Count', data:data.STATE_ORDER.map(function(s){return o.totalsByState[s]||0;})}] },
+      options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}}, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
+    });
+    draw('chart-overview-new-removed', {
+      type:'bar',
+      data:{ labels:data.SEV_ORDER, datasets:[
+        {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=o.newVsRemovedBySeverity[s]||{};return r.NEW||0;})},
+        {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=o.newVsRemovedBySeverity[s]||{};return r.REMOVED||0;})}
+      ]},
+      options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
+    });
+    draw('chart-overview-sev-state', {
+      type:'bar',
+      data:{ labels:data.SEV_ORDER, datasets:[
+        {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.NEW||0;}), stack:'s1'},
+        {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.REMOVED||0;}), stack:'s1'},
+        {label:'UNCHANGED', data:data.SEV_ORDER.map(function(s){var r=o.matrixSevState[s]||{};return r.UNCHANGED||0;}), stack:'s1'}
+      ]},
+      options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}} }
+    });
+  }
 
-    function drawModule(mod){
-      var base = 'chart-' + mod.slug;
-      var m = mod.data || { totalsByState:{}, newVsRemovedBySeverity:{}, matrixSevState:{} };
-      draw(base + '-state', {
-        type:'bar',
-        data:{ labels:data.STATE_ORDER, datasets:[{label:'Count', data:data.STATE_ORDER.map(function(s){return (m.totalsByState||{})[s]||0;})}] },
-        options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}}, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
-      });
-      draw(base + '-new-removed', {
-        type:'bar',
-        data:{ labels:data.SEV_ORDER, datasets:[
-          {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=(m.newVsRemovedBySeverity||{})[s]||{};return r.NEW||0;})},
-          {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=(m.newVsRemovedBySeverity||{})[s]||{};return r.REMOVED||0;})}
-        ]},
-        options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
-      });
-      draw(base + '-sev-state', {
-        type:'bar',
-        data:{ labels:data.SEV_ORDER, datasets:[
-          {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.NEW||0;}), stack:'s1'},
-          {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.REMOVED||0;}), stack:'s1'},
-          {label:'UNCHANGED', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.UNCHANGED||0;}), stack:'s1'}
-        ]},
-        options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}} }
-      });
-    }
+  function drawModule(mod){
+    var base = 'chart-' + mod.slug;
+    var m = mod.data || { totalsByState:{}, newVsRemovedBySeverity:{}, matrixSevState:{} };
+    draw(base + '-state', {
+      type:'bar',
+      data:{ labels:data.STATE_ORDER, datasets:[{label:'Count', data:data.STATE_ORDER.map(function(s){return (m.totalsByState||{})[s]||0;})}] },
+      options:{ responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}}, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
+    });
+    draw(base + '-new-removed', {
+      type:'bar',
+      data:{ labels:data.SEV_ORDER, datasets:[
+        {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=(m.newVsRemovedBySeverity||{})[s]||{};return r.NEW||0;})},
+        {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=(m.newVsRemovedBySeverity||{})[s]||{};return r.REMOVED||0;})}
+      ]},
+      options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:false},y:{stacked:false,beginAtZero:true}} }
+    });
+    draw(base + '-sev-state', {
+      type:'bar',
+      data:{ labels:data.SEV_ORDER, datasets:[
+        {label:'NEW', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.NEW||0;}), stack:'s1'},
+        {label:'REMOVED', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.REMOVED||0;}), stack:'s1'},
+        {label:'UNCHANGED', data:data.SEV_ORDER.map(function(s){var r=(m.matrixSevState||{})[s]||{};return r.UNCHANGED||0;}), stack:'s1'}
+      ]},
+      options:{ responsive:true, maintainAspectRatio:false, animation:false, scales:{x:{stacked:true},y:{stacked:true,beginAtZero:true}} }
+    });
+  }
 
-    try {
-      drawOverview();
-      (data.modules||[]).forEach(drawModule);
-    } finally {
-      try { window.__markSectionReady('dashboard'); } catch(e){}
-      // Señales que espera tu waitForVisuals
-      window.__chartsReady = true;          // <-- clave para waitForVisuals
-      window.__ALL_SECTIONS_READY = true;   // (opcional, ya lo usabas)
-      window.PDF_READY = true;              // (opcional, compat)
-    }
-  })();</script>`.trim();
+  try {
+    drawOverview();
+    (data.modules||[]).forEach(drawModule);
+  } finally {
+    window.__chartsReady = true;
+  }
+})();</script>`.trim();
 
-
-  return [sec4_overview, sec4_2_header_and_first, perModule, script].join('\n');
+  return [style, sec4_overview, sec4_2_header_and_first, perModule, script].join('\n');
 }
 
 module.exports = { dashboardHtml };
