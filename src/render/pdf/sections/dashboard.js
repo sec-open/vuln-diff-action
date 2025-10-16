@@ -94,9 +94,9 @@ function tablesBlock3(agg){
 function chartsBlock(idPrefix){
   return `
 <div class="dash charts-3 no-break">
-  <div class="chart-box"><h4>Distribution by State</h4><canvas class="chart-compact" id="${idPrefix}-state" width="220" height="90"></canvas></div>
-  <div class="chart-box"><h4>NEW vs REMOVED by Severity</h4><canvas class="chart-compact" id="${idPrefix}-new-removed" width="220" height="90"></canvas></div>
-  <div class="chart-box"><h4>By Severity &amp; State (stacked)</h4><canvas class="chart-compact" id="${idPrefix}-sev-state" width="220" height="90"></canvas></div>
+  <div class="chart-box"><h4>Distribution by State</h4><canvas class="chart-compact" id="${idPrefix}-state" width="660" height="270"></canvas></div>
+  <div class="chart-box"><h4>NEW vs REMOVED by Severity</h4><canvas class="chart-compact" id="${idPrefix}-new-removed" width="660" height="270"></canvas></div>
+  <div class="chart-box"><h4>By Severity &amp; State (stacked)</h4><canvas class="chart-compact" id="${idPrefix}-sev-state" width="660" height="270"></canvas></div>
 </div>`.trim();
 }
 
@@ -113,7 +113,7 @@ function dashboardHtml(view){
   .charts-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 2px 0 6px; }
   .tables-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0; }
   .chart-box { display:flex; flex-direction:column; gap:3px; overflow:hidden; }
-  .chart-compact { width: 220px; height: 90px; display:block; }
+  .chart-compact { width: 660px; height: 270px; display:block; }
   #dashboard table.compact, [id^="dashboard-mod"] table.compact { font-size: 9px; line-height: 1.25; }
   #dashboard table.compact th, #dashboard table.compact td,
   [id^="dashboard-mod"] table.compact th, [id^="dashboard-mod"] table.compact td { padding: 3px 6px; }
@@ -174,10 +174,10 @@ function dashboardHtml(view){
 
   function lockCanvas(el){
     if (!el) return;
-    el.style.width = '220px';
-    el.style.height = '90px';
-    if (el.width !== 220) el.width = 220;
-    if (el.height !== 90) el.height = 90;
+    el.style.width = '660px';
+    el.style.height = '270px';
+    if (el.width !== 660) el.width = 660;
+    if (el.height !== 270) el.height = 270;
   }
 
   function draw(id, cfg){
