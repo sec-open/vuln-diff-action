@@ -63,6 +63,8 @@ function makePrintCss() {
   .module-tables { margin-top:10px; }
   .module-tables h4 { margin:12px 0 6px 0; }
   .module-tables table { margin-bottom:8px; }
+  /* Ensure summary stacked tables span full width */
+  #summary table.compact { width:100% !important; }
 
   /* Hide interactive UI */
   #app-menu, #app-header, nav, .controls, .filters, .btn, button{ display:none !important; }

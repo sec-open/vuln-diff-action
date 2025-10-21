@@ -109,15 +109,15 @@ function renderSevByStateTable(bySevState) {
 </table>`.trim();
 }
 
-/** Renders per-module severity/state matrix table. */
-function renderModuleMatrixTable(mod, mData) {
+/** Renders per-module severity/state matrix table (number injected externally). */
+function renderModuleMatrixTable(num, mod, mData) {
   const sevOrder = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
   const rows = sevOrder.map(sev => {
     const r = (mData || {})[sev] || { NEW:0, REMOVED:0, UNCHANGED:0 };
     return `<tr><td>${sev}</td><td>${safeNum(r.NEW)}</td><td>${safeNum(r.REMOVED)}</td><td>${safeNum(r.UNCHANGED)}</td></tr>`;
   }).join('');
   return `
-<h4>2.2.1 ${mod}</h4>
+<h4>2.2.${num} ${mod}</h4>
 <table class="compact no-break">
   <thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>
   <tbody>${rows}</tbody>
@@ -134,8 +134,6 @@ function summaryHtml(view) {
   const headRef = view?.inputs?.headRef || view?.head?.ref || '';
   const baseShaShort = view?.base?.shaShort || '';
   const headShaShort = view?.head?.shaShort || '';
-  const tools = view?.tools || {};
-  const action = view?.action || {};
   const items = Array.isArray(view?.diff?.items) ? view.diff.items : (Array.isArray(view?.items) ? view.items : []);
   const bySevState = view?.diff?.summary?.by_severity_and_state || view?.summary?.by_severity_and_state || deriveBySeverityAndState(items);
   const totals = totalsByState(bySevState);
@@ -144,71 +142,53 @@ function summaryHtml(view) {
   const refsTable = renderRefsTable({ baseRef, baseShaShort, headRef, headShaShort });
   const totalsTable = renderTotalsByStateTable(totals);
   const sevMatrix = renderSevByStateTable(bySevState);
-  const toolsTable = renderToolsTable(tools, action);
-  const inputsTable = renderInputsTable(view?.inputs || {});
 
   const modules = Object.keys(byModuleSevState || {}).sort((a,b)=>a.localeCompare(b,'en',{sensitivity:'base'}));
 
-  // 2 (Summary) + 2.1 Overview — en la misma página
+  // 2 + 2.1 Overview (stacked, full width, only requested blocks)
   const sec2_and_2_1 = `
 <section class="page" id="summary">
   <h2>2. Summary</h2>
-
   <h3>2.1 Overview</h3>
   <div class="no-break">
-    <p><strong>Project</strong>: ${repo}</p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:8px 0;">
-      <div>
-        <h4>References compared</h4>
-        ${refsTable}
-      </div>
-      <div>
-        <h4>Tools &amp; environment</h4>
-        ${toolsTable}
-      </div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:8px 0;">
-      <div>
-        <h4>Action inputs</h4>
-        ${inputsTable}
-      </div>
-      <div>
-        <h4>Totals by state</h4>
-        ${totalsTable}
-        <h4 style="margin-top:10px;">Severity × State</h4>
-        ${sevMatrix}
-      </div>
-    </div>
+    <h4>Project</h4>
+    <p><code>${repo}</code></p>
+    <h4>References compared</h4>
+    ${refsTable}
+    <h4>Totals by state</h4>
+    ${totalsTable}
+    <h4>Severity × State</h4>
+    ${sevMatrix}
   </div>
 </section>`.trim();
 
-  // 2.2 Modules — página nueva con 2.2.1 en la misma página
-  const firstMod = modules[0];
-  const sec2_2 = `
+  // 2.2 Modules vulnerabilities — pages with 3 modules each
+  let moduleSections;
+  if (!modules.length) {
+    moduleSections = `
 <section class="page" id="summary-modules">
   <h3>2.2 Modules vulnerabilities</h3>
-  ${firstMod ? renderModuleMatrixTable(firstMod, byModuleSevState[firstMod]) : '<p>No module-level data available.</p>'}
+  <p>No module-level data available.</p>
 </section>`.trim();
-
-  // 2.2.2+ — cada módulo en su propia página
-  const rest = modules.slice(1);
-  const perModule = rest.map((m, i) => {
-    const data = byModuleSevState[m];
-    const rows = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'].map(sev => {
-      const r = (data || {})[sev] || { NEW:0, REMOVED:0, UNCHANGED:0 };
-      return `<tr><td>${sev}</td><td>${safeNum(r.NEW)}</td><td>${safeNum(r.REMOVED)}</td><td>${safeNum(r.UNCHANGED)}</td></tr>`;
-    }).join('');
-    return `
-<section class="page" id="summary-mod-${i+2}">
-  <h4>2.2.${i + 2} ${m}</h4>
-  <table class="compact no-break">
-    <thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>
+  } else {
+    const chunks = [];
+    for (let i = 0; i < modules.length; i += 3) {
+      chunks.push(modules.slice(i, i + 3));
+    }
+    moduleSections = chunks.map((chunk, chunkIdx) => {
+      const inner = chunk.map((mod, idxInChunk) => {
+        const globalNum = (chunkIdx * 3) + idxInChunk + 1; // 2.2.(globalNum)
+        return renderModuleMatrixTable(globalNum, mod, byModuleSevState[mod]);
+      }).join('\n');
+      return `
+<section class="page" id="summary-mod-group-${chunkIdx+1}">
+  <h3>${chunkIdx === 0 ? '2.2 Modules vulnerabilities' : '2.2 (cont.) Modules vulnerabilities'}</h3>
+  ${inner}
 </section>`.trim();
-  }).join('\n');
+    }).join('\n');
+  }
 
-  return [sec2_and_2_1, sec2_2, perModule].join('\n');
+  return [sec2_and_2_1, moduleSections].join('\n');
 }
 
 module.exports = { summaryHtml };
