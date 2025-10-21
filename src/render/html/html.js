@@ -4,8 +4,8 @@
 // Writes ./dist/html/{index.html, header.html, menu.html, sections/*.html, assets/**}
 
 const core = require('@actions/core');
-const fsp = require('fs/promises');
 const fs = require('fs');
+const fsp = require('fs/promises');
 const path = require('path');
 const { buildView } = require('../common/view');
 

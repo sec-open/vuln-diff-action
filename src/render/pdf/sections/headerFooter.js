@@ -1,4 +1,8 @@
 // PDF header/footer utilities: fetch logo (remote/local), convert to data URI, and build printable header/footer HTML.
+const https = require('https');
+const fs = require('fs');
+const fsp = fs.promises;
+const path = require('path');
 
 /** Fetches a remote URL over HTTPS returning Buffer. */
 function fetchHttps(url) {

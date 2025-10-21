@@ -1,4 +1,8 @@
 // PDF dependency graph section: embeds pre-rendered HTML fragments and injects a Mermaid runtime script.
+const fs = require('fs');
+const path = require('path');
+
+
 
 /** Safe UTF-8 file read; returns empty string on error. */
 async function readTextSafe(p) { try { return await fs.promises.readFile(p, 'utf8'); } catch { return ''; } }
