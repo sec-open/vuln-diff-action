@@ -11,12 +11,11 @@ const { precomputeFromDiff } = require('./precompute');
 
 // --- Helpers locales (mismo algoritmo que en precompute) ---
 function extractRootGroupIdFromFirstHop(firstHop) {
-  if (!firstHop || typeof firstHop !== 'string') return '';
-  const m = firstHop.match(/^pkg:maven\/([^\/]+)\/([^@\/]+)@/);
-  if (m) return m[1] || '';
-  const g = firstHop.match(/^([^:]+):([^:]+):([^:]+)$/);
-  if (g) return g[1] || '';
-  return '';
+if (!firstHop || (Array.isArray(firstHop) && !firstHop.length)) return '';
+// En view.js/ precompute.js llamas con pathArr[0], aquí asumimos string del primer hop
+const first = typeof firstHop === 'string' ? parseHop(firstHop) : parseHop(Array.isArray(firstHop) ? firstHop[0] : '');
+return first && first.groupId ? first.groupId : '';
+
 }
 function parseGav(hop) {
   if (!hop || typeof hop !== 'string') return null;
@@ -24,21 +23,66 @@ function parseGav(hop) {
   if (!m) return null;
   return { groupId: m[1], artifactId: m[2], version: m[3] };
 }
+
+// --- NUEVO: parser PURL maven ---
+function parsePurl(hop) {
+  if (!hop || typeof hop !== 'string') return null;
+  const m = hop.match(/^pkg:maven\/([^\/]+)\/([^@\/]+)@([^?]+)(?:\?.*)?$/i);
+  if (!m) return null;
+  return { groupId: m[1], artifactId: m[2], version: m[3] };
+}
+
+// --- NUEVO: hop parser compatible (GAV primero; si no, PURL) ---
+function parseHop(hop) {
+  return parseGav(hop) || parsePurl(hop) || null;
+}
+
+// --- NUEVO: a GAV string ---
+function toGav(obj) {
+  if (!obj) return '';
+  const { groupId, artifactId, version } = obj;
+  if (!groupId || !artifactId || !version) return '';
+  return `${groupId}:${artifactId}:${version}`;
+}
+
+
+
 function extractModuleAndTailFromSinglePath(pathArr) {
-  if (!Array.isArray(pathArr) || pathArr.length < 2) return { module: '', tail: [] };
-  const rootGroupId = extractRootGroupIdFromFirstHop(pathArr[0]);
-  if (!rootGroupId) return { module: '', tail: [] };
-  let lastIdx = -1, module = '';
-  for (let i = 1; i < pathArr.length; i++) {
-    const gav = parseGav(pathArr[i]);
-    if (gav && gav.groupId === rootGroupId) {
-      lastIdx = i;
-      module = gav.artifactId || module;
-    }
+if (!Array.isArray(pathArr) || pathArr.length < 2) return { module: '', tail: [] };
+
+// 1) primer hop define group raíz
+const first = parseHop(pathArr[0]);
+const rootGroupId = first && first.groupId ? first.groupId : '';
+if (!rootGroupId) return { module: '', tail: [] };
+
+// 2) último hop cuyo groupId == raíz
+let lastIdx = -1, module = '';
+for (let i = 1; i < pathArr.length; i++) {
+  const h = parseHop(pathArr[i]);
+  if (h && h.groupId === rootGroupId) {
+    lastIdx = i;
+    module = h.artifactId || module;
   }
-  if (!module) return { module: '', tail: [] };
-  const tail = pathArr.slice(lastIdx + 1);
-  return { module, tail };
+}
+// si no hubo coincidencias más allá del primero, usamos el primero como módulo
+if (!module) {
+  module = (first && first.artifactId) || '';
+  lastIdx = 0;
+}
+
+// 3) tail = hops detrás del módulo, en GAV (si no parsea, deja literal)
+const tail = [];
+for (let j = lastIdx + 1; j < pathArr.length; j++) {
+  const h = parseHop(pathArr[j]);
+  if (h) {
+    const gav = toGav(h);
+    tail.push(gav || pathArr[j]);
+  } else {
+    tail.push(pathArr[j]);
+  }
+}
+return { module, tail };
+
 }
 function deriveModulesAndModulePaths(item) {
   const modSet = new Set();
