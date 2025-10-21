@@ -1,4 +1,5 @@
-// Builds the PDF dashboard section: aggregates vulnerability data and renders Chart.js canvases inline.
+// PDF dashboard section: aggregates vulnerability data and embeds non-responsive Chart.js canvases.
+// Provides overview (global) and per-module triplets (state distribution, NEW vs REMOVED, severity/state matrix).
 
 const SEV_ORDER = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
 const STATE_ORDER = ['NEW','REMOVED','UNCHANGED'];
@@ -133,7 +134,7 @@ function dashboardHtml(view){
   .no-break, .no-break * { break-inside: avoid; page-break-inside: avoid; }
 </style>`.trim();
 
-  // 4 + 4.1 Overview — misma página
+  // Section 4.1 Overview (same page)
   const sec4_overview = `
 <section class="page" id="dashboard">
   <h2>4. Dashboard</h2>
@@ -141,7 +142,7 @@ function dashboardHtml(view){
   ${vizTriplet('chart-overview', agg.overview)}
 </section>`.trim();
 
-  // 4.2 Modules — nueva página con 4.2.1 en la misma
+  // Section 4.2 Modules header + first module on same page
   const firstMod = modules[0];
   const firstSlug = slugify(firstMod || 'module0');
   const sec4_2_header_and_first = `
@@ -151,7 +152,7 @@ function dashboardHtml(view){
   ${vizTriplet('chart-' + firstSlug, firstMod ? agg.modules[firstMod] : { totalsByState:{NEW:0,REMOVED:0,UNCHANGED:0}, newVsRemovedBySeverity:{}, matrixSevState:{} })}
 </section>`.trim();
 
-  // 4.2.2… — cada módulo en su propia página
+  // Remaining modules each on its own page (4.2.2+)
   const rest = modules.slice(1);
   const perModule = rest.map((m,i)=>{
     const s = slugify(m);
@@ -162,14 +163,14 @@ function dashboardHtml(view){
 </section>`.trim();
   }).join('\n');
 
-  // payload para pintar
+  // Data payload for Chart.js script
   const payload = {
     SEV_ORDER, STATE_ORDER,
     overview: agg.overview,
     modules: modules.map((m, idx)=>({ name:m, slug:slugify(m||('module'+idx)), data: agg.modules[m] }))
   };
 
-  // Chart.js (no responsive) + señal waitForVisuals
+  // Chart rendering script sets window.__chartsReady for PDF visual wait logic.
   const script = `
 <script>(function(){
   if (typeof window==='undefined' || typeof document==='undefined') return;

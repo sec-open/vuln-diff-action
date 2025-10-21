@@ -1,48 +1,30 @@
-// Provides the HTML snippet for the dashboard section (charts + KPIs). Consumed by client-side runtime.
-// Does not perform data reads; the browser JS populates chart canvases and KPI placeholders.
+// HTML dashboard section: provides static placeholders (Chart.js canvases, KPI containers).
+// Data is populated client-side by assets/js/dashboard.js after loading the section.
+
+/**
+ * Returns HTML markup for the interactive dashboard section.
+ * @returns {string}
+ */
+function renderDashboard() {
   return `
-/**
- * Returns the HTML for the dashboard section (chart placeholders and KPI containers).
- * @returns {string} HTML markup for the dashboard view.
- */
-/**
- * Builds hyperlink markup for known vulnerability IDs.
- * @param {string} id
- * @returns {string}
- */
 <div class="card">
+  <h2 id="section-title">Dashboard</h2>
+  <p class="small">Visual summary of vulnerability state changes, severity distribution, component impact, and fixability.</p>
 </div>
-
-<!-- Row 1: three charts -->
 <div class="grid-3">
-
-/**
- * Formats package coordinates as group:artifact:version.
- * @param {Object} v
- * @returns {string}
- */
   <div class="card chart-card">
     <h3>Distribution by State</h3>
     <div class="chart-wrap"><canvas id="chart-state-pie" aria-label="State distribution pie"></canvas></div>
   </div>
+  <div class="card chart-card">
+    <h3>NEW vs REMOVED by Severity</h3>
     <div class="chart-wrap"><canvas id="chart-new-removed" aria-label="NEW vs REMOVED bar"></canvas></div>
-
-/**
- * Formats a single dependency path chain into HTML.
- * @param {Array<string>} chain
- * @returns {string}
- */
   </div>
   <div class="card chart-card">
     <h3>By Severity &amp; State (stacked)</h3>
     <div class="chart-wrap"><canvas id="chart-severity-stacked" aria-label="Severity stacked bar"></canvas></div>
   </div>
-/**
- * Converts vulnerability items into table row HTML strings.
- */
 </div>
-
-<!-- Row 2: head vs base + top components + KPIs -->
 <div class="grid-3" style="margin-top:12px;">
   <div class="card chart-card">
     <h3>Head vs Base — Severity</h3>
@@ -55,19 +37,11 @@
   <div class="card" style="position:relative;">
     <h3>
       Risk &amp; Fixability
-      <span id="risk-help" class="info-badge" title="How is risk calculated?">i</span>
+      <span id="risk-help" class="info-badge" title="Show weighted risk explanation">i</span>
     </h3>
-
-    <!-- Tooltip (hidden by default) -->
     <div id="risk-tooltip" class="tooltip">
-/**
- * Wraps a table with filter control inside a card.
- * @param {string} title
- * @param {string} id
- * @param {Array<Object>} items
- * @returns {string}
       <button class="close" id="risk-tooltip-close" aria-label="Close">&times;</button>
-      <h4>Weighted Risk — How it is computed</h4>
+      <h4>Weighted Risk Calculation</h4>
       <div class="tooltip-grid">
         <div>
           <div class="small" style="margin-bottom:6px;">Formula</div>
@@ -77,7 +51,7 @@
             Base Stock Risk = Σ(weight × (REMOVED + UNCHANGED))
           </div>
           <div style="margin-top:8px;">
-            <div class="small">Weights by severity (visual)</div>
+            <div class="small">Severity weights (visual)</div>
             <div id="risk-weight-bar" class="weight-bar" style="margin-top:6px;"></div>
           </div>
         </div>
@@ -85,18 +59,11 @@
           <div class="small" style="margin-bottom:6px;">Weights table</div>
           <table>
             <thead><tr><th>Severity</th><th>Weight</th></tr></thead>
-            <tbody id="risk-weights-rows">
-              <!-- rows injected by dashboard.js -->
-            </tbody>
+            <tbody id="risk-weights-rows"></tbody>
           </table>
         </div>
-/**
- * Renders Base dependency paths (REMOVED + UNCHANGED).
- * @param {{view:Object}} param0
- * @returns {string}
- */
+      </div>
     </div>
-
     <div class="grid-2" style="margin-top:10px;">
       <div>
         <div class="kpi">
@@ -104,13 +71,9 @@
           <div id="kpi-net-risk" class="kpi-value">—</div>
           <div class="small">Weighted NEW − REMOVED</div>
         </div>
-/**
- * Renders Head dependency paths (NEW + UNCHANGED).
- * @param {{view:Object}} param0
- * @returns {string}
- */
+        <div class="kpi" style="margin-top:8px;">
           <div class="kpi-label">Base Stock Risk</div>
-          <div id="kpi-base-stock" class="kpi-value">—</div>
+            <div id="kpi-base-stock" class="kpi-value">—</div>
           <div class="small">Weighted (REMOVED + UNCHANGED)</div>
         </div>
         <div class="kpi" style="margin-top:8px;">

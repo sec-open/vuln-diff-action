@@ -75,14 +75,14 @@ async function waitForVisuals(page, { timeout = 60000 } = {}) {
       var q = document.querySelector.bind(document);
       var qa = function(sel){ return Array.prototype.slice.call(document.querySelectorAll(sel)); };
 
-      // CHARTS
+      // CHARTS readiness
       var hasCharts = qa('canvas[id^="chart-"]').length > 0;
       var chartsOk =
         (window.__chartsReady === true) ||
         !hasCharts ||
         qa('canvas[id^="chart-"]').every(function(c){ return (c.width || 0) > 0 && (c.height || 0) > 0; });
 
-      // MERMAID
+      // MERMAID readiness
       var mermaidBlocks = qa('pre code.language-mermaid, .language-mermaid, pre.mermaid, .mermaid');
       var hasMermaid = mermaidBlocks.length > 0;
       var mermaidOk =
@@ -90,14 +90,14 @@ async function waitForVisuals(page, { timeout = 60000 } = {}) {
         !hasMermaid ||
         (qa('svg[id^="mmsvg-"]').length >= mermaidBlocks.length);
 
-      // FIX INSIGHTS
+      // FIX INSIGHTS content loaded
       var fixEl = q('#fix-insights');
       var fixOk =
         (window.__fixInsightsReady === true) ||
         !fixEl ||
         !/Loading…|Loading\\.\\.\\.|Loading/i.test(fixEl.textContent || '');
 
-      // DEP PATHS
+      // DEP PATHS tables present
       var depBase = q('#dep-paths-base');
       var depHead = q('#dep-paths-head');
       var depOk =
@@ -105,7 +105,7 @@ async function waitForVisuals(page, { timeout = 60000 } = {}) {
         (!depBase && !depHead) ||
         (q('#dep-paths-base table, #dep-paths-head table') !== null);
 
-      // IMÁGENES (logos header/footer y otras)
+      // IMAGES (all <img> complete)
       var imagesOk = Array.prototype.every.call(document.images || [], function(img){ return img.complete; });
 
       return chartsOk && mermaidOk && fixOk && depOk && imagesOk;
