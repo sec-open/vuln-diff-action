@@ -32,6 +32,9 @@ function asGav(v) {
   const ver = pkg.version ?? 'unknown';
   return `${g}:${a}:${ver}`;
 }
+// Orden para severidades y estados (mayor a menor / prioridad para desempate).
+const SEVERITY_ORDER = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, UNKNOWN: 1 };
+const STATE_ORDER = { NEW: 3, REMOVED: 2, UNCHANGED: 1 };
 // ---------- end helpers ----------
 
 // Renders the main summary markdown file: header, repo info, side-by-side base/head blocks,
@@ -89,14 +92,27 @@ Commit: ${mdSafe(view.head.commitSubject)}
     lines.push(`| ${view.summary.totals.NEW} | ${view.summary.totals.REMOVED} | ${view.summary.totals.UNCHANGED} |`);
     lines.push('');
 
-    // Vulnerability listing (flattened) without any branch column.
+    // Vulnerability listing (flattened) con columna Severity y ordenado.
     lines.push('## All Vulnerabilities');
-    const header = '| Vulnerability | Package | State |\n|---|---|---|';
-    const rows = (view.items || []).map(v => {
+    const header = '| Severity | Vulnerability | Package | State |\n|---|---|---|---|';
+    const sorted = (view.items || []).slice().sort((a, b) => {
+      const sa = SEVERITY_ORDER[String(a.severity || 'UNKNOWN').toUpperCase()] || 0;
+      const sb = SEVERITY_ORDER[String(b.severity || 'UNKNOWN').toUpperCase()] || 0;
+      if (sa !== sb) return sb - sa; // severidad desc
+      const sta = STATE_ORDER[String(a.state || 'UNKNOWN').toUpperCase()] || 0;
+      const stb = STATE_ORDER[String(b.state || 'UNKNOWN').toUpperCase()] || 0;
+      if (sta !== stb) return stb - sta; // state desc
+      // desempate adicional por id
+      const ida = (a.id || a.ids?.ghsa || a.ids?.cve || '').toString();
+      const idb = (b.id || b.ids?.ghsa || b.ids?.cve || '').toString();
+      return ida.localeCompare(idb, 'en', { sensitivity: 'base' });
+    });
+    const rows = sorted.map(v => {
+      const sev = String(v.severity || 'UNKNOWN').toUpperCase();
       const id = v.id || v.ids?.ghsa || v.ids?.cve || 'UNKNOWN';
       const pkg = asGav(v);
       const state = String(v.state || 'UNKNOWN').toUpperCase();
-      return `| ${hyperlinkId(id)} | \`${pkg}\` | ${state} |`;
+      return `| ${sev} | ${hyperlinkId(id)} | \`${pkg}\` | ${state} |`;
     });
     lines.push(header);
     lines.push(...rows);
