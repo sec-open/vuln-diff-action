@@ -9,13 +9,18 @@ const fs = require('fs');
 const path = require('path');
 const { buildView } = require('../common/view');
 
+/** Ensures a directory exists (recursive). */
 async function ensureDir(dir) {
   await fsp.mkdir(dir, { recursive: true });
 }
+
+/** Writes UTF-8 text content to a file (creating parent directories). */
 async function writeText(p, content) {
   await ensureDir(path.dirname(p));
   await fsp.writeFile(p, content, 'utf8');
 }
+
+/** Recursively copies a directory tree or single file from src to dst. */
 async function copyTree(src, dst) {
   const stat = await fsp.stat(src);
   if (stat.isDirectory()) {
@@ -37,6 +42,10 @@ async function copyTree(src, dst) {
   }
 }
 
+/**
+ * Builds the complete HTML bundle (index, header, menu, sections, JSON data, static assets).
+ * @param {{distDir?:string, logoUrl?:string}} opts
+ */
 async function buildHtmlBundle({ distDir = './dist', logoUrl = '' } = {}) {
   core.startGroup('[render/html] buildHtmlBundle');
   try {

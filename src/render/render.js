@@ -1,12 +1,9 @@
 // src/render/render.js
-// Render Orchestrator: kicks off 3.1 (Markdown), 3.2 (HTML) and now 3.3 (PDF).
+// Phase 3 Orchestrator: runs Markdown (3.1), HTML bundle (3.2), and PDF (3.3).
 const core = require('@actions/core');
 const path = require('path');
 
-/**
- * Markdown init (3.1):
- * - Calls the markdown renderer (summary.md, pr-comment.md, slack.md).
- */
+/** Executes Markdown rendering (summary, PR comment, Slack if implemented). */
 async function markdown_init({ distDir = './dist' } = {}) {
   core.startGroup('[render] Markdown');
   try {
@@ -45,11 +42,7 @@ async function markdown_init({ distDir = './dist' } = {}) {
   }
 }
 
-/**
- * HTML init (3.2):
- * - Calls the HTML bundle builder. Output must be written under ./dist/html.
- * - Optional input: html_logo_url to place a logo in the header (can be a relative path inside the bundle or an absolute URL).
- */
+/** Builds static HTML bundle (assets + sections) under ./dist/html. */
 async function html_init({ distDir = './dist', logoUrl } = {}) {
   core.startGroup('[render] HTML');
   try {
@@ -69,12 +62,7 @@ async function html_init({ distDir = './dist', logoUrl } = {}) {
   }
 }
 
-/**
- * PDF init (3.3) — skeleton:
- * - Generates a minimal printable bundle under ./dist/pdf (cover, TOC, introduction).
- * - Uses the same html_logo_url input for the cover logo.
- * - Does NOT export to .pdf yet (HTML skeleton only). Export can be added later.
- */
+/** Generates full printable HTML and exports PDF under ./dist/pdf. */
 async function pdf_init({ distDir = './dist' } = {}) {
   core.startGroup('[render] PDF');
   try {
@@ -89,10 +77,7 @@ async function pdf_init({ distDir = './dist' } = {}) {
   }
 }
 
-/**
- * Render entrypoint (Phase 3):
- * - Runs Markdown (3.1), then HTML (3.2), then PDF (3.3).
- */
+/** Entry point: sequentially runs Markdown → HTML → PDF. */
 async function render(options = {}) {
   const distDir = options.distDir || './dist';
 

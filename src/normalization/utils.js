@@ -3,8 +3,10 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 
+// Ordered severities for comparison operations.
 const SEV_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
-// Spec allows mapping NEGLIGIBLE; we map it to LOW for consistency across outputs. :contentReference[oaicite:1]{index=1}
+
+// Normalizes severity strings; maps NEGLIGIBLE to LOW and unknown values to UNKNOWN.
 function normalizeSeverity(sev) {
   if (!sev) return 'UNKNOWN';
   const s = String(sev).toUpperCase();
@@ -13,12 +15,14 @@ function normalizeSeverity(sev) {
   return 'UNKNOWN';
 }
 
+// Returns worst (highest impact) severity between two values using ordering index.
 function worstSeverity(a, b) {
   const ia = SEV_ORDER.indexOf(normalizeSeverity(a));
   const ib = SEV_ORDER.indexOf(normalizeSeverity(b));
   return ia <= ib ? normalizeSeverity(a) : normalizeSeverity(b);
 }
 
+// Deduplicates items by JSON stringification; optional limit caps output length.
 function uniqueByJSON(arr, limit) {
   const seen = new Set();
   const out = [];
@@ -33,20 +37,24 @@ function uniqueByJSON(arr, limit) {
   return out;
 }
 
+// Reads JSON file and parses into object.
 async function readJSON(p) {
   const buf = await fsp.readFile(p, 'utf8');
   return JSON.parse(buf);
 }
 
+// Writes object to JSON file with indentation and trailing newline.
 async function writeJSON(p, obj) {
   await fsp.mkdir(path.dirname(p), { recursive: true });
   await fsp.writeFile(p, JSON.stringify(obj, null, 2) + '\n', 'utf8');
 }
 
+// Returns current timestamp in ISO format.
 function nowISO() {
   return new Date().toISOString();
 }
 
+// Picks CVSS entry with highest score from list; extracts score and vector where available.
 function pickMaxCvss(cvssList) {
   if (!Array.isArray(cvssList) || cvssList.length === 0) return null;
   let best = null;
@@ -62,6 +70,7 @@ function pickMaxCvss(cvssList) {
   return best;
 }
 
+// Ensures value is returned as array of strings.
 function ensureStringArray(x) {
   if (!x) return [];
   if (Array.isArray(x)) return x.map(String);

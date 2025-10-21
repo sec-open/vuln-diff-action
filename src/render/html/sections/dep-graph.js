@@ -1,15 +1,32 @@
-// src/render/html/sections/dep-graph.js
-// Renders Mermaid dependency graphs for Base and Head from Phase-2 paths.
-// No JSON reads here; uses the strict "view" injected by the orchestrator.
+// Builds Mermaid graphs from vulnerability dependency paths (Base / Head views).
+// Uses view.items[].paths; no file system or JSON reads here.
 
+/**
+ * Sanitizes a label into a Mermaid-safe node identifier.
+ * @param {string} s
+ * @returns {string}
+ */
 function sanitizeId(s) {
   // Mermaid node ids: letters, digits, underscore. Keep it deterministic.
   return String(s).replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 80);
 }
+
+/**
+ * Produces a Mermaid node definition for a given id/label.
+ * @param {string} id
+ * @param {string} label
+ * @returns {string}
+ */
 function nodeDef(id, label) {
   // Rounded box looks nice for components
   return `${id}["${label}"]`;
 }
+
+/**
+ * Converts arrays of path chains into Mermaid graph syntax.
+ * @param {Array<Object>} items
+ * @returns {string} Mermaid graph code.
+ */
 function buildMermaidFromPaths(items) {
   const nodes = new Map();  // id -> def
   const edges = new Set();  // "idA-->idB"
@@ -41,6 +58,12 @@ function buildMermaidFromPaths(items) {
   return `${header}\n${body}`;
 }
 
+/**
+ * Wraps Mermaid code in a styled card container.
+ * @param {string} title
+ * @param {string} mermaidCode
+ * @returns {string}
+ */
 function renderGraphCard(title, mermaidCode) {
   return `
 <div class="card">
@@ -49,7 +72,11 @@ function renderGraphCard(title, mermaidCode) {
 </div>`;
 }
 
-/** Base: show paths for vulnerabilities present in BASE (REMOVED or UNCHANGED). */
+/**
+ * Renders Base dependency graph (REMOVED + UNCHANGED states).
+ * @param {{view: Object}} param0
+ * @returns {string}
+ */
 function renderDepGraphBase({ view } = {}) {
   if (!view) throw new Error('[render/html/dep-graph] Missing view');
   const items = (view.items || []).filter((v) => {
@@ -60,7 +87,11 @@ function renderDepGraphBase({ view } = {}) {
   return renderGraphCard('Dependency Graph — Base', code);
 }
 
-/** Head: show paths for vulnerabilities present in HEAD (NEW or UNCHANGED). */
+/**
+ * Renders Head dependency graph (NEW + UNCHANGED states).
+ * @param {{view: Object}} param0
+ * @returns {string}
+ */
 function renderDepGraphHead({ view } = {}) {
   if (!view) throw new Error('[render/html/dep-graph] Missing view');
   const items = (view.items || []).filter((v) => {

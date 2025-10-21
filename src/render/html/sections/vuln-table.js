@@ -1,9 +1,12 @@
-// src/render/html/sections/vuln-table.js
-// Renders sections/vuln-table.html using the Phase-2 view (strict). No JSON reads here.
-// Adds client-side filter + sort (tables.js).
+// Renders a sortable/filterable vulnerability diff table (Severity, ID, Package, Branch presence, State).
 
 const SEV_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, UNKNOWN: 4 };
 
+/**
+ * Builds hyperlink markup for vulnerability IDs (CVE/GHSA).
+ * @param {string} id
+ * @returns {string}
+ */
 function hyperlinkId(id) {
   if (!id) return 'UNKNOWN';
   const up = String(id).toUpperCase();
@@ -11,6 +14,12 @@ function hyperlinkId(id) {
   if (up.startsWith('GHSA-')) return `<a href="https://github.com/advisories/${up}" target="_blank" rel="noopener">${id}</a>`;
   return id;
 }
+
+/**
+ * Formats package coordinates into group:artifact:version.
+ * @param {Object} v
+ * @returns {string}
+ */
 function asGav(v) {
   const pkg = v?.package || {};
   const g = pkg.groupId ?? 'unknown';
@@ -18,6 +27,12 @@ function asGav(v) {
   const ver = pkg.version ?? 'unknown';
   return `${g}:${a}:${ver}`;
 }
+
+/**
+ * Resolves branch presence label from diff state.
+ * @param {string} state
+ * @returns {string}
+ */
 function branchFromState(state) {
   const s = String(state || '').toUpperCase();
   if (s === 'NEW') return 'Head';
@@ -26,6 +41,11 @@ function branchFromState(state) {
   return 'UNKNOWN';
 }
 
+/**
+ * Generates full vulnerability table HTML.
+ * @param {{view:Object}} param0
+ * @returns {string}
+ */
 function renderVulnTable({ view } = {}) {
   if (!view) throw new Error('[render/html/vuln-table] Missing view');
 

@@ -1,8 +1,7 @@
-// Normalize grype matches into per-occurrence model keyed by <vuln_id>::<GAV>. :contentReference[oaicite:3]{index=3}
 const { normalizeSeverity, worstSeverity, pickMaxCvss, ensureStringArray, uniqueByJSON } = require('./utils');
 
+// Extracts prioritized vulnerability identifiers (prefers GHSA, then CVE, then fallback IDs).
 function primaryIdFrom(match) {
-  // Order: GHSA > CVE > raw id. :contentReference[oaicite:4]{index=4}
   const ids = match?.vulnerability?.ids || [];
   let ghsa = null, cve = null;
   for (const id of ids) {
@@ -16,17 +15,17 @@ function primaryIdFrom(match) {
   return { id, ghsa: ghsa || null, cve: cve || null };
 }
 
+// Extracts fix information (state and fixed versions) from vulnerability object.
 function extractFixInfo(vuln) {
   const fixedIns = vuln?.fix ?? vuln?.fixes ?? {};
-  // grype uses { state, versions: [] }
   return {
     state: fixedIns?.state || null,
     versions: Array.isArray(fixedIns?.versions) ? fixedIns.versions : [],
   };
 }
 
+// Resolves package coordinates (purl, component reference, and GAV) using SBOM index resolution.
 function resolvePackageInfo(artifact, sbomIndex) {
-  // Try grype artifact purl/componentRef first
   let purl = artifact?.purl || artifact?.metadata?.purl || null;
   let component_ref = artifact?.metadata?.bomRef || artifact?.bomRef || artifact?.componentRef || null;
 
@@ -40,7 +39,6 @@ function resolvePackageInfo(artifact, sbomIndex) {
   if (comp) {
     gav = sbomIndex.gavFromComponent(comp);
   } else {
-    // fallback from purl itself
     if (finalPurl && finalPurl.startsWith('pkg:maven/')) {
       const after = finalPurl.slice('pkg:maven/'.length);
       const atIdx = after.indexOf('@');
@@ -69,34 +67,29 @@ function resolvePackageInfo(artifact, sbomIndex) {
   };
 }
 
+// Computes dependency paths (root-to-target) via SBOM index, honoring limit.
 function computePaths(targetRef, sbomIndex, limitPaths) {
   if (!targetRef) return [];
   const paths = sbomIndex.computePathsToTarget(targetRef, limitPaths);
   return paths;
 }
 
+// Normalizes raw grype matches into consolidated occurrence entries keyed by match_key.
+// Performs severity merging, CVSS tie-breaking, URL and path aggregation, and per-side summary.
 function normalizeOneSide(grypeJson, sbomIndex, meta, gitInfo, { limitPaths = 5 } = {}) {
-  // Build occurrences map by match_key (consolidated). :contentReference[oaicite:5]{index=5}
   const matches = Array.isArray(grypeJson?.matches) ? grypeJson.matches : [];
   const acc = new Map();
 
   for (const m of matches) {
     const { id, ghsa, cve } = primaryIdFrom(m);
     const severity = normalizeSeverity(m?.vulnerability?.severity);
-
     const cvss_max = pickMaxCvss(m?.vulnerability?.cvss) || null;
-
     const fix = extractFixInfo(m?.vulnerability);
-
     const urls = ensureStringArray(m?.vulnerability?.urls);
-
     const description = typeof m?.vulnerability?.description === 'string' ? m.vulnerability.description : undefined;
 
-    // artifact / package info
     const art = m?.artifact || m?.package || {};
     const pkgInfo = resolvePackageInfo(art, sbomIndex);
-
-    // paths from CycloneDX deps
     const paths = computePaths(pkgInfo.targetRef, sbomIndex, limitPaths);
 
     const match_key = `${id}::${pkgInfo.package.groupId}:${pkgInfo.package.artifactId}:${pkgInfo.package.version}`;
@@ -114,21 +107,19 @@ function normalizeOneSide(grypeJson, sbomIndex, meta, gitInfo, { limitPaths = 5 
       match_key,
     };
 
-    // consolidate
+    // Consolidate duplicates by match_key merging severity, CVSS, URLs, and paths.
     if (!acc.has(match_key)) {
       acc.set(match_key, entry);
     } else {
       const prev = acc.get(match_key);
-      // 1) worst severity
       const sev = worstSeverity(prev.severity, severity);
-      // 2) tie-break by higher cvss score if severities equivalent after normalization
+
       let cvssChosen = prev.cvss_max;
       if (sev === normalizeSeverity(prev.severity) && prev.cvss_max?.score !== undefined) {
         const prevScore = Number(prev.cvss_max.score);
         const curScore = Number(cvss_max?.score ?? -1);
         if (curScore > prevScore) cvssChosen = cvss_max;
       } else if (sev === severity) {
-        // if severity comes from current but prev had none
         if (!prev.cvss_max && cvss_max) cvssChosen = cvss_max;
       }
 
@@ -136,7 +127,6 @@ function normalizeOneSide(grypeJson, sbomIndex, meta, gitInfo, { limitPaths = 5 
         ...prev,
         severity: sev,
         cvss_max: cvssChosen || prev.cvss_max || null,
-        // merge urls, versions, paths
         urls: Array.from(new Set([...(prev.urls || []), ...urls])),
         paths: uniqueByJSON([...(prev.paths || []), ...paths], 5),
       };
@@ -144,15 +134,15 @@ function normalizeOneSide(grypeJson, sbomIndex, meta, gitInfo, { limitPaths = 5 
     }
   }
 
-  // Build final array
   const vulnerabilities = [...acc.values()];
 
-  // Summary. :contentReference[oaicite:6]{index=6}
+  // Build severity distribution summary.
   const by_severity = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 };
   for (const v of vulnerabilities) {
     by_severity[normalizeSeverity(v.severity)]++;
   }
 
+  // Final normalized side document.
   const out = {
     schema_version: '2.0.0',
     generated_at: new Date().toISOString(),

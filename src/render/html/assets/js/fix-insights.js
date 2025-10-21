@@ -1,18 +1,22 @@
-// src/render/html/assets/js/fix-insights.js
-// Browser-side rendering for Fix Insights (Chart.js + tables built from fix-insights-data.json)
+// Fix insights renderer: loads JSON data, builds fix coverage charts, and populates tables
+// listing vulnerabilities with available fixes (NEW + UNCHANGED).
 
 (function () {
+  // HTML section and data artifact URLs.
   const SECT_URL = './sections/fix-insights.html';
   const DATA_URL = './sections/fix-insights-data.json';
 
+  // Checks Chart.js availability.
   function hasChartJs() { return !!window.Chart; }
 
+  // Loads JSON data from artifact endpoint.
   async function fetchData() {
     const res = await fetch(DATA_URL, { cache: 'no-store' });
     if (!res.ok) throw new Error(`Failed to load ${DATA_URL}: ${res.status}`);
     return res.json();
   }
 
+  // Builds bar chart grouping vulnerability counts by severity (with/without fix).
   function mkBarFixBySeverity(ctx, labels, withFix, withoutFix) {
     return new Chart(ctx, {
       type: 'bar',
@@ -26,6 +30,7 @@
     });
   }
 
+  // Builds donut chart summarizing overall fix coverage.
   function mkDonutFixCoverage(ctx, withFix, withoutFix) {
     return new Chart(ctx, {
       type: 'doughnut',
@@ -38,6 +43,7 @@
     });
   }
 
+  // Generates hyperlink for recognized vulnerability identifiers (CVE / GHSA).
   function hyperlinkId(id) {
     if (!id) return 'UNKNOWN';
     const up = String(id).toUpperCase();
@@ -45,6 +51,8 @@
     if (up.startsWith('GHSA-')) return `<a href="https://github.com/advisories/${up}" target="_blank" rel="noopener">${id}</a>`;
     return id;
   }
+
+  // Formats package coordinates into group:artifact:version string.
   function toGav(pkg) {
     const g = pkg?.groupId ?? 'unknown';
     const a = pkg?.artifactId ?? 'unknown';
@@ -52,6 +60,7 @@
     return `${g}:${a}:${v}`;
   }
 
+  // Populates a table body with fix insight rows or fallback row if empty.
   function buildRows(items, tbodyId) {
     const tbody = document.getElementById(tbodyId);
     if (!tbody) return;
@@ -76,6 +85,7 @@
     tbody.innerHTML = rows;
   }
 
+  // Main render routine for fix insights section: validates active page, fetches data, renders charts and tables.
   async function render() {
     const content = document.getElementById('app-content');
     if (!content) return;
@@ -86,7 +96,7 @@
     try { data = await fetchData(); }
     catch (e) { console.error('[fix-insights] data fetch error:', e); return; }
 
-    // Charts
+    // Charts (severity distribution + donut coverage).
     if (hasChartJs() && data.fixesHead) {
       const sev = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
       const withFix = sev.map(s => data.fixesHead.bySeverity[s]?.with_fix ?? 0);
@@ -99,11 +109,12 @@
       if (donutEl) mkDonutFixCoverage(donutEl, data.fixesHead.totals.with_fix || 0, data.fixesHead.totals.without_fix || 0);
     }
 
-    // Tables
+    // Tables (NEW with fix, UNCHANGED with fix).
     buildRows(data.newWithFix || [], 'rows-new-with-fix');
     buildRows(data.unchangedWithFix || [], 'rows-unchanged-with-fix');
   }
 
+  // Observes content changes to trigger render when section is loaded.
   document.addEventListener('DOMContentLoaded', () => {
     const content = document.getElementById('app-content');
     if (!content) return;

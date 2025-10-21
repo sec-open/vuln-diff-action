@@ -1,6 +1,13 @@
 // src/render/html/sections/overview.js
 // Renders sections/overview.html using the strict Phase-2 view (no JSON reads here).
 
+// Provides introductory overview section explaining methodology and comparison context.
+
+/**
+ * Renders overview section using repository and commit metadata from the view.
+ * @param {{view:Object}} param0
+ * @returns {string}
+ */
 function renderOverview({ view } = {}) {
   if (!view) throw new Error('[render/html/overview] Missing view');
 
@@ -21,7 +28,7 @@ function renderOverview({ view } = {}) {
   <ol>
     <li><strong>SBOM generation</strong> — via CycloneDX Maven (when a Maven reactor is detected) or Syft as a fallback.</li>
     <li><strong>Vulnerability scanning</strong> — the SBOM is analyzed with Grype to produce machine-readable findings (IDs, severities, CVSS, affected packages, locations, and fix data).</li>
-    <li><strong>Normalization &amp; diff</strong> — findings are normalized into a unified schema and compared using <code>id::package.name::package.version</code>. Final states are: <strong>NEW</strong> (present only in head), <strong>REMOVED</strong> (present only in base), <strong>UNCHANGED</strong> (present in both).</li>
+    <li><strong>Normalization &amp; diff</strong> — findings are normalized into a unified schema and compared using <code>id::package.name::package.version</code>. Final states are: <strong>NEW</strong>, <strong>REMOVED</strong>, <strong>UNCHANGED</strong>.</li>
     <li><strong>Rendering</strong> — an interactive HTML dashboard, plus a printable PDF and a Markdown summary for CI/PR reviews.</li>
   </ol>
 

@@ -1,17 +1,33 @@
-// src/render/html/sections/summary.js
-// Renders sections/summary.html from a strict "view" (no JSON reads here).
+// Summary section renderer: shows generation timestamp, tool/input metadata, branch details,
+// and severity/state totals derived from the unified view.
 
 const SEVERITY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
 
+/**
+ * Builds a table row (th + td) for a key/value pair.
+ * @param {string} k
+ * @param {string} v
+ * @returns {string}
+ */
 function krow(k, v) {
   return `<tr><th style="width:220px">${k}</th><td>${v ?? 'n/a'}</td></tr>`;
 }
 
+/**
+ * Generates table rows for tools metadata.
+ * @param {Object} tools
+ * @returns {string}
+ */
 function toolsTable(tools) {
   const rows = Object.entries(tools || {}).map(([n, v]) => krow(n, v)).join('');
   return rows || krow('Tools', 'n/a');
 }
 
+/**
+ * Generates table rows for input parameters.
+ * @param {Object} inputs
+ * @returns {string}
+ */
 function inputsTable(inputs) {
   return [
     krow('base_ref', `<code>${inputs.baseRef}</code>`),
@@ -20,6 +36,12 @@ function inputsTable(inputs) {
   ].join('');
 }
 
+/**
+ * Renders a card with branch commit metadata.
+ * @param {string} title
+ * @param {Object} b
+ * @returns {string}
+ */
 function branchTable(title, b) {
   return `
 <div class="card">
@@ -34,11 +56,21 @@ function branchTable(title, b) {
 </div>`;
 }
 
+/**
+ * Displays aggregated totals (NEW / REMOVED / UNCHANGED).
+ * @param {Object} sum
+ * @returns {string}
+ */
 function totalsBlock(sum) {
   const t = sum.totals;
   return `<div><b>Totals</b> — <b>NEW:</b> ${t.NEW} · <b>REMOVED:</b> ${t.REMOVED} · <b>UNCHANGED:</b> ${t.UNCHANGED}</div>`;
 }
 
+/**
+ * Builds severity/state breakdown table.
+ * @param {Object} by
+ * @returns {string}
+ */
 function sevStateTable(by) {
   const rows = SEVERITY_ORDER.map(s => {
     const v = by[s] || { NEW: 0, REMOVED: 0, UNCHANGED: 0 };
@@ -47,6 +79,11 @@ function sevStateTable(by) {
   return `<table><thead><tr><th>Severity</th><th style="text-align:right">NEW</th><th style="text-align:right">REMOVED</th><th style="text-align:right">UNCHANGED</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+/**
+ * Produces full summary section HTML.
+ * @param {{view:Object}} param0
+ * @returns {string}
+ */
 function renderSummary({ view } = {}) {
   if (!view) throw new Error('[render/html/summary] Missing view');
 

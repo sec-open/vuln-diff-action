@@ -2,6 +2,7 @@
 // Mermaid bootstrapping for dependency graph sections.
 
 (function () {
+  // Verifies Mermaid presence; logs helpful error if missing.
   function ensureMermaid() {
     if (!window.mermaid) {
       console.error('[dep-graph] mermaid not found. Did you include assets/js/vendor/mermaid.min.js in index.html?');
@@ -10,16 +11,16 @@
     return true;
   }
 
+  // Initializes Mermaid (without auto-start) and renders all diagrams with class .mermaid.
   function runMermaid() {
     if (!ensureMermaid()) return;
-    // Do not auto-start on load; we drive rendering after content is injected.
     window.mermaid.initialize({ startOnLoad: false });
-    // Re-render all diagrams present in the section
     const nodes = document.querySelectorAll('.mermaid');
     if (nodes.length === 0) return;
     window.mermaid.run({ querySelector: '.mermaid' });
   }
 
+  // Observes section content changes; runs Mermaid only for target dependency graph pages.
   document.addEventListener('DOMContentLoaded', function () {
     const content = document.getElementById('app-content');
     if (!content) { runMermaid(); return; }

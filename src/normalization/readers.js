@@ -1,6 +1,8 @@
 const path = require('path');
 const { readJSON } = require('./utils');
 
+// Reads Phase 1 output files (meta, git, sbom, grype) and returns structured context.
+// Paths are resolved relative to provided dist directory.
 async function readPhase1Dist(distDir = './dist') {
   const files = {
     meta: path.join(distDir, 'meta.json'),

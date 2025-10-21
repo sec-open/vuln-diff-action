@@ -1,10 +1,12 @@
-// src/render/pdf/sections/dashboard.js
+// Builds the PDF dashboard section: aggregates vulnerability data and renders Chart.js canvases inline.
+
 const SEV_ORDER = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
 const STATE_ORDER = ['NEW','REMOVED','UNCHANGED'];
 
 function sevKey(s){ return String(s||'UNKNOWN').toUpperCase(); }
 function stateKey(s){ return String(s||'').toUpperCase(); }
 
+// Derives module names from an item (uses precomputed module_paths if available).
 function deriveModuleNamesFromItem(it){
   const mp = it && it.module_paths ? it.module_paths : {};
   const keys = Object.keys(mp || {});
@@ -13,6 +15,7 @@ function deriveModuleNamesFromItem(it){
   return ['—'];
 }
 
+// Aggregates counts by severity/state at overview level and per module.
 function aggregate(items = []){
   const agg = {
     overview: {
@@ -56,17 +59,19 @@ function aggregate(items = []){
   return agg;
 }
 
+// Converts a string to a slug suitable for element IDs.
 function slugify(s){
   return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'module';
 }
 
+// Generic HTML table builder.
 function tableFromArray(headers, rows){
   const thead = `<thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>`;
   const tbody = rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('');
   return `<table class="compact">${thead}<tbody>${tbody}</tbody></table>`;
 }
 
-// ---- tablas específicas por bloque ----
+// Overview / module helper tables.
 function tblTotalsByState(obj){
   return tableFromArray(['NEW','REMOVED','UNCHANGED'], [[
     obj.totalsByState.NEW, obj.totalsByState.REMOVED, obj.totalsByState.UNCHANGED
@@ -87,7 +92,7 @@ function tblSevByState(obj){
   return tableFromArray(['Severity','NEW','REMOVED','UNCHANGED'], rows);
 }
 
-// ---- bloque “gráfico + tabla” (título único) ----
+// Renders a visualization pair (chart + data table) with a title.
 function vizPair(prefix, title, tableHtml, canvasId){
   return `
 <div class="viz-pair no-break">
@@ -101,7 +106,7 @@ function vizPair(prefix, title, tableHtml, canvasId){
 </div>`.trim();
 }
 
-// 3 bloques apilados para overview/módulo
+// Renders the three stacked visualization pairs for a stats object.
 function vizTriplet(prefix, statsObj){
   return [
     vizPair(prefix, 'Distribution by State', tblTotalsByState(statsObj), 'state'),
@@ -110,6 +115,7 @@ function vizTriplet(prefix, statsObj){
   ].join('\n');
 }
 
+// Entry point: builds full dashboard HTML (overview + modules + chart script).
 function dashboardHtml(view){
   const items = Array.isArray(view?.diff?.items) ? view.diff.items : (Array.isArray(view?.items) ? view.items : []);
   const agg = aggregate(items);

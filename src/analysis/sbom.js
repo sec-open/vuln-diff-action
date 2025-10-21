@@ -1,8 +1,9 @@
-// Generate CycloneDX SBOM: try Maven reactor first; fallback to syft
+// SBOM generation helper: prefers Maven CycloneDX aggregate, falls back to Syft.
 const path = require('path');
 const { execCmd } = require('./exec');
 const { writeFile } = require('./fsx');
 
+// Detects presence of a Maven reactor (pom.xml at root); returns boolean.
 async function hasMavenReactor(cwd, mvnPath) {
   if (!mvnPath) return false;
   // quick heuristic: presence of pom.xml in root
@@ -10,6 +11,7 @@ async function hasMavenReactor(cwd, mvnPath) {
   return stdout.trim() === 'yes';
 }
 
+// Invokes CycloneDX Maven plugin to generate aggregate JSON SBOM; returns file path.
 async function generateSbomWithMaven(cwd) {
   // Produces target/sbom.json (we’ll read it back)
   const args = [
@@ -24,6 +26,7 @@ async function generateSbomWithMaven(cwd) {
   return sbomPath;
 }
 
+// Uses Syft to scan a directory and emits CycloneDX JSON SBOM (writes to temp file).
 async function generateSbomWithSyft(cwd, syftPath) {
   const { stdout } = await execCmd(syftPath, ['dir:.', '-o', 'cyclonedx-json'], { cwd });
   // syft prints the SBOM to stdout
@@ -32,6 +35,7 @@ async function generateSbomWithSyft(cwd, syftPath) {
   return outPath;
 }
 
+// Orchestrates SBOM generation: attempt Maven, fallback to Syft if unavailable/failure.
 async function generateSbom(opts) {
   const { checkoutDir, tools } = opts;
   const useMaven = await hasMavenReactor(checkoutDir, tools.paths.mvn);

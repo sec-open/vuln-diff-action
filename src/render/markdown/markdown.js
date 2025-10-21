@@ -10,11 +10,13 @@ const { buildView } = require('../common/view');
 // ---------- end imports ----------
 
 // ---------- helpers ----------
+// Markdown renderer: creates summary markdown (side-by-side refs, totals, flat vulnerability table, tool metadata).
+
 // Safely converts potentially undefined/null/empty values to a printable markdown-safe string.
 function mdSafe(s) {
   return (s === undefined || s === null || s === '') ? 'n/a' : String(s);
 }
-// Builds a hyperlink for known vulnerability ID formats (CVE / GHSA); returns plain text otherwise.
+// Generates hyperlink for common vulnerability IDs (CVE/GHSA).
 function hyperlinkId(id) {
   if (!id) return 'UNKNOWN';
   const up = String(id).toUpperCase();
@@ -22,7 +24,7 @@ function hyperlinkId(id) {
   if (up.startsWith('GHSA-')) return `[${id}](https://github.com/advisories/${up})`;
   return String(id);
 }
-// Formats a vulnerability's package coordinates as group:artifact:version (fallbacks to 'unknown').
+// Formats package data into group:artifact:version.
 function asGav(v) {
   const pkg = v?.package || {};
   const g = pkg.groupId ?? 'unknown';
@@ -131,12 +133,12 @@ Commit: ${mdSafe(view.head.commitSubject)}
   }
 }
 
-// Placeholder: PR comment renderer (kept for compatibility if invoked externally).
+/** Placeholder kept for external compatibility (no implementation). */
 async function renderPrCommentMarkdown(ctx = {}) {
   // ...existing code...
 }
 
-// Placeholder: Slack message renderer (kept for compatibility if invoked externally).
+/** Placeholder kept for external compatibility (no implementation). */
 async function renderSlackMarkdown(ctx = {}) {
   // ...existing code...
 }

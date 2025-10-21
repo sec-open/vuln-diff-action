@@ -1,6 +1,10 @@
 // src/render/html/sections/fix-insights.js
 // Fix insights: charts + actionable tables. No JSON reads here.
 
+/**
+ * Returns HTML for the fix insights section (HEAD-focused fixability view).
+ * @returns {string}
+ */
 function renderFixInsights(/* { view } */) {
   return `
 <div class="card">

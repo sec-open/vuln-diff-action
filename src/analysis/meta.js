@@ -1,7 +1,9 @@
+// Constructs and persists meta.json describing inputs, repository, tool versions, and environment.
 const os = require('os');
 const path = require('path');
 const { writeJson } = require('./fsx');
 
+// Builds metadata object capturing run context (schema version, timestamps, inputs, tooling).
 function makeMeta({ inputs, repo, tools, paths }) {
   return {
     schema_version: '1.0',
@@ -35,6 +37,7 @@ function makeMeta({ inputs, repo, tools, paths }) {
   };
 }
 
+// Writes metadata object to disk as JSON.
 async function writeMeta(metaPath, metaObj) {
   await writeJson(metaPath, metaObj);
 }

@@ -6,14 +6,14 @@ const { uploadDistAsSingleArtifact } = require('./utils/artifact');
 
 let normalization;
 try {
-  ({ normalization } = require('./normalization/normalization')); // Normalization may not exist in early builds
+  ({ normalization } = require('./normalization/normalization')); // Normalization phase (may be absent in early builds)
 } catch (e) {
   core.warning(`[vuln-diff] Normalization not available in this build: ${e?.message || e}`);
 }
 
 let render;
 try {
-  ({ render } = require('./render/render')); // new: render orchestrator (Render entrypoint)
+  ({ render } = require('./render/render')); // Phase 3 rendering
 } catch (e) {
   core.warning(`[vuln-diff] Render not available in this build: ${e?.message || e}`);
 }
@@ -28,7 +28,7 @@ async function runMain() {
   const distDir = './dist';
   const absDist = path.resolve(distDir);
 
-  // Analysis
+  // Phase 1: Analysis
   try {
     core.info('[vuln-diff] Analysis: start');
     await analysis();
@@ -38,7 +38,7 @@ async function runMain() {
     return;
   }
 
-  // Normalization
+  // Phase 2: Normalization (optional if available)
   if (!normalization) {
     core.info('[vuln-diff] Normalization: skipped (not available in this build)');
   } else {
@@ -52,7 +52,7 @@ async function runMain() {
     }
   }
 
-  // Render (Render) — always attempt if available
+  // Phase 3: Rendering (Markdown, HTML, PDF)
   if (!render) {
     core.info('[vuln-diff] Render: skipped (not available in this build)');
   } else {
@@ -66,7 +66,7 @@ async function runMain() {
     }
   }
 
-  // Count files before upload (diagnostics)
+  // Count produced files prior to artifact upload (diagnostic).
   let fileCount = 0;
   async function countFiles(dir) {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -80,12 +80,12 @@ async function runMain() {
   await countFiles(absDist);
   core.info(`[vuln-diff][upload] files to upload in artifact: ${fileCount}`);
 
-  // Upload single artifact with the entire ./dist (includes Analysis + 2 + 3 outputs)
+  // Upload entire dist folder as a single artifact.
   try {
     core.info('[vuln-diff][upload] uploading single artifact…');
     const response = await uploadDistAsSingleArtifact({
       distDir,
-      name: 'report-files', // ensure fixed artifact name
+      name: 'report-files',
     });
     core.info(`[vuln-diff][upload] artifact upload OK: ${JSON.stringify(response)}`);
   } catch (e) {
@@ -94,7 +94,7 @@ async function runMain() {
   }
 }
 
-// Executed directly by Node in GitHub Actions
+// Execute when invoked directly (GitHub Action entrypoint).
 if (require.main === module) {
   runMain().catch((err) => core.setFailed(err?.message || String(err)));
 }

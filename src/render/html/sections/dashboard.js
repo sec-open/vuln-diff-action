@@ -1,27 +1,45 @@
-// src/render/html/sections/dashboard.js
-// Dashboard section — charts only (no tables). No JSON reads here.
-
-function renderDashboard(/* { view } */) {
+// Provides the HTML snippet for the dashboard section (charts + KPIs). Consumed by client-side runtime.
+// Does not perform data reads; the browser JS populates chart canvases and KPI placeholders.
   return `
+/**
+ * Returns the HTML for the dashboard section (chart placeholders and KPI containers).
+ * @returns {string} HTML markup for the dashboard view.
+ */
+/**
+ * Builds hyperlink markup for known vulnerability IDs.
+ * @param {string} id
+ * @returns {string}
+ */
 <div class="card">
-  <h2 id="section-title">Dashboard</h2>
-  <p class="small">High-level visual summary of the diff (no extra calculations; all data comes from Phase 2 + Phase 3 precompute).</p>
 </div>
 
 <!-- Row 1: three charts -->
 <div class="grid-3">
+
+/**
+ * Formats package coordinates as group:artifact:version.
+ * @param {Object} v
+ * @returns {string}
+ */
   <div class="card chart-card">
     <h3>Distribution by State</h3>
     <div class="chart-wrap"><canvas id="chart-state-pie" aria-label="State distribution pie"></canvas></div>
   </div>
-  <div class="card chart-card">
-    <h3>NEW vs REMOVED by Severity</h3>
     <div class="chart-wrap"><canvas id="chart-new-removed" aria-label="NEW vs REMOVED bar"></canvas></div>
+
+/**
+ * Formats a single dependency path chain into HTML.
+ * @param {Array<string>} chain
+ * @returns {string}
+ */
   </div>
   <div class="card chart-card">
     <h3>By Severity &amp; State (stacked)</h3>
     <div class="chart-wrap"><canvas id="chart-severity-stacked" aria-label="Severity stacked bar"></canvas></div>
   </div>
+/**
+ * Converts vulnerability items into table row HTML strings.
+ */
 </div>
 
 <!-- Row 2: head vs base + top components + KPIs -->
@@ -42,6 +60,12 @@ function renderDashboard(/* { view } */) {
 
     <!-- Tooltip (hidden by default) -->
     <div id="risk-tooltip" class="tooltip">
+/**
+ * Wraps a table with filter control inside a card.
+ * @param {string} title
+ * @param {string} id
+ * @param {Array<Object>} items
+ * @returns {string}
       <button class="close" id="risk-tooltip-close" aria-label="Close">&times;</button>
       <h4>Weighted Risk — How it is computed</h4>
       <div class="tooltip-grid">
@@ -66,7 +90,11 @@ function renderDashboard(/* { view } */) {
             </tbody>
           </table>
         </div>
-      </div>
+/**
+ * Renders Base dependency paths (REMOVED + UNCHANGED).
+ * @param {{view:Object}} param0
+ * @returns {string}
+ */
     </div>
 
     <div class="grid-2" style="margin-top:10px;">
@@ -76,7 +104,11 @@ function renderDashboard(/* { view } */) {
           <div id="kpi-net-risk" class="kpi-value">—</div>
           <div class="small">Weighted NEW − REMOVED</div>
         </div>
-        <div class="kpi" style="margin-top:8px;">
+/**
+ * Renders Head dependency paths (NEW + UNCHANGED).
+ * @param {{view:Object}} param0
+ * @returns {string}
+ */
           <div class="kpi-label">Base Stock Risk</div>
           <div id="kpi-base-stock" class="kpi-value">—</div>
           <div class="small">Weighted (REMOVED + UNCHANGED)</div>

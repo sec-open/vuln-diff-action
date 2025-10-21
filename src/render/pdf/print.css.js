@@ -8,12 +8,12 @@ function makePrintCss() {
     background:#ffffff !important; color:#0b0f16 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif !important;
   }
-  /* Neutraliza fondos oscuros del bundle */
+  /* Normalize dark background surfaces to white for printing */
   body, .card, .panel, .box, .bg, .bg-slate-900, .bg-slate-800, .bg-slate-700, .chart-card {
     background:#ffffff !important; color:#0b0f16 !important;
   }
 
-  /* ===== PORTADA (oscura) ===== */
+  /* ===== COVER PAGE (dark theme) ===== */
   .cover-page {
     page-break-after: always !important;
     background:#0b0f16 !important; color:#e5e7eb !important;
@@ -26,7 +26,7 @@ function makePrintCss() {
   .cover-title .line2{ font-size:18px; color:#cbd5e1; }
   .cover-title .cover-meta-ts{ color:#9ca3af; font-size:12px; }
 
-  /* Tarjetas Base/Head: corrige corte y wrap de SHA largo */
+  /* Base/Head cards: fix long SHA wrapping */
   .cover-cards{
     position:absolute; left:18mm; right:18mm; bottom:18mm;
     display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px;
@@ -36,25 +36,25 @@ function makePrintCss() {
   .card-dark .kv{ display:grid; grid-template-columns:120px 1fr; gap:6px 12px; font-size:13px; line-height:1.38; }
   .wrap { word-break: break-word; overflow-wrap: anywhere; }
 
-  /* ===== PÁGINAS ===== */
+  /* ===== GENERIC PAGES ===== */
   .page { page-break-before: always !important; background:#fff !important; }
   .section-wrap{ padding:6mm 0 !important; }
   .section-title{ font-size:20px !important; margin:0 0 8px 0 !important; }
 
-  /* TOC: más grande y con más interlineado */
+  /* TOC: larger spacing and font size */
   .toc h2{ font-size:22px !important; margin-bottom:14px !important; }
   .toc ol{ font-size:15px !important; line-height:1.9 !important; padding-left:20px !important; }
   .toc li{ margin:6px 0 !important; }
 
-  /* Subtítulos */
+  /* Subsection headings */
   .subsection-title{ font-weight:700; margin:12px 0 4px 0; padding-bottom:4px; border-bottom:2px solid #0b0f16; }
 
-  /* Tablas */
+  /* Tables */
   table{ width:100% !important; border-collapse: collapse !important; }
   th,td{ text-align:left !important; padding:6px 8px !important; border-bottom:1px solid #e5e7eb !important; vertical-align: top; }
   thead th{ background:#f3f4f6 !important; font-weight:600 !important; }
 
-  /* Dashboard */
+  /* Dashboard cards */
   .print-dash-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   .print-dash-card{ border:1px solid #e5e7eb; border-radius:10px; padding:8px; }
   .print-dash-card h4{ margin:0 0 6px 0; font-size:14px; }
@@ -64,15 +64,15 @@ function makePrintCss() {
   .module-tables h4 { margin:12px 0 6px 0; }
   .module-tables table { margin-bottom:8px; }
 
-  /* Oculta UI interactiva del bundle */
+  /* Hide interactive UI */
   #app-menu, #app-header, nav, .controls, .filters, .btn, button{ display:none !important; }
 
-  /* Links & code */
+  /* Links & inline code blocks */
   a{ color:#1d4ed8 !important; text-decoration:none !important; }
   a:hover{ text-decoration:underline !important; }
   code{ background:#eef2ff !important; padding:2px 6px !important; border-radius:6px !important; }
 
-  /* Dependency Paths */
+  /* Dependency Paths printable adjustments */
   #Paths, .paths-filter, .filter, .filter-box, .search, .search-box, input[type="search"] { display: none !important; }
   .dep-paths-table, .dep-paths-table thead, .dep-paths-table tbody, .dep-paths-table tr, .dep-paths-table td, .dep-paths-table th { page-break-inside: avoid !important; }
   .dep-paths .subsection-title { margin-top: 10px; }
@@ -81,12 +81,12 @@ function makePrintCss() {
   /* Fix Insights totals box */
   .fix-totals { border:1px solid #e5e7eb; border-radius:8px; padding:8px; margin:8px 0 12px; }
 
-    .page-break-before { page-break-before: always !important; break-before: page !important; }
-    .toc ol { font-size: 15px !important; line-height: 1.9 !important; } /* TOC legible */
+  .page-break-before { page-break-before: always !important; break-before: page !important; }
+  .toc ol { font-size: 15px !important; line-height: 1.9 !important; }
 
-    /* Evitar que título quede al final y tabla salte (Dependency Paths) */
-    .dep-block { break-inside: avoid !important; page-break-inside: avoid !important; margin-bottom: 10px; }
-    .dep-block h4 { margin: 0 0 6px 0; }
+  /* Prevent orphaned headings before table page breaks */
+  .dep-block { break-inside: avoid !important; page-break-inside: avoid !important; margin-bottom: 10px; }
+  .dep-block h4 { margin: 0 0 6px 0; }
 
   `.trim();
 }

@@ -2,12 +2,18 @@
 const { normalizeSeverity } = require('./utils');
 const { buildDiffSummary } = require('./summarize');
 
+// Builds a map keyed by match_key for quick lookup.
 function mapByKey(arr) {
   const m = new Map();
   for (const v of arr || []) m.set(v.match_key, v);
   return m;
 }
 
+// Computes diff states (NEW / REMOVED / UNCHANGED) between base and head vulnerability sets.
+// - UNCHANGED: present in both; takes HEAD side data for freshness.
+// - REMOVED: present only in BASE.
+// - NEW: present only in HEAD.
+// Attaches normalized severity and builds a summary object.
 function buildDiff(baseDoc, headDoc, meta) {
   const B = mapByKey(baseDoc?.vulnerabilities || []);
   const H = mapByKey(headDoc?.vulnerabilities || []);
@@ -15,14 +21,14 @@ function buildDiff(baseDoc, headDoc, meta) {
   const items = [];
   const seen = new Set();
 
-  // From BASE
+  // Iterate base side to mark UNCHANGED or REMOVED.
   for (const [k, b] of B.entries()) {
     if (H.has(k)) {
       const h = H.get(k);
       items.push({
         state: 'UNCHANGED',
         branches: 'BOTH',
-        ...h, // For unchanged, take HEAD side severity/details. :contentReference[oaicite:9]{index=9}
+        ...h,
         severity: normalizeSeverity(h.severity),
       });
     } else {
@@ -36,7 +42,7 @@ function buildDiff(baseDoc, headDoc, meta) {
     seen.add(k);
   }
 
-  // From HEAD that were not seen
+  // Add remaining head entries as NEW.
   for (const [k, h] of H.entries()) {
     if (seen.has(k)) continue;
     items.push({
@@ -47,8 +53,10 @@ function buildDiff(baseDoc, headDoc, meta) {
     });
   }
 
+  // Build diff summary aggregations.
   const summary = buildDiffSummary(items);
 
+  // Final diff document payload.
   const out = {
     schema_version: '2.0.0',
     generated_at: new Date().toISOString(),

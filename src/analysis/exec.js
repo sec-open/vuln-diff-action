@@ -1,6 +1,7 @@
-// Small, testable exec helpers (no global side-effects)
+// Process execution utilities: spawn commands capturing stdout/stderr; portable which helper.
 const { spawn } = require('child_process');
 
+// Executes a command and returns a promise resolving with { stdout, stderr, code } or rejecting on non-zero exit.
 function execCmd(cmd, args = [], opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
@@ -20,6 +21,7 @@ function execCmd(cmd, args = [], opts = {}) {
   });
 }
 
+// Locates a command in PATH (first match); returns null if not found.
 async function which(command) {
   try {
     const { stdout } = await execCmd(process.platform === 'win32' ? 'where' : 'which', [command]);

@@ -44,8 +44,6 @@ th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border);
 #app-menu .submenu { margin-left: 8px; border-left: 2px solid var(--border); padding-left: 8px; }
 #app-menu .item[style*="font-weight:600"] { cursor: default; }
 
-
-/* --- Charts layout & sizing --- */
 /* --- Charts layout & sizing --- */
 :root { --chart-h: 320px; }  /* set 400px if you prefer */
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }

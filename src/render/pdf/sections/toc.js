@@ -1,4 +1,8 @@
+// Table of contents generator for PDF (static ordered list of sections).
+
 // src/render/pdf/sections/toc.js
+
+/** Returns HTML for the table of contents page. */
 function tocHtml() {
   // Título sin sufijos, numeración fija, sin duplicados
   const items = [

@@ -1,17 +1,22 @@
 // src/render/html/assets/js/dashboard.js
-// Browser-side chart rendering for Dashboard (Chart.js v4).
-// Loaded globally from index.html (not injected per section).
+// Browser-side dashboard renderer: fetches JSON data, builds charts (Chart.js),
+// populates KPI metrics, and binds a weighted risk tooltip.
 
 (function () {
+  // Endpoint for dashboard data (JSON artifact produced server-side)
   const DATA_URL = './sections/dashboard-data.json';
 
+  // Returns true if Chart.js is present in global window scope.
   function hasChartJs() { return !!window.Chart; }
 
+  // Fetches JSON data with no-store caching (fresh each navigation).
   async function fetchData() {
     const res = await fetch(DATA_URL, { cache: 'no-store' });
     if (!res.ok) throw new Error(`Failed to load ${DATA_URL}: ${res.status}`);
     return res.json();
   }
+
+  // Maps severity value to CSS class used for color coding dots/bars.
   function sevKeyToClass(sev) {
     const s = String(sev || '').toUpperCase();
     if (s === 'CRITICAL') return 'sev-critical';
@@ -21,6 +26,7 @@
     return 'sev-unknown';
   }
 
+  // Builds table rows HTML listing severity weights (risk scoring factors).
   function renderWeightsTable(weights) {
     const order = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
     return order.map(sev => {
@@ -30,26 +36,28 @@
     }).join('');
   }
 
+  // Builds horizontal segmented bar representing relative severity weights.
   function renderWeightsBar(weights) {
     const order = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
     const total = order.reduce((acc, sev) => acc + (weights?.[sev] ?? 0), 0) || 1;
     return order.map(sev => {
       const w = weights?.[sev] ?? 0;
-      const pct = Math.max(6, Math.round((w / total) * 100)); // mínimo 6% para visibilidad
+      // Minimum width ensures visibility for very small values.
+      const pct = Math.max(6, Math.round((w / total) * 100));
       return `<span class="seg ${sevKeyToClass(sev)}" style="width:${pct}%;" title="${sev}: ${w}"></span>`;
     }).join('');
   }
 
-  // Tooltip toggle logic
+  // Attaches click handlers for weighted risk tooltip (open/close + outside click dismissal).
   function bindRiskTooltip() {
     const btn = document.getElementById('risk-help');
     const tip = document.getElementById('risk-tooltip');
     const close = document.getElementById('risk-tooltip-close');
     if (!btn || !tip) return;
 
+    // Opens tooltip near trigger badge, positioning inside card boundaries.
     function open(e) {
       e.preventDefault();
-      // place tooltip near the badge
       const rect = btn.getBoundingClientRect();
       const parentRect = btn.closest('.card').getBoundingClientRect();
       const top = rect.bottom - parentRect.top + 8;
@@ -58,6 +66,7 @@
       tip.style.left = `${left}px`;
       tip.classList.add('show');
     }
+    // Hides tooltip.
     function closeTip() { tip.classList.remove('show'); }
 
     btn.addEventListener('click', open);
@@ -69,6 +78,7 @@
     });
   }
 
+  // Creates pie chart for state distribution.
   function mkPie(ctx, data) {
     return new Chart(ctx, {
       type: 'pie',
@@ -80,6 +90,8 @@
       }
     });
   }
+
+  // Creates side-by-side bar chart for two datasets (e.g., NEW vs REMOVED or HEAD vs BASE).
   function mkBarSideBySide(ctx, labels, a, b, labelA = 'NEW', labelB = 'REMOVED') {
     return new Chart(ctx, {
       type: 'bar',
@@ -92,6 +104,8 @@
       }
     });
   }
+
+  // Creates stacked bar chart for state breakdown per severity.
   function mkBarStacked(ctx, labels, a, b, c) {
     return new Chart(ctx, {
       type: 'bar',
@@ -104,6 +118,8 @@
       }
     });
   }
+
+  // Horizontal bar chart listing components ranked by vulnerability count (HEAD side).
   function mkBarTopComponents(ctx, labels, counts) {
     return new Chart(ctx, {
       type: 'bar',
@@ -117,6 +133,8 @@
       }
     });
   }
+
+  // Bar chart comparing fix availability for NEW vulnerabilities by severity.
   function mkBarFixNew(ctx, labels, withFix, withoutFix) {
     return new Chart(ctx, {
       type: 'bar',
@@ -130,17 +148,18 @@
     });
   }
 
+  // Sets KPI value and applies conditional coloring (net risk indicator).
   function setKpi(id, value) {
     const el = document.getElementById(id);
     if (!el) return;
     el.textContent = String(value);
-    // color hint: red if positive net risk (worse), green if <= 0
     if (id === 'kpi-net-risk') {
       const v = Number(value);
       el.style.color = Number.isFinite(v) && v > 0 ? '#f87171' : '#34d399';
     }
   }
 
+  // Main render flow: ensures section is active, fetches data, draws charts, populates KPIs, binds tooltip.
   async function render() {
     const content = document.getElementById('app-content');
     if (!content) return;
@@ -156,51 +175,57 @@
       return;
     }
 
-    // ---- existing charts ----
+    // Chart element references (conditionally rendered if present).
     const pieEl = document.getElementById('chart-state-pie');
     const nrEl = document.getElementById('chart-new-removed');
     const stkEl = document.getElementById('chart-severity-stacked');
     const hvbEl = document.getElementById('chart-head-vs-base');
     const topEl = document.getElementById('chart-top-components');
 
+    // Pie chart (state totals).
     if (pieEl && data.stateTotals) mkPie(pieEl, data.stateTotals);
+
+    // Side-by-side NEW vs REMOVED per severity.
     if (nrEl && data.newVsRemovedBySeverity) {
       mkBarSideBySide(nrEl, data.newVsRemovedBySeverity.labels, data.newVsRemovedBySeverity.NEW, data.newVsRemovedBySeverity.REMOVED);
     }
+
+    // Stacked severity (NEW / REMOVED / UNCHANGED).
     if (stkEl && data.severityStacked) {
       mkBarStacked(stkEl, data.severityStacked.labels, data.severityStacked.NEW, data.severityStacked.REMOVED, data.severityStacked.UNCHANGED);
     }
+
+    // HEAD vs BASE comparison by severity.
     if (hvbEl && data.headVsBaseBySeverity) {
       const labels = Object.keys(data.headVsBaseBySeverity);
       const head = labels.map(k => data.headVsBaseBySeverity[k].head);
       const base = labels.map(k => data.headVsBaseBySeverity[k].base);
       mkBarSideBySide(hvbEl, labels, head, base, 'HEAD', 'BASE');
     }
+
+    // Top vulnerable components (HEAD).
     if (topEl && Array.isArray(data.topComponentsHead)) {
       const labels = data.topComponentsHead.map(x => x.gav);
       const counts = data.topComponentsHead.map(x => x.count);
       mkBarTopComponents(topEl, labels, counts);
     }
 
-    // ---- KPIs (net risk) ----
+    // KPI metrics and tooltip content population.
     if (data.riskKpis?.kpis) {
       setKpi('kpi-net-risk', data.riskKpis.kpis.netRisk ?? '—');
-      setKpi('kpi-base-stock', data.riskKpis.kpis.baseStockRisk ?? '—'); // ← NEW
+      setKpi('kpi-base-stock', data.riskKpis.kpis.baseStockRisk ?? '—');
       setKpi('kpi-head-stock', data.riskKpis.kpis.headStockRisk ?? '—');
 
-        // Fill tooltip content (weights table + bar)
-        const weights = data.riskKpis.weights || null;
-        const rowsEl = document.getElementById('risk-weights-rows');
-        const barEl = document.getElementById('risk-weight-bar');
-        if (weights && rowsEl) rowsEl.innerHTML = renderWeightsTable(weights);
-        if (weights && barEl)  barEl.innerHTML  = renderWeightsBar(weights);
+      const weights = data.riskKpis.weights || null;
+      const rowsEl = document.getElementById('risk-weights-rows');
+      const barEl = document.getElementById('risk-weight-bar');
+      if (weights && rowsEl) rowsEl.innerHTML = renderWeightsTable(weights);
+      if (weights && barEl)  barEl.innerHTML  = renderWeightsBar(weights);
 
-        // Bind tooltip events
-        bindRiskTooltip();
+      bindRiskTooltip();
     }
 
-
-    // ---- NEW Fixability (bars by severity) ----
+    // Fixability chart: NEW vulnerabilities with/without fix grouped by severity.
     if (data.fixesNew?.by_severity) {
       const sev = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
       const withFix = sev.map(s => data.fixesNew.by_severity[s]?.with_fix ?? 0);
@@ -210,6 +235,7 @@
     }
   }
 
+  // Bootstraps a mutation observer to re-render when section content changes.
   document.addEventListener('DOMContentLoaded', () => {
     const content = document.getElementById('app-content');
     if (!content) return;

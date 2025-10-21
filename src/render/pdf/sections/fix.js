@@ -2,15 +2,21 @@
 const fs = require('fs');
 const path = require('path');
 
+// Fix insights PDF section: totals and split tables for vulnerabilities with/without available fixes.
+
+/** Reads JSON file safely returning null on failure. */
 function readJsonSafe(p){ try { return JSON.parse(fs.readFileSync(p,'utf8')); } catch { return null; } }
+/** Normalizes severity key. */
 function sevKey(s){ return String(s||'UNKNOWN').toUpperCase(); }
 
+/** Builds a compact HTML table. */
 function table(headers, rows){
   const thead = `<thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>`;
   const tbody = rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('');
   return `<table class="compact">${thead}<tbody>${tbody || '<tr><td colspan="'+headers.length+'">—</td></tr>'}</tbody></table>`;
 }
 
+/** Builds row cells for a vulnerability item. */
 function rowFromItem(o){
   const vuln = o.id || o.vulnerabilityId || '';
   const pkg = (() => {
@@ -25,6 +31,11 @@ function rowFromItem(o){
   return [sevKey(o.severity), vuln, pkg, String(o.state||'').toUpperCase(), target];
 }
 
+/**
+ * Builds complete Fix Insights section HTML.
+ * @param {string} distDir
+ * @returns {Promise<string>}
+ */
 async function fixHtml(distDir){
   const diffPath = path.join(distDir, 'diff.json');
   const diff = readJsonSafe(diffPath) || {};

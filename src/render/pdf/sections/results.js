@@ -2,13 +2,18 @@
 const fs = require('fs');
 const path = require('path');
 
+// PDF results tables: diff, base-only view, head-only view (sorted by severity → id → package → state).
+
+/** Safe JSON file read; returns null if unreadable. */
 function readJsonSafe(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
 }
-
+/** Normalizes severity key. */
 function sevKey(s) { return String(s || 'UNKNOWN').toUpperCase(); }
+/** Normalizes state key. */
 function stateKey(s) { return String(s || '').toUpperCase(); }
 
+/** Produces group:artifact:version string from package object. */
 function gavStr(p) {
   if (!p) return '';
   if (typeof p === 'string') return p;
@@ -21,6 +26,7 @@ function gavStr(p) {
 
 const SEV_ORDER = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1, UNKNOWN: 0 };
 
+/** Sorts items by severity priority then id then package then state. */
 function sortItems(items) {
   return items.sort((a, b) => {
     const sa = SEV_ORDER[sevKey(a.severity)] || 0;
@@ -38,12 +44,14 @@ function sortItems(items) {
   });
 }
 
+/** Builds HTML table from headers and row cell arrays. */
 function tableHtml(headers, rows) {
   const thead = `<thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>`;
   const tbody = rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('');
   return `<table class="compact">${thead}<tbody>${tbody}</tbody></table>`;
 }
 
+/** Converts one vulnerability item to a row array. */
 function makeRow(o) {
   return [
     sevKey(o.severity),
@@ -65,6 +73,11 @@ function rowsHead(items) {
   return sortItems(f).map(makeRow);
 }
 
+/**
+ * Builds all vulnerability table sections for PDF.
+ * @param {string} distDir
+ * @param {Object} view
+ */
 async function resultsHtml(distDir, view) {
   const diff = readJsonSafe(path.join(distDir, 'diff.json')) || {};
   const items = Array.isArray(diff.items) ? diff.items : (Array.isArray(view?.diff?.items) ? view.diff.items : []);

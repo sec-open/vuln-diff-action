@@ -9,18 +9,18 @@ const { install, computeExecutablePath } = require('@puppeteer/browsers');
 const { PDFDocument } = require('pdf-lib');
 
 /**
- * Devuelve una ruta ejecutable si existe y es ejecutable.
+ * Returns true if a path exists and is executable.
  */
 function isExecutable(p) {
   try { fs.accessSync(p, fs.constants.X_OK); return true; } catch { return false; }
 }
 
 /**
- * Intenta resolver un Chrome/Chromium ya presente en el runner.
+ * Attempts to locate a system-installed Chrome/Chromium binary.
  */
 function resolveSystemChrome() {
   const candidates = [
-    process.env.PUPPETEER_EXECUTABLE_PATH, // si el workflow la define
+    process.env.PUPPETEER_EXECUTABLE_PATH, // if the workflow defines it
     '/usr/bin/google-chrome',
     '/usr/bin/google-chrome-stable',
     '/usr/bin/chromium',
@@ -34,8 +34,8 @@ function resolveSystemChrome() {
 }
 
 /**
- * Descarga (si hace falta) y devuelve el ejecutable de **Chrome for Testing (stable)**
- * en una caché LOCAL del repo. Si falla con 404, devuelve null (no rompe).
+ * Installs (if needed) Chrome for Testing (stable) locally and returns the executable path.
+ * If it fails with 404, returns null (does not break).
  */
 async function resolveChromeForTesting() {
   const cacheDir = path.join(process.cwd(), '.chrome-for-testing');
@@ -47,26 +47,25 @@ async function resolveChromeForTesting() {
     const execPath = computeExecutablePath({ cacheDir, browser, buildId });
     if (execPath && fs.existsSync(execPath)) return execPath;
   } catch (e) {
-    // No abortamos por 404 ni por bloqueos de red; seguimos con otros métodos
+    // Do not abort on 404 or network blocks; continue with other methods
     console.warn('[pdf] Chrome for Testing install failed or unavailable:', e?.message || e);
   }
   return null;
 }
 
 /**
- * Resuelve la ruta del ejecutable de navegador a usar con puppeteer-core,
- * priorizando: 1) sistema  2) Chrome for Testing (stable).
+ * Determines which browser executable to use (system first, fallback to Chrome for Testing).
  */
 async function ensureBrowserPath() {
-  // 1) Chrome del sistema (más fiable en runners, evita 404)
+  // 1) System Chrome (more reliable in runners, avoids 404)
   const sys = resolveSystemChrome();
   if (sys) return sys;
 
-  // 2) Chrome for Testing (stable) cacheado localmente
+  // 2) Chrome for Testing (stable) cached locally
   const cft = await resolveChromeForTesting();
   if (cft) return cft;
 
-  // Si llegamos aquí, no hay navegador usable
+  // If we reached here, no usable browser
   throw new Error('[pdf] No Chrome/Chromium executable available (system not found, Chrome for Testing download failed).');
 }
 
@@ -114,17 +113,15 @@ async function waitForVisuals(page, { timeout = 60000 } = {}) {
   `;
   try {
     await page.waitForFunction(predicate, { timeout });
-    await page.waitForTimeout(150); // pequeño settle
+    await page.waitForTimeout(150); // small settle
   } catch {
-    // No bloquea: si no llega a ready, seguimos igualmente (tu comportamiento actual)
+    // Does not block: if it does not reach ready, we continue anyway (your current behavior)
   }
 }
 
 
 /**
- * Renderiza print.html en dos pasadas y une:
- *  1) Portada (pág.1) sin header/footer
- *  2) Resto (pág.2..n) con header/footer
+ * Renders the report in two passes (cover without header/footer, rest with header/footer) and merges PDFs.
  */
 async function renderPdf({
   printHtmlPath,
@@ -150,10 +147,10 @@ async function renderPdf({
     const page = await browser.newPage();
     await page.goto(`file://${printHtmlPath}`, { waitUntil: 'load', timeout: gotoTimeoutMs });
 
-    // Esperar charts/mermaid (si están)
+    // Wait for charts/mermaid (if present)
     await waitForVisuals(page, { timeout: visualsTimeoutMs });
 
-    // 1) Portada (sin header/footer)
+    // 1) Cover page (without header/footer)
     const coverTmp = path.join(pdfDir, 'cover.tmp.pdf');
     await page.pdf({
       printBackground: true,
@@ -164,7 +161,7 @@ async function renderPdf({
       margin: { top: marginTop, bottom: marginBottom, left: marginLeft, right: marginRight },
     });
 
-    // 2) Resto (con header/footer)
+    // 2) Rest of the document (with header/footer)
     const restTmp = path.join(pdfDir, 'rest.tmp.pdf');
     await page.pdf({
       printBackground: true,
@@ -177,7 +174,7 @@ async function renderPdf({
       margin: { top: marginTop, bottom: marginBottom, left: marginLeft, right: marginRight },
     });
 
-    // 3) Unir PDFs con pdf-lib
+    // 3) Merge PDFs with pdf-lib
     const coverDoc = await PDFDocument.load(await fsp.readFile(coverTmp));
     const restDoc  = await PDFDocument.load(await fsp.readFile(restTmp));
     const out = await PDFDocument.create();

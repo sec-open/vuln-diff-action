@@ -1,10 +1,9 @@
-// src/render/html/assets/js/tables.js
-// Minimal sort + filter for tables with class "sortable filterable".
-// - Click a <th data-sort="key"> to sort asc/desc.
-// - Typing in <input.tbl-filter data-target="#tableId"> filters rows by text.
-// Supports numeric sort if the target <td> has data-num="123".
+// Table enhancement module: adds client-side sorting and text filtering
+// for tables with class "sortable" and inputs with class "tbl-filter".
+// Sorting supports numeric comparison when target cell includes data-num attribute.
 
 (function () {
+  // Extracts sortable value from a cell: numeric if data-num present, else lowercased text.
   function cellValue(td) {
     if (td && td.dataset && td.dataset.num !== undefined) {
       const n = Number(td.dataset.num);
@@ -13,6 +12,7 @@
     return (td.textContent || '').trim().toLowerCase();
   }
 
+  // Sorts table rows (single <tbody>) by key taken from matching <th data-sort="key">.
   function sortTable(table, key, asc) {
     const tbody = table.tBodies[0];
     const rows = Array.from(tbody.rows);
@@ -35,18 +35,20 @@
     ths[idx].setAttribute('aria-sort', asc ? 'ascending' : 'descending');
   }
 
+  // Binds click listeners on sortable headers to toggle ascending/descending order.
   function bindSorting(root) {
     root.querySelectorAll('table.sortable thead th[data-sort]').forEach(th => {
       th.addEventListener('click', () => {
         const table = th.closest('table');
         const key = th.dataset.sort;
         const current = th.getAttribute('aria-sort');
-        const asc = current !== 'ascending'; // toggle
+        const asc = current !== 'ascending'; // Toggle sort direction.
         sortTable(table, key, asc);
       });
     });
   }
 
+  // Binds input listeners on filter fields to hide rows not matching query text.
   function bindFiltering(root) {
     root.querySelectorAll('input.tbl-filter[data-target]').forEach(inp => {
       const sel = inp.dataset.target;
@@ -59,15 +61,16 @@
         t = setTimeout(() => {
           const q = inp.value.trim().toLowerCase();
           const rows = table.tBodies[0].rows;
-          for (const r of rows) {
-            const hit = q === '' || Array.from(r.cells).some(td => (td.textContent || '').toLowerCase().includes(q));
-            r.style.display = hit ? '' : 'none';
-          }
-        }, 120);
+            for (const r of rows) {
+              const hit = q === '' || Array.from(r.cells).some(td => (td.textContent || '').toLowerCase().includes(q));
+              r.style.display = hit ? '' : 'none';
+            }
+        }, 120); // Debounce to reduce excessive DOM work.
       });
     });
   }
 
+  // Initializes observers to apply enhancements when new section HTML is loaded.
   document.addEventListener('DOMContentLoaded', () => {
     const content = document.getElementById('app-content');
     if (!content) return;

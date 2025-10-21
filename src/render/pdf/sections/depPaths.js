@@ -1,10 +1,11 @@
-// src/render/pdf/sections/depPaths.js
+// Builds PDF sections for dependency paths (Base / Head). Ensures module_paths are computed and
+// renders a severity-grouped table (Vulnerability, Package, Module → Path tail).
 
 const { deriveModulesAndModulePaths } = require('../../common/path-helpers');
 
 const SEV_ORDER = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, UNKNOWN:1 };
 
-// helpers (idénticos a los que ya te funcionaban)
+// Formats a package into a GAV or fallback.
 const pkgStr = (p) => {
   if (!p) return '—';
   const g = p.groupId || ''; const a = p.artifactId || ''; const v = p.version || '';
@@ -13,13 +14,14 @@ const pkgStr = (p) => {
   return a || v || '—';
 };
 
+// Returns first URL-based anchor or plain ID.
 const vulnLink = (it) => {
   const url = Array.isArray(it.urls) && it.urls[0] ? it.urls[0] : (it.url || '');
   const id = it.id || it.vulnerabilityId || '—';
   return url ? `<a href="${url}">${id}</a>` : id;
 };
 
-// render por lado (base/head), devuelve SOLO el bloque interno (sin <section> ni <h2>)
+// Internal renderer per side (filters items by state, expands module tails, deduplicates).
 function buildDependencyPathsSection(items, side) {
   const keep = (it) => {
     const st = String(it.state || '').toUpperCase();
@@ -104,7 +106,7 @@ function buildDependencyPathsSection(items, side) {
   return `<div class="dep-paths">${sections}</div>`;
 }
 
-// orquestador con firma compatible: (itemsOrView, side) → INNER HTML (sin numerar ni envolver)
+// Orchestrator: accepts full view or raw items; recomputes module_paths if absent.
 function dependencyPathsHtml(itemsOrView, side) {
   const items = Array.isArray(itemsOrView)
     ? itemsOrView

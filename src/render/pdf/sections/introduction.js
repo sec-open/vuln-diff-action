@@ -1,4 +1,10 @@
-// src/render/pdf/sections/introduction.js
+// PDF introduction section: explains scope, methodology, tooling, and purpose of the diff.
+
+/**
+ * Builds introduction section HTML using view metadata.
+ * @param {Object} view
+ * @returns {string}
+ */
 function introHtml(view) {
   const repo = view?.repo || '';
   const baseRef = view?.inputs?.baseRef || view?.base?.ref || '';
@@ -9,7 +15,6 @@ function introHtml(view) {
   const tools = view?.tools || {};
   const action = view?.action || {};
 
-  // Texto proporcionado por ti, adaptado a la estructura de view.js
   const html = `
 <section class="page">
   <h2 class="section-title">1. Introduction</h2>

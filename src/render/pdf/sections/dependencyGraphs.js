@@ -1,9 +1,12 @@
-// src/render/pdf/sections/dependencyGraphs.js
-const fs = require('fs');
-const path = require('path');
+// PDF dependency graph section: embeds pre-rendered HTML fragments and injects a Mermaid runtime script.
 
+/** Safe UTF-8 file read; returns empty string on error. */
 async function readTextSafe(p) { try { return await fs.promises.readFile(p, 'utf8'); } catch { return ''; } }
 
+/**
+ * Builds HTML for base/head dependency graph pages and a script to render Mermaid diagrams.
+ * @param {string} distDir
+ */
 async function dependencyGraphsHtml(distDir) {
   const htmlRoot = path.join(distDir || '', 'html');
   const sectionsDir = path.join(htmlRoot, 'sections');

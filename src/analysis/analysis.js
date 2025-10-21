@@ -1,4 +1,4 @@
-// Phase 1 end-to-end orchestration (no Phase 2/3 logic)
+// Phase 1 orchestration: generates SBOMs, vulnerability scan outputs, and metadata for later phases.
 const path = require('path');
 const os = require('os');
 const core = require('@actions/core');
@@ -18,14 +18,16 @@ const { generateSbom } = require('./sbom');
 const { scanSbomWithGrype } = require('./grype');
 const { makeMeta, writeMeta } = require('./meta');
 
+// Main driver: validates platform, resolves refs, prepares isolated checkouts,
+// builds SBOMs, runs Grype, writes meta, cleans up, and sets action outputs.
 async function analysis() {
-  // Small helper to time steps
+  // Helper: returns a closure reporting elapsed milliseconds.
   const time = () => {
     const start = Date.now();
     return () => `${(Date.now() - start)}ms`;
   };
 
-  // 0) Preconditions
+  // Precondition: Linux runner required (SBOM tooling expectation).
   if (os.platform() !== 'linux') {
     core.setFailed('This action requires a Linux runner (Ubuntu recommended).');
     return;
@@ -33,6 +35,7 @@ async function analysis() {
 
   core.startGroup('[analysis] Inputs');
   try {
+    // Read required action inputs (base/head refs and optional subdirectory).
     const base_ref = core.getInput('base_ref', { required: true });
     const head_ref = core.getInput('head_ref', { required: true });
     const subPath = core.getInput('path') || '.';
@@ -41,12 +44,13 @@ async function analysis() {
     core.info(`head_ref: ${head_ref}`);
     core.info(`path: ${subPath}`);
 
+    // Prepare dist layout directories.
     const repoRoot = process.cwd();
     const l = layout();
     await ensureDir(l.root);
     core.debug(`dist root: ${l.root}`);
 
-    // 1) Tools detection
+    // Tool detection: discover or install syft/grype/maven.
     core.endGroup();
     core.startGroup('[analysis] Tools detection');
     let stop = time();
@@ -54,7 +58,7 @@ async function analysis() {
     core.info(`tools detected in ${stop()}`);
     core.debug(`tools: ${JSON.stringify(tools, null, 2)}`);
 
-    // 2) Resolve refs & worktrees
+    // Resolve refs to SHAs and prepare temporary worktrees.
     core.endGroup();
     core.startGroup('[analysis] Resolve refs & prepare worktrees');
     stop = time();
@@ -67,6 +71,7 @@ async function analysis() {
     core.info(`resolved base_sha: ${baseSha} (${base7})`);
     core.info(`resolved head_sha: ${headSha} (${head7})`);
 
+    // Collect commit metadata (author, subject, timestamps).
     const baseInfo = await commitInfo(baseSha, repoRoot);
     const headInfo = await commitInfo(headSha, repoRoot);
 
@@ -75,6 +80,7 @@ async function analysis() {
     await ensureDir(path.dirname(l.git.head));
     await writeJson(l.git.head, { ...headInfo, ref: head_ref });
 
+    // Create detached worktrees for base and head revisions.
     const baseCheckout = await prepareIsolatedCheckout(
       baseSha,
       path.join(l.root, 'refs', base7),
@@ -86,7 +92,7 @@ async function analysis() {
       repoRoot
     );
 
-    // Target working subfolders (path input)
+    // Resolve working subdirectories according to input path.
     const baseWorkdir = path.resolve(baseCheckout, subPath);
     const headWorkdir = path.resolve(headCheckout, subPath);
 
@@ -94,7 +100,7 @@ async function analysis() {
     core.info(`head workdir: ${headWorkdir}`);
     core.info(`refs & worktrees ready in ${stop()}`);
 
-    // 3) SBOM generation
+    // SBOM generation for each side (Maven aggregate or Syft fallback).
     core.endGroup();
     core.startGroup('[analysis] SBOM generation');
     stop = time();
@@ -104,7 +110,7 @@ async function analysis() {
     const baseSbomPathLocal = await generateSbom({ checkoutDir: baseWorkdir, tools });
     const headSbomPathLocal = await generateSbom({ checkoutDir: headWorkdir, tools });
 
-    // copy (read/write) into dist canonical paths
+    // Copy generated SBOMs into canonical dist locations.
     const fs = require('fs/promises');
     await fs.copyFile(baseSbomPathLocal, l.sbom.base);
     await fs.copyFile(headSbomPathLocal, l.sbom.head);
@@ -112,7 +118,7 @@ async function analysis() {
     core.info(`wrote SBOMs -> ${l.sbom.base} / ${l.sbom.head}`);
     core.info(`SBOM generation done in ${stop()}`);
 
-    // 4) Grype scans
+    // Vulnerability scanning using Grype against CycloneDX SBOMs.
     core.endGroup();
     core.startGroup('[analysis] Vulnerability scanning (Grype)');
     stop = time();
@@ -122,13 +128,14 @@ async function analysis() {
     const baseGrypeJson = await scanSbomWithGrype(tools.paths.grype, l.sbom.base, baseWorkdir);
     const headGrypeJson = await scanSbomWithGrype(tools.paths.grype, l.sbom.head, headWorkdir);
 
+    // Persist raw scan output.
     await writeFile(l.grype.base, Buffer.from(baseGrypeJson, 'utf8'));
     await writeFile(l.grype.head, Buffer.from(headGrypeJson, 'utf8'));
 
     core.info(`wrote Grype outputs -> ${l.grype.base} / ${l.grype.head}`);
     core.info(`Grype scans done in ${stop()}`);
 
-    // 5) Meta
+    // Metadata document describing inputs, environment, tool versions, and artifact paths.
     core.endGroup();
     core.startGroup('[analysis] Metadata');
     stop = time();
@@ -144,7 +151,7 @@ async function analysis() {
     core.debug(`meta: ${JSON.stringify(meta, null, 2)}`);
     core.info(`metadata written in ${stop()}`);
 
-    // 6) Cleanup worktrees (best-effort)
+    // Cleanup worktrees (non-fatal if fails).
     core.endGroup();
     core.startGroup('[analysis] Cleanup worktrees');
     stop = time();
@@ -154,13 +161,14 @@ async function analysis() {
     ]);
     core.info(`cleanup done in ${stop()}`);
 
-    // 7) Outputs
+    // Action outputs: expose resolved SHAs.
     core.endGroup();
     core.startGroup('[analysis] Outputs');
     core.setOutput('base_sha', baseSha);
     core.setOutput('head_sha', headSha);
     core.info(`outputs: base_sha=${baseSha}, head_sha=${headSha}`);
   } catch (err) {
+    // Failure path marks action failed and ends grouping.
     core.setFailed(`[analysis] failed: ${err?.message || err}`);
   } finally {
     core.endGroup();

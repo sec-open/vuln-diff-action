@@ -1,9 +1,6 @@
-// src/render/pdf/sections/headerFooter.js
-const path = require('path');
-const fs = require('fs');
-const fsp = fs.promises;
-const https = require('https');
+// PDF header/footer utilities: fetch logo (remote/local), convert to data URI, and build printable header/footer HTML.
 
+/** Fetches a remote URL over HTTPS returning Buffer. */
 function fetchHttps(url) {
   return new Promise((resolve, reject) => {
     https.get(url, (res) => {
@@ -15,6 +12,7 @@ function fetchHttps(url) {
   });
 }
 
+/** Guesses MIME type based on file extension. */
 function guessMimeByExt(p) {
   const ext = (p || '').toLowerCase();
   if (ext.endsWith('.png')) return 'image/png';
@@ -24,7 +22,12 @@ function guessMimeByExt(p) {
   return 'application/octet-stream';
 }
 
-/** URL → data URI (SVG en utf8 para header/footer) */
+/**
+ * Resolves a logo input (URL or relative path) into a data URI (SVG kept as inline UTF-8).
+ * @param {string} logoInput
+ * @param {string} distDir
+ * @returns {Promise<string>}
+ */
 async function getLogoDataUri(logoInput, distDir) {
   if (!logoInput) return '';
   const u = String(logoInput).trim();
@@ -71,6 +74,10 @@ async function getLogoDataUri(logoInput, distDir) {
   }
 }
 
+/**
+ * Builds header HTML (colored band with logo + repo + timestamp).
+ * @param {{logoDataUri:string, repo:string, generatedAt:string}} cfg
+ */
 function headerTemplate({ logoDataUri, repo, generatedAt }) {
   const H = 36; // altura banda
   const band = '#0b0f16';
@@ -116,6 +123,10 @@ function headerTemplate({ logoDataUri, repo, generatedAt }) {
 }
 
 
+/**
+ * Builds footer HTML (band with base/head refs + page numbers).
+ * @param {{logoDataUri:string, baseRef:string, headRef:string, generatedAt:string}} cfg
+ */
 function footerTemplate({ logoDataUri, baseRef, headRef, generatedAt }) {
   const H = 32; // altura banda
   const band = '#0b0f16';

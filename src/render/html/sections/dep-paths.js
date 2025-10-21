@@ -1,8 +1,7 @@
-// src/render/html/sections/dep-paths.js
-// Renders dependency path tables for Base and Head using the Phase-2 view.
-// No JSON reads here; paths come from view.items[].paths (array of arrays).
-// Adds client-side filter + sort (tables.js).
+// Renders dependency path tables for Base and Head using the normalized view.
+// Provides sortable + filterable tables (enhanced client-side). No filesystem I/O here.
 
+// Returns HTML anchor for known vulnerability IDs (CVE/GHSA); plain text otherwise.
 function hyperlinkId(id) {
   if (!id) return 'UNKNOWN';
   const up = String(id).toUpperCase();
@@ -10,6 +9,8 @@ function hyperlinkId(id) {
   if (up.startsWith('GHSA-')) return `<a href="https://github.com/advisories/${up}" target="_blank" rel="noopener">${id}</a>`;
   return id;
 }
+
+// Formats package coordinates into group:artifact:version (fallbacks to 'unknown').
 function asGav(v) {
   const pkg = v?.package || {};
   const g = pkg.groupId ?? 'unknown';
@@ -17,11 +18,14 @@ function asGav(v) {
   const ver = pkg.version ?? 'unknown';
   return `${g}:${a}:${ver}`;
 }
+
+// Formats a single dependency path chain into HTML with right arrow separators.
 function formatPath(chain) {
   if (!Array.isArray(chain) || !chain.length) return '<code>n/a</code>';
   return chain.map((seg) => `<code>${String(seg)}</code>`).join(' &rarr; ');
 }
 
+// Builds table row HTML for each vulnerability entry including all dependency paths.
 function rowsFor(items) {
   return items.map((v) => {
     const id = v.id || v.ids?.ghsa || v.ids?.cve || 'UNKNOWN';
@@ -42,6 +46,7 @@ function rowsFor(items) {
   }).join('');
 }
 
+// Wraps the table (with filter input) inside a card container.
 function renderTable(title, id, items) {
   return `
 <div class="card">
@@ -66,7 +71,7 @@ function renderTable(title, id, items) {
 </div>`;
 }
 
-/** Base: show vulnerabilities present in BASE (REMOVED or UNCHANGED). */
+/** Base side: includes REMOVED + UNCHANGED vulnerabilities (present in base). */
 function renderDepPathsBase({ view } = {}) {
   if (!view) throw new Error('[render/html/dep-paths] Missing view');
   const items = (view.items || []).filter((v) => {
@@ -76,7 +81,7 @@ function renderDepPathsBase({ view } = {}) {
   return renderTable('Dependency Paths — Base', 'dep-paths-base-tbl', items);
 }
 
-/** Head: show vulnerabilities present in HEAD (NEW or UNCHANGED). */
+/** Head side: includes NEW + UNCHANGED vulnerabilities (present in head). */
 function renderDepPathsHead({ view } = {}) {
   if (!view) throw new Error('[render/html/dep-paths] Missing view');
   const items = (view.items || []).filter((v) => {

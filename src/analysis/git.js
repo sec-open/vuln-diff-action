@@ -1,17 +1,19 @@
-// Git helpers: resolve refs, author info, isolated checkouts via worktree
+// Git helpers: fetch refs, resolve revisions, extract commit metadata, manage isolated worktrees.
 const path = require('path');
 const { execCmd } = require('./exec');
 const { ensureDir } = require('./fsx');
 
+// Fetches all remote refs and tags (prunes stale references).
 async function gitFetchAll(cwd) {
   await execCmd('git', ['fetch', '--all', '--tags', '--prune'], { cwd });
 }
 
+// Resolves a ref (branch/tag/SHA) to a full commit SHA; tries common prefixes.
 async function resolveRefToSha(ref, cwd) {
   const trimmed = (ref || '').trim();
   if (!trimmed) throw new Error('Empty ref');
 
-  // Si ya parece SHA, devuélvelo validado
+  // If it looks like a SHA, return it after validation
   if (/^[0-9a-f]{7,40}$/i.test(trimmed)) {
     const { stdout } = await execCmd('git', ['rev-parse', trimmed], { cwd });
     return stdout.trim();
@@ -36,9 +38,10 @@ async function resolveRefToSha(ref, cwd) {
   throw new Error(`Unable to resolve ref: ${ref}\nLast error: ${lastErr ? lastErr.message : 'unknown'}`);
 }
 
-
+// Returns short 7-char prefix of a commit SHA.
 function shortSha(sha) { return sha.slice(0, 7); }
 
+// Retrieves commit metadata (author, timestamps, subject) for a given SHA.
 async function commitInfo(sha, cwd) {
   const fmt = [
     '%H', // full sha
@@ -59,6 +62,7 @@ async function commitInfo(sha, cwd) {
   };
 }
 
+// Creates a detached worktree at the specified SHA (read-only operations).
 async function prepareIsolatedCheckout(sha, targetDir, repoRoot) {
   await ensureDir(path.dirname(targetDir));
   // Use a detached worktree at the specific commit, read-only operations
@@ -66,6 +70,7 @@ async function prepareIsolatedCheckout(sha, targetDir, repoRoot) {
   return targetDir;
 }
 
+// Removes a worktree (best-effort; ignores errors).
 async function cleanupWorktree(dir, repoRoot) {
   try {
     await execCmd('git', ['worktree', 'remove', dir, '--force'], { cwd: repoRoot });

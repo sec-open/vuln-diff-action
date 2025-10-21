@@ -6,7 +6,7 @@ const { fileURLToPath } = require('url');
 const { buildView } = require('../common/view');
 const { renderPdf } = require('./utils/exporter');
 const { coverHtml } = require('./sections/cover');
-const { makePrintCss } = require('./print.css'); // js
+const { makePrintCss } = require('./print.css');
 const { headerTemplate, footerTemplate, getLogoDataUri } = require('./sections/headerFooter');
 const { tocHtml } = require('./sections/toc');
 const { introHtml } = require('./sections/introduction');
@@ -18,9 +18,7 @@ const { dependencyPathsHtml } = require('./sections/depPaths');
 const core = require('@actions/core');
 const { fixHtml } = require('./sections/fix');
 
-// -------------------------------------------------------------
-// Utils
-// -------------------------------------------------------------
+// Removes vendor script tags (Chart.js / Mermaid) from embedded HTML sections to avoid duplication.
 function stripVendorScripts(html = '') {
   // Elimina cualquier <script ... chart.umd.js> o <script ... mermaid*.js> embebido en secciones HTML
   return String(html)
@@ -28,6 +26,7 @@ function stripVendorScripts(html = '') {
     .replace(/<script[^>]+mermaid(\.min)?\.js[^>]*><\/script>/ig, '');
 }
 
+// Small helpers (existence / safe read / diff load).
 const exists = (p) => { try { fs.accessSync(p); return true; } catch { return false; } };
 const readTextSafe = async (p) => { try { return await fsp.readFile(p, 'utf8'); } catch { return ''; } };
 const loadDiff = async (distDir) => {
@@ -35,10 +34,11 @@ const loadDiff = async (distDir) => {
   catch { return null; }
 };
 
+// Severity and state ranking (for potential ordering in other sections).
 const SEV_ORDER = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, UNKNOWN:1 };
 const STATE_ORDER = { NEW:3, REMOVED:2, UNCHANGED:1 };
 
-// GAV string
+// Formats a package object into a GAV-like string.
 const pkgStr = (p) => {
   if (!p) return '—';
   const g = p.groupId || ''; const a = p.artifactId || ''; const v = p.version || '';
@@ -46,15 +46,14 @@ const pkgStr = (p) => {
   if (a && v) return `${a}:${v}`;
   return a || v || '—';
 };
+// Builds a vulnerability hyperlink using first URL if available.
 const vulnLink = (it) => {
   const url = Array.isArray(it.urls) && it.urls[0] ? it.urls[0] : (it.url || '');
   const id = it.id || it.vulnerabilityId || '—';
   return url ? `<a href="${url}">${id}</a>` : id;
 };
 
-// -------------------------------------------------------------
-// Secciones
-// -------------------------------------------------------------
+// Section plan defines ordering and titles (used for TOC and numbering).
 function sectionPlan() {
   return [
     { id: 'intro', title: 'Introduction', num: 1, file: 'intro.html' },
@@ -69,6 +68,7 @@ function sectionPlan() {
   ];
 }
 
+// Wraps section HTML with numbering/title.
 function sectionWrapper({ id, title, num, innerHtml }) {
   return `
 <div class="page section-wrap" id="${id}">
@@ -78,6 +78,7 @@ function sectionWrapper({ id, title, num, innerHtml }) {
 `.trim();
 }
 
+// Builds full printable HTML (cover, toc, sections, dependency paths, fix insights).
 async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
   const htmlRoot = path.join(distDir, 'html');
   const sectionsDir = path.join(htmlRoot, 'sections');
@@ -158,8 +159,7 @@ ${bodyInner}
   return html;
 }
 
-
-
+// Orchestrates PDF generation: prepares assets, builds view, renders HTML, exports PDF.
 async function pdf_init({ distDir = './dist', html_logo_url = '' } = {}) {
   console.log('[pdf/orch] start');
   const absDist = path.resolve(distDir);

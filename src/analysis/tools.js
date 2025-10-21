@@ -1,4 +1,4 @@
-// Tool detection with APT (when permitted) + user-space fallback via tar.gz (no sudo)
+// Tool detection and installation strategy: prefer system packages (APT) then fallback to GitHub tarballs.
 const os = require('os');
 const path = require('path');
 const { execCmd, which } = require('./exec');
@@ -9,7 +9,10 @@ const DEFAULTS = {
   grype: process.env.GRYPE_VERSION || 'v0.79.2',
 };
 
+// Returns true if running on Linux.
 function isLinux() { return os.platform() === 'linux'; }
+
+// Maps Node.js arch to release asset architecture tag.
 function archTag() {
   const a = os.arch();
   if (a === 'x64') return 'amd64';
@@ -17,11 +20,13 @@ function archTag() {
   return 'amd64';
 }
 
+// Checks if apt-get exists (permission not guaranteed).
 async function aptExists() {
   try { await execCmd('bash', ['-lc', 'command -v apt-get >/dev/null 2>&1']); return true; }
   catch { return false; }
 }
 
+// Executes apt command with sudo fallback; propagates combined error details if both attempts fail.
 async function runApt(cmd) {
   // try sudo first, then without (algunos runners no necesitan sudo)
   try { return await execCmd('bash', ['-lc', `sudo ${cmd}`]); } catch (e1) {
@@ -34,6 +39,7 @@ async function runApt(cmd) {
   }
 }
 
+// Ensures Anchore APT repository is configured (trusted) before installing syft/grype.
 async function ensureAnchoreAptRepo() {
   await runApt('apt-get update -y');
   await runApt('apt-get install -y curl gpg');
@@ -41,11 +47,13 @@ async function ensureAnchoreAptRepo() {
   await runApt('apt-get update -y');
 }
 
+// Prepends a directory to PATH for current process execution context.
 async function addToPath(dir) {
   // prepend to PATH for current process
   process.env.PATH = `${dir}:${process.env.PATH || ''}`;
 }
 
+// Downloads and extracts a GitHub release tar.gz for a tool; returns binary path.
 async function downloadTarballTool({ repo, ver, binName, toolsDir }) {
   const arch = archTag();
   const plat = isLinux() ? 'linux' : (os.platform() === 'darwin' ? 'darwin' : null);
@@ -65,6 +73,8 @@ async function downloadTarballTool({ repo, ver, binName, toolsDir }) {
   await addToPath(toolDir);
   return binPath;
 }
+
+// Ensures Syft binary is available (tries existing, then APT, then tarball fallback).
 async function ensureSyft(toolsDir) {
   let syft = await which('syft');
   if (syft) return syft;
@@ -90,6 +100,7 @@ async function ensureSyft(toolsDir) {
   return await downloadTarballTool({ repo: 'syft', ver: DEFAULTS.syft, binName: 'syft', toolsDir });
 }
 
+// Ensures Grype binary is available (tries existing, then APT, then tarball fallback).
 async function ensureGrype(toolsDir) {
   let grype = await which('grype');
   if (grype) return grype;
@@ -114,6 +125,7 @@ async function ensureGrype(toolsDir) {
   return await downloadTarballTool({ repo: 'grype', ver: DEFAULTS.grype, binName: 'grype', toolsDir });
 }
 
+// Attempts Maven installation via APT; returns path or null if unavailable.
 async function ensureMaven() {
   // Maven es opcional (fallback Syft ya lo cubre); si APT no está disponible o no hay permisos, seguimos sin Maven
   let mvn = await which('mvn');
@@ -131,6 +143,7 @@ async function ensureMaven() {
   return null;
 }
 
+// Extracts version from JSON-formatted CLI output (Syft/Grype).
 async function tryGetJsonVersion(bin, args) {
   try {
     const { stdout } = await execCmd(bin, args);
@@ -139,12 +152,14 @@ async function tryGetJsonVersion(bin, args) {
   } catch { return null; }
 }
 
+// Extracts Maven version string from mvn -v output.
 async function tryGetMavenVersion(mvnPath) {
   if (!mvnPath) return null;
   try { const { stdout } = await execCmd(mvnPath, ['-v']); return stdout.split('\n')[0].trim(); }
   catch { return null; }
 }
 
+// Detects/installs required tools and returns their paths and versions.
 async function detectTools() {
   const toolsDir = path.resolve(process.cwd(), '.tools');
 

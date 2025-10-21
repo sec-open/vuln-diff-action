@@ -1,7 +1,10 @@
+// Defines dist folder layout and sanitization utility.
 const path = require('path');
 
+// Resolves canonical dist root (under current working directory).
 function distRoot() { return path.resolve(process.cwd(), 'dist'); }
 
+// Returns structured paths for all Phase 1 artifacts.
 function layout() {
   const root = distRoot();
   return {
@@ -23,6 +26,7 @@ function layout() {
   };
 }
 
+// Sanitizes arbitrary string into filesystem-friendly token.
 function sanitizeName(s) {
   return String(s).replace(/[^a-zA-Z0-9._-]/g, '_');
 }

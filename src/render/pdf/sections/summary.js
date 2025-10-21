@@ -1,8 +1,13 @@
-// src/render/pdf/sections/summary.js
+// PDF summary section: aggregates counts by severity/state, inputs, tools, refs, and per-module matrices.
+
+/** Safe numeric conversion with fallback to 0. */
 function safeNum(n) { const x = Number(n); return Number.isFinite(x) ? x : 0; }
+/** Normalizes severity string. */
 function sevKey(s) { return String(s || 'UNKNOWN').toUpperCase(); }
+/** Normalizes state string. */
 function stateKey(s) { return String(s || '').toUpperCase(); }
 
+/** Aggregates counts by severity and state. */
 function deriveBySeverityAndState(items = []) {
   const SEV = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
   const out = {}; SEV.forEach(k => out[k] = { NEW:0, REMOVED:0, UNCHANGED:0 });
@@ -14,6 +19,7 @@ function deriveBySeverityAndState(items = []) {
   return out;
 }
 
+/** Sums totals across severity rows. */
 function totalsByState(bySevState = {}) {
   const acc = { NEW:0, REMOVED:0, UNCHANGED:0 };
   for (const sev of Object.keys(bySevState || {})) {
@@ -25,6 +31,7 @@ function totalsByState(bySevState = {}) {
   return acc;
 }
 
+/** Builds module→severity→state matrix. */
 function aggregatesByModuleSeverityState(items = []) {
   const out = {};
   for (const it of items) {
@@ -41,6 +48,7 @@ function aggregatesByModuleSeverityState(items = []) {
   return out;
 }
 
+/** Renders tools table (versions). */
 function renderToolsTable(tools = {}, action = {}) {
   return `
 <table class="compact">
@@ -55,6 +63,7 @@ function renderToolsTable(tools = {}, action = {}) {
 </table>`.trim();
 }
 
+/** Renders action inputs table. */
 function renderInputsTable(inputs = {}) {
   const rows = Object.entries(inputs || {}).map(([k, v]) =>
     `<tr><td>${k}</td><td><code>${String(v)}</code></td></tr>`).join('');
@@ -65,6 +74,7 @@ function renderInputsTable(inputs = {}) {
 </table>`.trim();
 }
 
+/** Renders refs comparison table. */
 function renderRefsTable({ baseRef, baseShaShort, headRef, headShaShort }) {
   return `
 <table class="compact">
@@ -76,6 +86,7 @@ function renderRefsTable({ baseRef, baseShaShort, headRef, headShaShort }) {
 </table>`.trim();
 }
 
+/** Renders totals by state table. */
 function renderTotalsByStateTable(totals) {
   return `
 <table class="compact">
@@ -84,6 +95,7 @@ function renderTotalsByStateTable(totals) {
 </table>`.trim();
 }
 
+/** Renders severity × state matrix table. */
 function renderSevByStateTable(bySevState) {
   const order = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
   const rows = order.map(sev => {
@@ -97,6 +109,7 @@ function renderSevByStateTable(bySevState) {
 </table>`.trim();
 }
 
+/** Renders per-module severity/state matrix table. */
 function renderModuleMatrixTable(mod, mData) {
   const sevOrder = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
   const rows = sevOrder.map(sev => {
@@ -111,6 +124,10 @@ function renderModuleMatrixTable(mod, mData) {
 </table>`.trim();
 }
 
+/**
+ * Builds summary section (overview + modules) HTML for PDF.
+ * @param {Object} view
+ */
 function summaryHtml(view) {
   const repo = view?.repo || '';
   const baseRef = view?.inputs?.baseRef || view?.base?.ref || '';

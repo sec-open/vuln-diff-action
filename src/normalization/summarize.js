@@ -1,6 +1,7 @@
 const { normalizeSeverity, SEV_ORDER } = require('./utils');
 
-// Build severity matrix for diff items. :contentReference[oaicite:7]{index=7}
+// Aggregates diff items into totals by state and matrix by severity + state.
+// Returns overall totals and severity/state breakdown.
 function buildDiffSummary(items) {
   const totals = { NEW: 0, REMOVED: 0, UNCHANGED: 0 };
   const by = {

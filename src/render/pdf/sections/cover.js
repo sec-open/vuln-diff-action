@@ -1,4 +1,9 @@
-// src/render/pdf/sections/cover.js
+// PDF cover page renderer: shows title, repository, timestamps, and base/head commit metadata.
+
+/**
+ * Builds HTML for the PDF cover section.
+ * @param {{repo:string, base:Object, head:Object, inputs:Object, generatedAt:string, logoDataUri:string}} params
+ */
 function coverHtml({ repo, base, head, inputs, generatedAt, logoDataUri }) {
   const baseRef = inputs?.baseRef || base.ref;
   const headRef = inputs?.headRef || head.ref;

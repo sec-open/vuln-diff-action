@@ -1,5 +1,9 @@
 /* [render/html] runtime router (no frameworks) */
+// Client-side lightweight router: loads HTML section fragments into page placeholders,
+// updates document title, and manages active menu state (no framework used).
+
 (function () {
+  // Fetches a fragment and injects its HTML into target selector, setting data-loaded for observers.
   async function loadInto(selector, url) {
     const el = document.querySelector(selector);
     if (!el) return;
@@ -16,6 +20,7 @@
     }
   }
 
+  // Wires menu click events to load corresponding section fragments into main content area.
   function wireMenu() {
     const menu = document.getElementById('app-menu');
     if (!menu) return;
@@ -27,6 +32,7 @@
 
       const name = a.getAttribute('data-section');
 
+      // Section routing (explicit mapping).
       if (name === 'overview') {
         loadInto('#app-content', './sections/overview.html');
       } else if (name === 'summary') {
@@ -46,7 +52,7 @@
       } else if (name === 'dep-paths-head') {
         loadInto('#app-content', './sections/dep-paths-head.html');
       } else {
-        // Placeholder for sections not implemented yet:
+        // Fallback for unimplemented sections: placeholder message.
         const el = document.querySelector('#app-content');
         if (el) {
           el.innerHTML =
@@ -56,7 +62,7 @@
         }
       }
 
-      // Active state
+      // Active menu item state toggle (remove previous, set current).
       menu
         .querySelectorAll('[data-section].active')
         .forEach((n) => n.classList.remove('active'));
@@ -64,15 +70,16 @@
     });
   }
 
+  // Boot sequence: loads header/menu, wires events, and triggers default section (overview).
   async function boot() {
     await loadInto('#app-header', './header.html');
     await loadInto('#app-menu', './menu.html');
     wireMenu();
 
-    // Default view → Overview
     const def = document.querySelector('#app-menu [data-section="overview"]');
     if (def) def.click();
   }
 
+  // Start once DOM is ready.
   document.addEventListener('DOMContentLoaded', boot);
 })();

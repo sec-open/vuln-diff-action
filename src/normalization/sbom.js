@@ -1,12 +1,14 @@
-// CycloneDX indexer + path finder from roots to a target component. :contentReference[oaicite:2]{index=2}
 const { uniqueByJSON } = require('./utils');
 
+// Builds an index over CycloneDX components and dependency graph.
+// Provides resolution by purl or ref, path computation to roots, and GAV extraction.
 function buildSbomIndex(bom) {
-  const components = new Map(); // key: bom-ref or purl
-  const byRef = new Map(); // bom-ref -> component
-  const byPurl = new Map(); // purl -> component
-  const idForNode = new Map(); // nodeId -> label "artifact:version" or GAV
+  const components = new Map();
+  const byRef = new Map();
+  const byPurl = new Map();
+  const idForNode = new Map();
 
+  // Index components by bom-ref and purl.
   const list = Array.isArray(bom?.components) ? bom.components : [];
   for (const c of list) {
     const keyRef = c['bom-ref'] || c.bomRef || c.ref || null;
@@ -15,10 +17,10 @@ function buildSbomIndex(bom) {
     if (keyPurl) byPurl.set(keyPurl, c);
   }
 
-  // Build dependency graph (parent -> children by bom-ref). CycloneDX uses dependencies[].ref + dependsOn[].
+  // Build dependency graph edges (parent -> children) and reverse edges (child -> parents).
   const depEntries = Array.isArray(bom?.dependencies) ? bom.dependencies : [];
-  const childrenByRef = new Map(); // parentRef -> Set(childRef)
-  const parentByRef = new Map();   // childRef -> Set(parentRef)
+  const childrenByRef = new Map();
+  const parentByRef = new Map();
 
   for (const d of depEntries) {
     const parentRef = d.ref || d['bom-ref'] || d.bomRef;
@@ -32,18 +34,16 @@ function buildSbomIndex(bom) {
     }
   }
 
-  // Identify roots: components which never appear as a child
+  // Derive root components (never appear as a child).
   const allRefs = new Set([...byRef.keys()]);
   const childRefs = new Set([...parentByRef.keys()]);
   const rootRefs = [...allRefs].filter(r => !childRefs.has(r));
 
-  // Node label helper (for paths)
+  // Produces a human-readable label for a component (tries Maven GAV, falls back to name:version).
   function labelForComponent(c) {
     const name = c?.name || '';
     const version = c?.version || '';
-    // Try Maven GAV where possible
     let groupId, artifactId;
-    // CycloneDX maven extension: group can be in c.group, artifact in c.name
     if (c?.purl?.startsWith('pkg:maven/')) {
       const after = c.purl.slice('pkg:maven/'.length);
       const atIdx = after.indexOf('@');
@@ -51,7 +51,7 @@ function buildSbomIndex(bom) {
       const parts = gavPart.split('/');
       if (parts.length >= 2) {
         groupId = parts[0];
-        artifactId = parts.slice(1).join('/'); // in case artifact includes slashes
+        artifactId = parts.slice(1).join('/');
       }
     } else if (c?.group && c?.name) {
       groupId = c.group;
@@ -67,6 +67,7 @@ function buildSbomIndex(bom) {
     idForNode.set(ref, labelForComponent(comp));
   }
 
+  // Resolves a component by purl or bom-ref returning component object and canonical reference.
   function resolveComponentByPurlOrRef({ purl, ref }) {
     let comp = null;
     let component_ref = null;
@@ -82,23 +83,20 @@ function buildSbomIndex(bom) {
     return { comp, component_ref: component_ref || comp['bom-ref'] || comp.bomRef || null, purl: p };
   }
 
-  // BFS backtracking from target to roots via parentByRef; then reverse path to get root->...->target
+  // Computes root-to-target paths (each path is an ordered array of labels) using DFS backtracking, limited by count.
   function computePathsToTarget(targetRef, limit = 5) {
     if (!targetRef) return [];
     const paths = [];
 
-    // If no parent edges, consider standalone: path = [targetLabel]
     if (!parentByRef.has(targetRef) || parentByRef.get(targetRef).size === 0) {
       const lbl = idForNode.get(targetRef) || targetRef;
       return [[lbl]];
     }
 
-    // We do a bounded DFS from target to roots (parents), collecting up to limit paths
     function dfs(currentRef, acc) {
       if (paths.length >= limit) return;
       const parents = parentByRef.get(currentRef);
       if (!parents || parents.size === 0 || rootRefs.includes(currentRef)) {
-        // hit a root or no parents
         const pathLabels = acc.slice().reverse().map(r => idForNode.get(r) || r);
         paths.push(pathLabels);
         return;
@@ -111,10 +109,10 @@ function buildSbomIndex(bom) {
       }
     }
     dfs(targetRef, [targetRef]);
-    // Ensure uniqueness and cap
     return uniqueByJSON(paths, limit);
   }
 
+  // Derives Maven GAV coordinates from a component (purl or group/name fields).
   function gavFromComponent(comp) {
     let groupId, artifactId, version;
     version = comp?.version || null;
@@ -133,7 +131,6 @@ function buildSbomIndex(bom) {
       groupId = comp.group;
       artifactId = comp.name;
     }
-    // Fallbacks
     groupId = groupId || comp?.publisher || 'unknown';
     artifactId = artifactId || comp?.name || 'unknown';
     version = version || 'unknown';
