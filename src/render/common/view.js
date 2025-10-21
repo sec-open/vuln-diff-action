@@ -1,5 +1,5 @@
 // src/render/common/view.js
-// Construye el view a partir de diff.json y enriquece con módulos.
+// Builds the view from diff.json and enriches items with derived modules.
 
 const fs = require('fs');
 const path = require('path');

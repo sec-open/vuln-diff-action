@@ -1,5 +1,5 @@
 // src/render/common/path-helpers.js
-// Helpers compartidos para parsing de hops y derivación de módulos.
+// Shared helpers for parsing hops and deriving modules.
 
 function parseGav(hop) {
   if (!hop || typeof hop !== 'string') return null;
@@ -35,11 +35,16 @@ function extractRootGroupIdFromFirstHop(firstHop) {
 }
 
 function extractModuleAndTailFromSinglePath(pathArr) {
-  if (!Array.isArray(pathArr) || pathArr.length < 2) return { module: '', tail: [] };
+  if (!Array.isArray(pathArr) || !pathArr.length) return { module: '', tail: [] };
 
   const first = parseHop(pathArr[0]);
-  const rootGroupId = first && first.groupId ? first.groupId : '';
-  if (!rootGroupId) return { module: '', tail: [] };
+  if (!first) return { module: '', tail: [] };
+  const rootGroupId = first.groupId || '';
+
+  // Si solo hay un hop, el módulo es el artifact y tail vacío:
+  if (pathArr.length === 1) {
+    return { module: first.artifactId || '', tail: [] };
+  }
 
   let lastIdx = -1, module = '';
   for (let i = 1; i < pathArr.length; i++) {
@@ -50,7 +55,7 @@ function extractModuleAndTailFromSinglePath(pathArr) {
     }
   }
   if (!module) {
-    module = (first && first.artifactId) || '';
+    module = first.artifactId || '';
     lastIdx = 0;
   }
 
@@ -71,7 +76,7 @@ function deriveModulesAndModulePaths(item) {
       const { module, tail } = extractModuleAndTailFromSinglePath(p);
       if (!module) continue;
       modSet.add(module);
-      const tailStr = tail.join(' -> ');
+      const tailStr = tail.join(' → '); // separador estandarizado
       if (!map.has(module)) map.set(module, new Set());
       map.get(module).add(tailStr);
     }

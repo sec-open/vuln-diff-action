@@ -1,5 +1,5 @@
 // src/render/common/precompute.js
-// Pre-aggregaciones a partir de diff.json.
+// Pre-aggregations derived from diff.json.
 
 const {
   deriveModulesAndModulePaths,
@@ -188,7 +188,7 @@ module.exports = {
     fixesNewAggregates,
     weightedSumBySeverity,
     netRiskKpis,
-    // Helpers re-exportados
+    // Re-exported helpers
     extractRootGroupIdFromFirstHop,
     parseGav,
     parseHop,

@@ -121,24 +121,21 @@ async function buildPrintHtml({ distDir, view, inputs, logoDataUri }) {
 
   bodyInner += '\n' + (await dependencyGraphsHtml(distDir));
 
-  const diffOnce = await loadDiff(distDir);
-  const items = Array.isArray(diffOnce?.items) ? diffOnce.items : [];
-
- const depBaseInner = dependencyPathsHtml(items, 'base');
- const depHeadInner = dependencyPathsHtml(items, 'head');
-
- bodyInner += '\n' + sectionWrapper({
-   id: 'dep-paths-base',
-   title: 'Dependency Paths — Base',
-   num: 7,
-   innerHtml: depBaseInner
- });
- bodyInner += '\n' + sectionWrapper({
-   id: 'dep-paths-head',
-   title: 'Dependency Paths — Head',
-   num: 8,
-   innerHtml: depHeadInner
- });
+  // Eliminamos loadDiff para esta sección y usamos view enriquecido
+  const depBaseInner = dependencyPathsHtml(view, 'base');
+  const depHeadInner = dependencyPathsHtml(view, 'head');
+  bodyInner += '\n' + sectionWrapper({
+    id: 'dep-paths-base',
+    title: 'Dependency Paths — Base',
+    num: 7,
+    innerHtml: depBaseInner
+  });
+  bodyInner += '\n' + sectionWrapper({
+    id: 'dep-paths-head',
+    title: 'Dependency Paths — Head',
+    num: 8,
+    innerHtml: depHeadInner
+  });
 
   const fixSection = await fixHtml(distDir);
   bodyInner += '\n' + fixSection;

@@ -1,5 +1,7 @@
 // src/render/pdf/sections/depPaths.js
 
+const { deriveModulesAndModulePaths } = require('../../common/path-helpers');
+
 const SEV_ORDER = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, UNKNOWN:1 };
 
 // helpers (idénticos a los que ya te funcionaban)
@@ -81,8 +83,8 @@ function buildDependencyPathsSection(items, side) {
     .filter(sev => Array.isArray(groups[sev]) && groups[sev].length)
     .map(sev => {
       const trs = groups[sev].map(r => {
-        const tailStr = Array.isArray(r.tail) ? r.tail.join(' -> ') : (r.tail || '');
-        const right = tailStr ? `${r.module} -> ${tailStr}` : (r.module || '—');
+        const tailStr = Array.isArray(r.tail) ? r.tail.join(' → ') : (r.tail || '');
+        const right = tailStr ? `${r.module} → ${tailStr}` : (r.module || '—');
         return `<tr>
           <td>${r.vhtml}</td>
           <td>${r.gav}</td>
@@ -106,7 +108,15 @@ function buildDependencyPathsSection(items, side) {
 function dependencyPathsHtml(itemsOrView, side) {
   const items = Array.isArray(itemsOrView)
     ? itemsOrView
-    : (Array.isArray(itemsOrView?.diff?.items) ? itemsOrView.diff.items : []);
+    : (Array.isArray(itemsOrView?.items) ? itemsOrView.items : []);
+  // Recalcular module_paths si faltan
+  for (const it of items) {
+    if (!it.module_paths) {
+      const { modules, module_paths } = deriveModulesAndModulePaths(it);
+      it.modules = modules;
+      it.module_paths = module_paths;
+    }
+  }
   return buildDependencyPathsSection(items, side);
 }
 
