@@ -51,6 +51,15 @@ async function fixHtml(distDir){
   const withFix = headItems.filter(hasFix);
   const withoutFix = headItems.filter(x => !hasFix(x));
 
+  // Severity ordering (descending)
+  const SEV_ORDER = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, UNKNOWN:1 };
+  const sortBySeverityDesc = arr =>
+    arr.slice().sort((a,b) =>
+      (SEV_ORDER[sevKey(b.severity)]||0) - (SEV_ORDER[sevKey(a.severity)]||0)
+    );
+  const withFixSorted = sortBySeverityDesc(withFix);
+  const withoutFixSorted = sortBySeverityDesc(withoutFix);
+
   const totalsHeaders = ['Vulnerabilities (HEAD)','With Fix','NEW (with fix)','UNCHANGED (with fix)'];
   const totalsRows = [[
     headItems.length,
@@ -69,10 +78,10 @@ async function fixHtml(distDir){
   ${table(totalsHeaders, totalsRows)}
 
   <h3>9.2 With fix (NEW/UNCHANGED)</h3>
-  ${table(headers, withFix.map(rowFromItem))}
+  ${table(headers, withFixSorted.map(rowFromItem))}
 
   <h3>9.3 Without fix (NEW/UNCHANGED)</h3>
-  ${table(headers, withoutFix.map(rowFromItem))}
+  ${table(headers, withoutFixSorted.map(rowFromItem))}
 
   <script>(function(){ try { window.__fixInsightsReady = true; } catch(e){} })();</script>
 </section>
