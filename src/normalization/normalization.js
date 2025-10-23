@@ -3,7 +3,7 @@ const core = require('@actions/core');
 const fs = require('fs/promises');
 const path = require('path');
 const { readPhase1Dist } = require('./readers');
-const { buildSbomIndex } = require('./sbom');
+const { buildSbomIndex, extractComponentInventory } = require('./sbom');
 const { normalizeOneSide } = require('./normalize');
 const { buildDiff } = require('./diff');
 const { writeJSON } = require('./utils');
@@ -59,7 +59,9 @@ async function normalization(options = {}) {
 
   // Compute diff states and persist diff.json.
   core.info('[vuln-diff][normalization] computing diff…');
-  const diffDoc = buildDiff(baseDoc, headDoc, meta);
+  const baseComponents = extractComponentInventory(sbom.base);
+  const headComponents = extractComponentInventory(sbom.head);
+  const diffDoc = buildDiff(baseDoc, headDoc, meta, { baseComponents, headComponents });
   const diffOut = path.join(distDir, 'diff.json');
   await writeJSON(diffOut, diffDoc);
   core.info(

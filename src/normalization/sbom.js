@@ -146,4 +146,36 @@ function buildSbomIndex(bom) {
   };
 }
 
-module.exports = { buildSbomIndex };
+// Extrae un inventario simplificado de componentes del SBOM para comparación entre ramas.
+// Devuelve array de objetos: { key, groupId, artifactId, version, purl }
+function extractComponentInventory(bom) {
+  const out = [];
+  const list = Array.isArray(bom?.components) ? bom.components : [];
+  for (const c of list) {
+    const purl = c.purl || null;
+    let groupId, artifactId, version;
+    version = c.version || 'unknown';
+    if (purl && purl.startsWith('pkg:maven/')) {
+      const after = purl.slice('pkg:maven/'.length);
+      const atIdx = after.indexOf('@');
+      const gavPart = atIdx >= 0 ? after.slice(0, atIdx) : after;
+      const parts = gavPart.split('/');
+      if (parts.length >= 2) {
+        groupId = parts[0];
+        artifactId = parts.slice(1).join('/');
+      }
+      if (atIdx >= 0) version = after.slice(atIdx + 1) || version;
+    }
+    if (!groupId && c.group && c.name) {
+      groupId = c.group;
+      artifactId = c.name;
+    }
+    groupId = groupId || c.publisher || c.author || 'unknown';
+    artifactId = artifactId || c.name || 'unknown';
+    const key = `${groupId}::${artifactId}`;
+    out.push({ key, groupId, artifactId, version, purl });
+  }
+  return out;
+}
+
+module.exports = { buildSbomIndex, extractComponentInventory };

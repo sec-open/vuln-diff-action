@@ -80,6 +80,33 @@ function sevStateTable(by) {
 }
 
 /**
+ * Generates table rows for dependency changes.
+ * @param {Object} dep
+ * @returns {string}
+ */
+function dependencyDiffTable(dep) {
+  if (!dep || !Array.isArray(dep.items) || dep.items.length === 0) {
+    return '<p>No dependency changes detected.</p>';
+  }
+  const head = '<table><thead><tr><th>State</th><th>Group</th><th>Artifact</th><th>Base Versions</th><th>Head Versions</th><th>#NEW vulns</th><th>#REMOVED vulns</th><th>NEW IDs</th><th>REMOVED IDs</th></tr></thead><tbody>';
+  const rows = dep.items.map(it => {
+    const newIds = (it.new_vulns||[]).map(v=>v.id).join(', ');
+    const removedIds = (it.removed_vulns||[]).map(v=>v.id).join(', ');
+    return `<tr>
+      <td>${it.state}</td>
+      <td>${it.groupId}</td>
+      <td>${it.artifactId}</td>
+      <td>${(it.baseVersions||[]).join(', ')}</td>
+      <td>${(it.headVersions||[]).join(', ')}</td>
+      <td style="text-align:right">${it.new_vulns_count||0}</td>
+      <td style="text-align:right">${it.removed_vulns_count||0}</td>
+      <td>${newIds || '—'}</td>
+      <td>${removedIds || '—'}</td>
+    </tr>`;}).join('');
+  return head + rows + '</tbody></table>';
+}
+
+/**
  * Produces full summary section HTML.
  * @param {{view:Object}} param0
  * @returns {string}
@@ -118,7 +145,10 @@ function renderSummary({ view } = {}) {
   ${sevStateTable(view.summary.bySeverityAndState)}
 </div>`;
 
-  return [intro, env, branches, sev].join('\n');
+  const dep = view.dependencyDiff || { totals:{}, items:[] };
+  const depCard = `\n<div class="card">\n  <h3>Dependency Changes</h3>\n  <p><b>Totals:</b> ADDED=${dep.totals.ADDED||0} · REMOVED=${dep.totals.REMOVED||0} · VERSION_CHANGED=${dep.totals.VERSION_CHANGED||0} · NEW_VULNS=${dep.totals.NEW_VULNS||0} · REMOVED_VULNS=${dep.totals.REMOVED_VULNS||0}</p>\n  ${dependencyDiffTable(dep)}\n</div>`;
+
+  return [intro, env, branches, sev, depCard].join('\n');
 }
 
 module.exports = { renderSummary };

@@ -9,12 +9,129 @@ function mapByKey(arr) {
   return m;
 }
 
+// Compute dependency inventory diff: identifies ADDED, REMOVED, VERSION_CHANGED libs.
+// baseComponents/headComponents: arrays with at least { key, groupId, artifactId, version, purl }
+function computeDependencyDiff(baseComponents = [], headComponents = [], diffItems = []) {
+  const idxBase = new Map();
+  const idxHead = new Map();
+
+  function ingest(list, target) {
+    for (const c of list) {
+      if (!c || !c.key) continue;
+      if (!target.has(c.key)) target.set(c.key, { key: c.key, groupId: c.groupId, artifactId: c.artifactId, versions: new Set(), purls: new Set() });
+      const rec = target.get(c.key);
+      if (c.version) rec.versions.add(c.version);
+      if (c.purl) rec.purls.add(c.purl);
+    }
+  }
+  ingest(baseComponents, idxBase);
+  ingest(headComponents, idxHead);
+
+  const allKeys = new Set([...idxBase.keys(), ...idxHead.keys()]);
+  const items = [];
+  let added = 0, removed = 0, versionChanged = 0;
+  let totalNewVulns = 0, totalRemovedVulns = 0;
+
+  // Pre-index vulnerabilities NEW and REMOVED by (groupId::artifactId::version)
+  const newVulnsByKeyVersion = new Map();
+  const removedVulnsByKeyVersion = new Map();
+  for (const v of diffItems) {
+    const pkg = v.package || {}; const g = pkg.groupId; const a = pkg.artifactId; const ver = pkg.version; if (!g || !a || !ver) continue;
+    const base = `${g}::${a}::${ver}`;
+    if (v.state === 'NEW') {
+      if (!newVulnsByKeyVersion.has(base)) newVulnsByKeyVersion.set(base, []);
+      newVulnsByKeyVersion.get(base).push({ id: v.id, severity: v.severity, version: ver });
+    } else if (v.state === 'REMOVED') {
+      if (!removedVulnsByKeyVersion.has(base)) removedVulnsByKeyVersion.set(base, []);
+      removedVulnsByKeyVersion.get(base).push({ id: v.id, severity: v.severity, version: ver });
+    }
+  }
+
+  for (const key of [...allKeys].sort()) {
+    const b = idxBase.get(key);
+    const h = idxHead.get(key);
+    if (b && !h) {
+      removed++;
+      // All removed vulnerabilities for versions present in base side
+      const removed_vulns = [...b.versions].flatMap(ver => removedVulnsByKeyVersion.get(`${b.groupId}::${b.artifactId}::${ver}`) || []);
+      totalRemovedVulns += removed_vulns.length;
+      items.push({
+        state: 'REMOVED',
+        key,
+        groupId: b.groupId,
+        artifactId: b.artifactId,
+        baseVersions: [...b.versions].sort(),
+        headVersions: [],
+        baseVersion: [...b.versions][0] || null,
+        headVersion: null,
+        removed_vulns,
+        new_vulns: [],
+        new_vulns_count: 0,
+        removed_vulns_count: removed_vulns.length,
+      });
+    } else if (!b && h) {
+      added++;
+      const new_vulns = [...h.versions].flatMap(ver => newVulnsByKeyVersion.get(`${h.groupId}::${h.artifactId}::${ver}`) || []);
+      totalNewVulns += new_vulns.length;
+      items.push({
+        state: 'ADDED',
+        key,
+        groupId: h.groupId,
+        artifactId: h.artifactId,
+        baseVersions: [],
+        headVersions: [...h.versions].sort(),
+        baseVersion: null,
+        headVersion: [...h.versions][0] || null,
+        new_vulns,
+        removed_vulns: [],
+        new_vulns_count: new_vulns.length,
+        removed_vulns_count: 0,
+      });
+    } else if (b && h) {
+      const bVers = [...b.versions].sort();
+      const hVers = [...h.versions].sort();
+      const same = bVers.length === hVers.length && bVers.every((v, i) => v === hVers[i]);
+      if (!same) {
+        versionChanged++;
+        const baseSet = new Set(bVers); const headSet = new Set(hVers);
+        const newVersions = hVers.filter(v => !baseSet.has(v));
+        const removedVersions = bVers.filter(v => !headSet.has(v));
+        const new_vulns = newVersions.flatMap(ver => newVulnsByKeyVersion.get(`${h.groupId}::${h.artifactId}::${ver}`) || []);
+        const removed_vulns = removedVersions.flatMap(ver => removedVulnsByKeyVersion.get(`${b.groupId}::${b.artifactId}::${ver}`) || []);
+        totalNewVulns += new_vulns.length;
+        totalRemovedVulns += removed_vulns.length;
+        items.push({
+          state: 'VERSION_CHANGED',
+          key,
+          groupId: h.groupId || b.groupId,
+          artifactId: h.artifactId || b.artifactId,
+          baseVersions: bVers,
+          headVersions: hVers,
+          baseVersion: bVers[0] || null,
+          headVersion: hVers[0] || null,
+          new_versions: newVersions,
+          removed_versions: removedVersions,
+          new_vulns,
+          removed_vulns,
+          new_vulns_count: new_vulns.length,
+          removed_vulns_count: removed_vulns.length,
+        });
+      }
+    }
+  }
+
+  return {
+    totals: { ADDED: added, REMOVED: removed, VERSION_CHANGED: versionChanged, NEW_VULNS: totalNewVulns, REMOVED_VULNS: totalRemovedVulns },
+    items,
+  };
+}
+
 // Computes diff states (NEW / REMOVED / UNCHANGED) between base and head vulnerability sets.
 // - UNCHANGED: present in both; takes HEAD side data for freshness.
 // - REMOVED: present only in BASE.
 // - NEW: present only in HEAD.
 // Attaches normalized severity and builds a summary object.
-function buildDiff(baseDoc, headDoc, meta) {
+function buildDiff(baseDoc, headDoc, meta, { baseComponents, headComponents } = {}) {
   const B = mapByKey(baseDoc?.vulnerabilities || []);
   const H = mapByKey(headDoc?.vulnerabilities || []);
 
@@ -56,6 +173,11 @@ function buildDiff(baseDoc, headDoc, meta) {
   // Build diff summary aggregations.
   const summary = buildDiffSummary(items);
 
+  // Compute dependency difference if inventories provided (after items so we can correlate vuln states).
+  const dependency_diff = (baseComponents || headComponents)
+    ? computeDependencyDiff(baseComponents, headComponents, items)
+    : null;
+
   // Final diff document payload.
   const out = {
     schema_version: '2.0.0',
@@ -66,10 +188,11 @@ function buildDiff(baseDoc, headDoc, meta) {
     base: baseDoc?.git || null,
     head: headDoc?.git || null,
     summary,
+    dependency_diff,
     items,
   };
 
   return out;
 }
 
-module.exports = { buildDiff };
+module.exports = { buildDiff, computeDependencyDiff };
