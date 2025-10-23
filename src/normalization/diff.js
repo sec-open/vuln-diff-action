@@ -207,6 +207,88 @@ function computeDirectDependencyChanges(moduleChanges = [], diffItems = []) {
   return { totals, changes };
 }
 
+// Computes per-module direct dependency differences (POM-like) between base and head inventories.
+// Each inventory entry: { module:{groupId,artifactId}, dependencies:[{groupId,artifactId,versions:[]}] }
+function computeModuleDependencyDiff(baseModules = [], headModules = []) {
+  function toMap(mods) {
+    const m = new Map();
+    for (const entry of mods || []) {
+      if (!entry?.module) continue;
+      const { groupId, artifactId } = entry.module;
+      const key = `${groupId}::${artifactId}`;
+      m.set(key, entry);
+    }
+    return m;
+  }
+  const B = toMap(baseModules);
+  const H = toMap(headModules);
+  const allModuleKeys = new Set([...B.keys(), ...H.keys()]);
+  const modules = [];
+  let depAdded = 0, depRemoved = 0, depVersionChanged = 0;
+
+  function indexDeps(entry) {
+    const map = new Map();
+    for (const d of entry?.dependencies || []) {
+      const dKey = `${d.groupId}::${d.artifactId}`;
+      map.set(dKey, d);
+    }
+    return map;
+  }
+
+  for (const modKey of [...allModuleKeys].sort()) {
+    const b = B.get(modKey);
+    const h = H.get(modKey);
+    const changes = [];
+
+    if (b && !h) {
+      const bDeps = indexDeps(b);
+      for (const dep of bDeps.values()) {
+        depRemoved++;
+        changes.push({ state: 'REMOVED', groupId: dep.groupId, artifactId: dep.artifactId, baseVersions: dep.versions || [], headVersions: [] });
+      }
+    } else if (!b && h) {
+      const hDeps = indexDeps(h);
+      for (const dep of hDeps.values()) {
+        depAdded++;
+        changes.push({ state: 'ADDED', groupId: dep.groupId, artifactId: dep.artifactId, baseVersions: [], headVersions: dep.versions || [] });
+      }
+    } else if (b && h) {
+      const bDeps = indexDeps(b);
+      const hDeps = indexDeps(h);
+      const allDepKeys = new Set([...bDeps.keys(), ...hDeps.keys()]);
+      for (const dKey of allDepKeys) {
+        const bd = bDeps.get(dKey);
+        const hd = hDeps.get(dKey);
+        if (bd && !hd) {
+          depRemoved++;
+          changes.push({ state: 'REMOVED', groupId: bd.groupId, artifactId: bd.artifactId, baseVersions: bd.versions || [], headVersions: [] });
+        } else if (!bd && hd) {
+          depAdded++;
+          changes.push({ state: 'ADDED', groupId: hd.groupId, artifactId: hd.artifactId, baseVersions: [], headVersions: hd.versions || [] });
+        } else if (bd && hd) {
+          const bVers = [...(bd.versions || [])].sort();
+          const hVers = [...(hd.versions || [])].sort();
+          const same = bVers.length === hVers.length && bVers.every((v,i)=>v===hVers[i]);
+          if (!same) {
+            depVersionChanged++;
+            changes.push({ state: 'VERSION_CHANGED', groupId: hd.groupId || bd.groupId, artifactId: hd.artifactId || bd.artifactId, baseVersions: bVers, headVersions: hVers });
+          }
+        }
+      }
+    }
+
+    if (changes.length) {
+      const [moduleGroupId, moduleArtifactId] = modKey.split('::');
+      modules.push({ moduleKey: modKey, moduleGroupId, moduleArtifactId, changes });
+    }
+  }
+
+  return {
+    totals: { MODULES_CHANGED: modules.length, DEP_ADDED: depAdded, DEP_REMOVED: depRemoved, DEP_VERSION_CHANGED: depVersionChanged },
+    modules,
+  };
+}
+
 function buildDiff(baseDoc, headDoc, meta, { baseComponents, headComponents, baseModulesInv, headModulesInv } = {}) {
   const B = mapByKey(baseDoc?.vulnerabilities || []);
   const H = mapByKey(headDoc?.vulnerabilities || []);

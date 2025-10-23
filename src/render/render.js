@@ -2,6 +2,7 @@
 // Phase 3 Orchestrator: runs Markdown (3.1), HTML bundle (3.2), and PDF (3.3).
 const core = require('@actions/core');
 const path = require('path');
+const fs = require('fs');
 
 /** Executes Markdown rendering (summary, PR comment, Slack if implemented). */
 async function markdown_init({ distDir = './dist' } = {}) {
@@ -77,11 +78,34 @@ async function pdf_init({ distDir = './dist' } = {}) {
   }
 }
 
+/** Ensures diff.json artifact is present; generates it if missing using normalization. */
+async function ensureDiffArtifact(distDir) {
+  try {
+    const diffPath = path.resolve(distDir, 'diff.json');
+    if (fs.existsSync(diffPath)) return;
+    core.info('[render] diff.json missing; attempting automatic normalization');
+    const normMod = require('../normalization/normalization');
+    if (typeof normMod.normalization === 'function') {
+      await normMod.normalization({ distDir });
+      if (fs.existsSync(diffPath)) {
+        core.info('[render] diff.json generated successfully via auto-normalization');
+      } else {
+        core.warning('[render] auto-normalization ran but diff.json still missing');
+      }
+    } else {
+      core.warning('[render] normalization module does not export a normalization() function');
+    }
+  } catch (e) {
+    core.warning(`[render] ensureDiffArtifact failed: ${e?.message || e}`);
+  }
+}
+
 /** Entry point: sequentially runs Markdown → HTML → PDF. */
 async function render(options = {}) {
   const distDir = options.distDir || './dist';
 
   core.info('[render] start');
+  await ensureDiffArtifact(distDir);
   await markdown_init({ distDir });
   await html_init({ distDir }); // HTML after Markdown
   await pdf_init({ distDir });  // PDF after HTML
