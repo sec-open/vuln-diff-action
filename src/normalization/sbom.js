@@ -179,3 +179,4 @@ function extractComponentInventory(bom) {
 }
 
 module.exports = { buildSbomIndex, extractComponentInventory };
+

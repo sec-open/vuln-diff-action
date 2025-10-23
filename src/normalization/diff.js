@@ -131,7 +131,83 @@ function computeDependencyDiff(baseComponents = [], headComponents = [], diffIte
 // - REMOVED: present only in BASE.
 // - NEW: present only in HEAD.
 // Attaches normalized severity and builds a summary object.
-function buildDiff(baseDoc, headDoc, meta, { baseComponents, headComponents } = {}) {
+const SEVERITY_ORDER = ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'];
+const SEVERITY_WEIGHT = { CRITICAL:5, HIGH:4, MEDIUM:3, LOW:2, UNKNOWN:1 };
+
+function sortVulnsBySeverity(arr = []) {
+  return arr.slice().sort((a,b)=> (SEVERITY_WEIGHT[String(b.severity||'UNKNOWN').toUpperCase()]||0) - (SEVERITY_WEIGHT[String(a.severity||'UNKNOWN').toUpperCase()]||0));
+}
+
+function computeDirectDependencyChanges(moduleChanges = [], diffItems = []) {
+  const acc = new Map(); // key -> { groupId, artifactId, baseVersions:Set, headVersions:Set }
+  for (const mod of moduleChanges || []) {
+    for (const ch of mod.changes || []) {
+      const key = `${ch.groupId}::${ch.artifactId}`;
+      if (!acc.has(key)) acc.set(key, { groupId: ch.groupId, artifactId: ch.artifactId, baseVersions: new Set(), headVersions: new Set() });
+      const rec = acc.get(key);
+      (ch.baseVersions||[]).forEach(v=> rec.baseVersions.add(v));
+      (ch.headVersions||[]).forEach(v=> rec.headVersions.add(v));
+    }
+  }
+  const changes = [];
+  const itemsByGA = new Map();
+  for (const it of diffItems || []) {
+    const pkg = it.package || {}; const g = pkg.groupId; const a = pkg.artifactId; const v = pkg.version; if (!g||!a||!v) continue;
+    const k = `${g}::${a}::${v}`;
+    if (!itemsByGA.has(k)) itemsByGA.set(k, []);
+    itemsByGA.get(k).push(it);
+  }
+  for (const [key, rec] of acc.entries()) {
+    const baseArr = [...rec.baseVersions].sort();
+    const headArr = [...rec.headVersions].sort();
+    let change_type;
+    if (baseArr.length && headArr.length) {
+      const same = baseArr.length === headArr.length && baseArr.every((v,i)=>v===headArr[i]);
+      change_type = same ? 'UNCHANGED' : 'UPDATED';
+      if (same) continue; // omit unchanged dependencies
+    } else if (baseArr.length && !headArr.length) {
+      change_type = 'REMOVED';
+    } else if (!baseArr.length && headArr.length) {
+      change_type = 'ADDED';
+    } else { continue; }
+
+    const NEW = []; const REMOVED = []; const UNCHANGED = [];
+    const baseSet = new Set(baseArr); const headSet = new Set(headArr); const commonSet = new Set([...baseArr.filter(v=>headSet.has(v))]);
+    for (const v of headArr) {
+      const list = itemsByGA.get(`${rec.groupId}::${rec.artifactId}::${v}`) || [];
+      for (const it of list) {
+        if (it.state === 'NEW') NEW.push({ id: it.id, severity: it.severity, state: it.state, version: v });
+        if (it.state === 'UNCHANGED' && commonSet.has(v)) UNCHANGED.push({ id: it.id, severity: it.severity, state: it.state, version: v });
+      }
+    }
+    for (const v of baseArr) {
+      const list = itemsByGA.get(`${rec.groupId}::${rec.artifactId}::${v}`) || [];
+      for (const it of list) {
+        if (it.state === 'REMOVED') REMOVED.push({ id: it.id, severity: it.severity, state: it.state, version: v });
+        if (it.state === 'UNCHANGED' && commonSet.has(v)) UNCHANGED.push({ id: it.id, severity: it.severity, state: it.state, version: v });
+      }
+    }
+    const change = {
+      groupId: rec.groupId,
+      artifactId: rec.artifactId,
+      change_type,
+      baseVersions: baseArr,
+      headVersions: headArr,
+      vulnerabilities: {
+        NEW: sortVulnsBySeverity(NEW),
+        REMOVED: sortVulnsBySeverity(REMOVED),
+        UNCHANGED: sortVulnsBySeverity(UNCHANGED),
+      },
+      counts: { NEW: NEW.length, REMOVED: REMOVED.length, UNCHANGED: UNCHANGED.length },
+    };
+    changes.push(change);
+  }
+  changes.sort((a,b)=>`${a.groupId}:${a.artifactId}`.localeCompare(`${b.groupId}:${b.artifactId}`,'en',{sensitivity:'base'}));
+  const totals = changes.reduce((acc,c)=>{ acc.CHANGES=(acc.CHANGES||0)+1; acc.NEW_VULNS=(acc.NEW_VULNS||0)+c.counts.NEW; acc.REMOVED_VULNS=(acc.REMOVED_VULNS||0)+c.counts.REMOVED; acc.UNCHANGED_VULNS=(acc.UNCHANGED_VULNS||0)+c.counts.UNCHANGED; return acc; }, {});
+  return { totals, changes };
+}
+
+function buildDiff(baseDoc, headDoc, meta, { baseComponents, headComponents, baseModulesInv, headModulesInv } = {}) {
   const B = mapByKey(baseDoc?.vulnerabilities || []);
   const H = mapByKey(headDoc?.vulnerabilities || []);
 
@@ -177,6 +253,12 @@ function buildDiff(baseDoc, headDoc, meta, { baseComponents, headComponents } = 
   const dependency_diff = (baseComponents || headComponents)
     ? computeDependencyDiff(baseComponents, headComponents, items)
     : null;
+  const dependency_module_diff = (baseModulesInv || headModulesInv)
+    ? computeModuleDependencyDiff(baseModulesInv, headModulesInv)
+    : null;
+  const direct_dependency_changes = dependency_module_diff
+    ? computeDirectDependencyChanges(dependency_module_diff.modules, items)
+    : null;
 
   // Final diff document payload.
   const out = {
@@ -189,10 +271,12 @@ function buildDiff(baseDoc, headDoc, meta, { baseComponents, headComponents } = 
     head: headDoc?.git || null,
     summary,
     dependency_diff,
+    dependency_module_diff,
+    direct_dependency_changes,
     items,
   };
 
   return out;
 }
 
-module.exports = { buildDiff, computeDependencyDiff };
+module.exports = { buildDiff, computeDependencyDiff, computeModuleDependencyDiff, computeDirectDependencyChanges };

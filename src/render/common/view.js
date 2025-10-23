@@ -84,6 +84,10 @@ function buildView(distDir = './dist') {
       },
       items: Array.isArray(diff.dependency_diff.items) ? diff.dependency_diff.items : []
     } : { totals:{ ADDED:0, REMOVED:0, VERSION_CHANGED:0, NEW_VULNS:0, REMOVED_VULNS:0 }, items:[] },
+    directDependencyChanges: diff.direct_dependency_changes ? {
+      totals: diff.direct_dependency_changes.totals || {},
+      changes: Array.isArray(diff.direct_dependency_changes.changes) ? diff.direct_dependency_changes.changes : []
+    } : { totals:{}, changes:[] },
   };
 
   view.precomputed = precomputeFromDiff(diff);

@@ -107,6 +107,58 @@ function dependencyDiffTable(dep) {
 }
 
 /**
+ * Formats the heading for each direct dependency change subsection.
+ * @param {number} idx - The index of the change in the list.
+ * @param {Object} change - The change object containing details of the dependency change.
+ * @returns {string} - Formatted heading string.
+ */
+function formatDirectDepHeading(idx, change) {
+  const base = change.baseVersions || []; const head = change.headVersions || [];
+  const ga = `${change.groupId}:${change.artifactId}`;
+  if (change.change_type === 'UPDATED') {
+    return `2.3.${idx} ${ga} updated (${base.join(', ') || '—'} -> ${head.join(', ') || '—'})`;
+  } else if (change.change_type === 'ADDED') {
+    return `2.3.${idx} ${ga} added (${head.join(', ') || '—'})`;
+  } else if (change.change_type === 'REMOVED') {
+    return `2.3.${idx} ${ga} removed (${base.join(', ') || '—'})`;
+  }
+  return `2.3.${idx} ${ga}`;
+}
+
+/**
+ * Renders a vulnerability table for a given set of vulnerabilities.
+ * @param {string} title - The title for the vulnerability table.
+ * @param {Array} vulns - The list of vulnerabilities to display.
+ * @returns {string} - HTML string for the vulnerability table.
+ */
+function renderVulnTable(title, vulns) {
+  if (!vulns || !vulns.length) return '';
+  const rows = vulns.map(v => `<tr><td>${v.id}</td><td>${v.version}</td><td>${String(v.severity||'UNKNOWN').toUpperCase()}</td><td>${v.state}</td></tr>`).join('');
+  return `<div class="vuln-block"><h5>${title} (${vulns.length})</h5><table><thead><tr><th>ID</th><th>Version</th><th>Severity</th><th>State</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+/**
+ * Renders the direct dependency changes section.
+ * @param {Object} view - The view object containing directDependencyChanges data.
+ * @returns {string} - HTML string for the direct dependency changes section.
+ */
+function renderDirectDependencyChangesSection(view) {
+  const dc = view.directDependencyChanges || { changes:[] };
+  const changes = Array.isArray(dc.changes) ? dc.changes : [];
+  const header = `<h3>Dependency Changes</h3>`;
+  if (!changes.length) return `<div class="card">${header}<p>No direct dependency changes detected.</p></div>`;
+  const blocks = changes.map((ch, i) => {
+    const heading = formatDirectDepHeading(i+1, ch);
+    const NEW = renderVulnTable('NEW vulnerabilities', ch.vulnerabilities?.NEW);
+    const REMOVED = renderVulnTable('REMOVED vulnerabilities', ch.vulnerabilities?.REMOVED);
+    const UNCHANGED = renderVulnTable('UNCHANGED vulnerabilities', ch.vulnerabilities?.UNCHANGED);
+    const hasContent = NEW || REMOVED || UNCHANGED;
+    return `<div class="direct-dep-change"><h4>${heading}</h4>${hasContent || '<p>No related vulnerabilities.</p>'}${NEW}${REMOVED}${UNCHANGED}</div>`;
+  }).join('');
+  return `<div class="card">${header}${blocks}</div>`;
+}
+
+/**
  * Produces full summary section HTML.
  * @param {{view:Object}} param0
  * @returns {string}
@@ -146,7 +198,8 @@ function renderSummary({ view } = {}) {
 </div>`;
 
   const dep = view.dependencyDiff || { totals:{}, items:[] };
-  const depCard = `\n<div class="card">\n  <h3>Dependency Changes</h3>\n  <p><b>Totals:</b> ADDED=${dep.totals.ADDED||0} · REMOVED=${dep.totals.REMOVED||0} · VERSION_CHANGED=${dep.totals.VERSION_CHANGED||0} · NEW_VULNS=${dep.totals.NEW_VULNS||0} · REMOVED_VULNS=${dep.totals.REMOVED_VULNS||0}</p>\n  ${dependencyDiffTable(dep)}\n</div>`;
+  // Reemplazamos depCard por subsecciones detalladas usando directDependencyChanges
+  const depCard = renderDirectDependencyChangesSection(view);
 
   return [intro, env, branches, sev, depCard].join('\n');
 }

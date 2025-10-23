@@ -199,10 +199,34 @@ function summaryHtml(view) {
   }
 
   // 2.3 Dependency Changes
-  const dep = view?.dependencyDiff || { totals:{ ADDED:0, REMOVED:0, VERSION_CHANGED:0, NEW_VULNS:0, REMOVED_VULNS:0 }, items:[] };
-  const depSection = `\n<section class="page" id="summary-dependency-changes">\n  <h3>2.3 Dependency Changes</h3>\n  <p><strong>Totals:</strong> ADDED=${dep.totals.ADDED||0} · REMOVED=${dep.totals.REMOVED||0} · VERSION_CHANGED=${dep.totals.VERSION_CHANGED||0} · NEW_VULNS=${dep.totals.NEW_VULNS||0} · REMOVED_VULNS=${dep.totals.REMOVED_VULNS||0}</p>\n  ${renderDependencyChanges(dep)}\n</section>`;
+  const directChanges = view?.directDependencyChanges || { changes:[] };
+  const depSection = `\n<section class="page" id="summary-dependency-changes">\n  <h3>2.3 Dependency Changes</h3>\n  ${renderDirectDependencyChangeSubsections(directChanges)}\n</section>`;
 
   return [sec2_and_2_1, moduleSections, depSection].join('\n');
+}
+
+/** Renders subsections for direct dependency changes (if any). */
+function renderDirectDependencyChangeSubsections(directChanges) {
+  const changes = Array.isArray(directChanges?.changes) ? directChanges.changes : [];
+  if (!changes.length) return '<p>No direct dependency changes detected.</p>';
+  return changes.map((ch, idx) => {
+    const base = ch.baseVersions || []; const head = ch.headVersions || []; const ga = `${ch.groupId}:${ch.artifactId}`;
+    let title;
+    if (ch.change_type === 'UPDATED') title = `2.3.${idx+1} ${ga} updated (${base.join(', ')||'—'} -> ${head.join(', ')||'—'})`;
+    else if (ch.change_type === 'ADDED') title = `2.3.${idx+1} ${ga} added (${head.join(', ')||'—'})`;
+    else if (ch.change_type === 'REMOVED') title = `2.3.${idx+1} ${ga} removed (${base.join(', ')||'—'})`;
+    else title = `2.3.${idx+1} ${ga}`;
+    function vulnBlock(label, arr) {
+      if (!arr || !arr.length) return '';
+      const rows = arr.map(v=> `<tr><td>${v.id}</td><td>${v.version}</td><td>${String(v.severity||'UNKNOWN').toUpperCase()}</td><td>${v.state}</td></tr>`).join('');
+      return `<div class="vuln-block"><h5>${label} (${arr.length})</h5><table class="compact no-break"><thead><tr><th>ID</th><th>Version</th><th>Severity</th><th>State</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    }
+    const NEW = vulnBlock('NEW vulnerabilities', ch.vulnerabilities?.NEW);
+    const REMOVED = vulnBlock('REMOVED vulnerabilities', ch.vulnerabilities?.REMOVED);
+    const UNCHANGED = vulnBlock('UNCHANGED vulnerabilities', ch.vulnerabilities?.UNCHANGED);
+    const content = NEW + REMOVED + UNCHANGED || '<p>No related vulnerabilities.</p>';
+    return `<div class="direct-dep-change"><h4>${title}</h4>${content}</div>`;
+  }).join('\n');
 }
 
 module.exports = { summaryHtml };
