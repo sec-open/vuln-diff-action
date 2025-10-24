@@ -121,9 +121,11 @@ function renderModuleMatrixTable(num, mod, mData) {
 <table class="compact no-break">
   <thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>
   <tbody>${rows}</tbody>
-</table>`.trim()/**
-/** Renders POM dependency changes table. */
-function dependencyPomChangesTable(pom * Builds summary section (overview + modules) HTML for PDF.
+</table>`.trim();
+}
+
+// --- POM dependency changes helpers (clean) ---
+function dependencyPomChangesTable(pomDiff) {
   if (!pomDiff || !Array.isArray(pomDiff.items)) return '<p>No POM dependency changes detected.</p>';
   const interesting = pomDiff.items.filter(it => ['NEW','UPDATED','REMOVED'].includes(it.state));
   if (!interesting.length) return '<p>No POM dependency changes detected.</p>';
@@ -131,8 +133,6 @@ function dependencyPomChangesTable(pom * Builds summary section (overview + modu
   const rows = interesting.map(it => `\n<tr><td>${it.state}</td><td>${it.groupId}:${it.artifactId}</td><td>${it.baseVersion || '—'}</td><td>${it.headVersion || '—'}</td></tr>`).join('');
   return head + rows + '</tbody></table>';
 }
-
-/** Renders POM dependency change subsections. */
 function renderPomDependencyChangeSubsections(pomDiff) {
   const items = Array.isArray(pomDiff?.items) ? pomDiff.items : [];
   const interesting = items.filter(it => ['NEW','UPDATED','REMOVED'].includes(it.state));
@@ -150,8 +150,6 @@ function renderPomDependencyChangeSubsections(pomDiff) {
     }).join('\n');
 }
 
- * @param {Object} view
- */
 function summaryHtml(view) {
   const repo = view?.repo || '';
   const baseRef = view?.inputs?.baseRef || view?.base?.ref || '';
@@ -166,10 +164,8 @@ function summaryHtml(view) {
   const refsTable = renderRefsTable({ baseRef, baseShaShort, headRef, headShaShort });
   const totalsTable = renderTotalsByStateTable(totals);
   const sevMatrix = renderSevByStateTable(bySevState);
-
   const modules = Object.keys(byModuleSevState || {}).sort((a,b)=>a.localeCompare(b,'en',{sensitivity:'base'}));
 
-  // 2 + 2.1 Overview (stacked, full width, only requested blocks)
   const sec2_and_2_1 = `
 <section class="page" id="summary">
   <h2>2. Summary</h2>
@@ -186,7 +182,6 @@ function summaryHtml(view) {
   </div>
 </section>`.trim();
 
-  // 2.2 Modules vulnerabilities — pages with 3 modules each
   let moduleSections;
   if (!modules.length) {
     moduleSections = `
@@ -196,12 +191,10 @@ function summaryHtml(view) {
 </section>`.trim();
   } else {
     const chunks = [];
-    for (let i = 0; i < modules.length; i += 3) {
-      chunks.push(modules.slice(i, i + 3));
-    }
+    for (let i = 0; i < modules.length; i += 3) chunks.push(modules.slice(i, i + 3));
     moduleSections = chunks.map((chunk, chunkIdx) => {
       const inner = chunk.map((mod, idxInChunk) => {
-        const globalNum = (chunkIdx * 3) + idxInChunk + 1; // 2.2.(globalNum)
+        const globalNum = (chunkIdx * 3) + idxInChunk + 1;
         return renderModuleMatrixTable(globalNum, mod, byModuleSevState[mod]);
       }).join('\n');
       return `
@@ -212,12 +205,10 @@ function summaryHtml(view) {
     }).join('\n');
   }
 
-  // 2.3 Dependency Changes
   const pomDiff = view?.dependencyPomDiff || { totals:{}, items:[] };
   const depSection = `\n<section class="page" id="summary-dependency-changes">\n  <h3>2.3 POM Dependency Changes</h3>\n  ${dependencyPomChangesTable(pomDiff)}\n  ${renderPomDependencyChangeSubsections(pomDiff)}\n</section>`;
 
   return [sec2_and_2_1, moduleSections, depSection].join('\n');
 }
-
 
 module.exports = { summaryHtml };

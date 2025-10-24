@@ -1,0 +1,27 @@
+{
+  "schema_version": "2.0.0",
+  "generated_at": "2025-10-24T00:00:00.000Z",
+  "repo": "example/repo",
+  "inputs": { "base_ref": "main", "head_ref": "feature", "path": "." },
+  "tools": { "syft": "v1", "grype": "v2" },
+  "base": { "ref": "refs/heads/main", "sha_short": "abc123", "sha": "abc123def456", "author": "Alice", "authored_at": "2025-10-20", "commit_subject": "Base commit" },
+  "head": { "ref": "refs/heads/feature", "sha_short": "def456", "sha": "def456ghi789", "author": "Bob", "authored_at": "2025-10-23", "commit_subject": "Feature commit" },
+  "summary": { "totals": { "NEW": 2, "REMOVED": 1, "UNCHANGED": 3 }, "by_severity_and_state": { "CRITICAL": { "NEW":1, "REMOVED":0, "UNCHANGED":0 }, "HIGH": { "NEW":1, "REMOVED":1, "UNCHANGED":1 }, "MEDIUM": { "NEW":0, "REMOVED":0, "UNCHANGED":1 }, "LOW": { "NEW":0, "REMOVED":0, "UNCHANGED":1 }, "UNKNOWN": { "NEW":0, "REMOVED":0, "UNCHANGED":0 } } },
+  "dependency_pom_diff": {
+    "totals": { "NEW":1, "REMOVED":1, "UPDATED":1, "UNCHANGED":1 },
+    "items": [
+      { "groupId": "org.sample", "artifactId": "lib-a", "baseVersion": "1.0.0", "headVersion": "1.1.0", "state": "UPDATED" },
+      { "groupId": "org.sample", "artifactId": "lib-b", "headVersion": "2.0.0", "state": "NEW" },
+      { "groupId": "org.sample", "artifactId": "lib-c", "baseVersion": "3.5.1", "state": "REMOVED" },
+      { "groupId": "org.sample", "artifactId": "lib-d", "baseVersion": "4.0.0", "headVersion": "4.0.0", "state": "UNCHANGED" }
+    ]
+  },
+  "items": [
+    { "match_key": "CVE-1", "id": "CVE-1", "severity": "critical", "state": "NEW" },
+    { "match_key": "CVE-2", "id": "CVE-2", "severity": "high", "state": "REMOVED" },
+    { "match_key": "CVE-3", "id": "CVE-3", "severity": "high", "state": "UNCHANGED" },
+    { "match_key": "CVE-4", "id": "CVE-4", "severity": "medium", "state": "UNCHANGED" },
+    { "match_key": "CVE-5", "id": "CVE-5", "severity": "low", "state": "UNCHANGED" },
+    { "match_key": "CVE-6", "id": "CVE-6", "severity": "high", "state": "NEW" }
+  ]
+}
