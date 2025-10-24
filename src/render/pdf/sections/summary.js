@@ -121,11 +121,35 @@ function renderModuleMatrixTable(num, mod, mData) {
 <table class="compact no-break">
   <thead><tr><th>Severity</th><th>NEW</th><th>REMOVED</th><th>UNCHANGED</th></tr></thead>
   <tbody>${rows}</tbody>
-</table>`.trim();
+</table>`.trim()/**
+/** Renders POM dependency changes table. */
+function dependencyPomChangesTable(pom * Builds summary section (overview + modules) HTML for PDF.
+  if (!pomDiff || !Array.isArray(pomDiff.items)) return '<p>No POM dependency changes detected.</p>';
+  const interesting = pomDiff.items.filter(it => ['NEW','UPDATED','REMOVED'].includes(it.state));
+  if (!interesting.length) return '<p>No POM dependency changes detected.</p>';
+  const head = '<table class="compact no-break"><thead><tr><th>State</th><th>Group:Artifact</th><th>Base Version</th><th>Head Version</th></tr></thead><tbody>';
+  const rows = interesting.map(it => `\n<tr><td>${it.state}</td><td>${it.groupId}:${it.artifactId}</td><td>${it.baseVersion || '—'}</td><td>${it.headVersion || '—'}</td></tr>`).join('');
+  return head + rows + '</tbody></table>';
 }
 
-/**
- * Builds summary section (overview + modules) HTML for PDF.
+/** Renders POM dependency change subsections. */
+function renderPomDependencyChangeSubsections(pomDiff) {
+  const items = Array.isArray(pomDiff?.items) ? pomDiff.items : [];
+  const interesting = items.filter(it => ['NEW','UPDATED','REMOVED'].includes(it.state));
+  if (!interesting.length) return '<p>No POM dependency changes detected.</p>';
+  return interesting
+    .sort((a,b)=>`${a.groupId}:${a.artifactId}`.localeCompare(`${b.groupId}:${b.artifactId}`,'en',{sensitivity:'base'}))
+    .map((it, idx) => {
+      const ga = `${it.groupId}:${it.artifactId}`;
+      let title;
+      if (it.state === 'UPDATED') title = `2.3.${idx+1} ${ga} UPDATED (${it.baseVersion || '—'} → ${it.headVersion || '—'})`;
+      else if (it.state === 'NEW') title = `2.3.${idx+1} ${ga} NEW (${it.headVersion || '—'})`;
+      else if (it.state === 'REMOVED') title = `2.3.${idx+1} ${ga} REMOVED (${it.baseVersion || '—'})`;
+      else title = `2.3.${idx+1} ${ga}`;
+      return `<div class="pom-dep-change"><h4>${title}</h4></div>`;
+    }).join('\n');
+}
+
  * @param {Object} view
  */
 function summaryHtml(view) {

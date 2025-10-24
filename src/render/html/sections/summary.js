@@ -94,9 +94,8 @@ function dependencyPomChangesTable(dep) {
 }
 
 /**
- * Renders the direct dependency changes section.
- * @param {Object} view - The view object containing directDependencyChanges data.
- * @returns {string} - HTML string for the direct dependency changes section.
+ * Renders the POM dependency change subsections.
+ * @returns {string} - HTML string listing each changed dependency (NEW / UPDATED / REMOVED).
  */
 function renderPomDependencyChangeSubsections(dep) {
   const items = Array.isArray(dep?.items) ? dep.items : [];
