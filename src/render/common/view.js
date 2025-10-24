@@ -74,20 +74,10 @@ function buildView(distDir = './dist') {
           return { ...it, modules, module_paths };
         })
       : [],
-    dependencyDiff: diff.dependency_diff ? {
-      totals: {
-        ADDED: diff.dependency_diff.totals?.ADDED || 0,
-        REMOVED: diff.dependency_diff.totals?.REMOVED || 0,
-        VERSION_CHANGED: diff.dependency_diff.totals?.VERSION_CHANGED || 0,
-        NEW_VULNS: diff.dependency_diff.totals?.NEW_VULNS || 0,
-        REMOVED_VULNS: diff.dependency_diff.totals?.REMOVED_VULNS || 0,
-      },
-      items: Array.isArray(diff.dependency_diff.items) ? diff.dependency_diff.items : []
-    } : { totals:{ ADDED:0, REMOVED:0, VERSION_CHANGED:0, NEW_VULNS:0, REMOVED_VULNS:0 }, items:[] },
-    directDependencyChanges: diff.direct_dependency_changes ? {
-      totals: diff.direct_dependency_changes.totals || {},
-      changes: Array.isArray(diff.direct_dependency_changes.changes) ? diff.direct_dependency_changes.changes : []
-    } : { totals:{}, changes:[] },
+    dependencyPomDiff: diff.dependency_pom_diff ? {
+      totals: diff.dependency_pom_diff.totals || { NEW:0, REMOVED:0, UPDATED:0, UNCHANGED:0 },
+      items: Array.isArray(diff.dependency_pom_diff.items) ? diff.dependency_pom_diff.items : []
+    } : { totals:{ NEW:0, REMOVED:0, UPDATED:0, UNCHANGED:0 }, items:[] },
   };
 
   view.precomputed = precomputeFromDiff(diff);

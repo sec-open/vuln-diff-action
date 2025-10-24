@@ -161,6 +161,34 @@ It generates an **SBOM (CycloneDX JSON)** for each ref, scans them with Grype, a
 
 ---
 
+## 📄 Diff JSON Structure (v2.0.0)
+
+El archivo `dist/diff.json` incluye ahora una sección adicional para dependencias declaradas explícitamente en `pom.xml`:
+
+```jsonc
+{
+  // ...existing keys...
+  "dependency_pom_diff": {
+    "totals": { "NEW": 0, "REMOVED": 0, "UPDATED": 0, "UNCHANGED": 0 },
+    "items": [
+      { "groupId": "org.example", "artifactId": "lib", "baseVersion": "1.2.3", "headVersion": "1.3.0", "state": "UPDATED" },
+      { "groupId": "org.foo", "artifactId": "bar", "headVersion": "2.0.0", "state": "NEW" },
+      { "groupId": "org.old", "artifactId": "legacy", "baseVersion": "0.9.1", "state": "REMOVED" }
+    ]
+  }
+}
+```
+
+Reglas de estado:
+- `NEW`: aparece en head y no en base.
+- `REMOVED`: existía en base y desaparece en head.
+- `UPDATED`: mismo `groupId:artifactId` pero versión distinta.
+- `UNCHANGED`: versión idéntica en ambos refs (no se muestra en tablas resumen HTML/PDF/Markdown).
+
+La sección POM se deriva exclusivamente de dependencias directas declaradas (tras resolver `${property}`), sin inferir transitivas.
+
+---
+
 ## 🧪 Notes & Tips
 
 ### On `build_command`

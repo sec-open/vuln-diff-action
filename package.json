@@ -24,7 +24,8 @@
     "@actions/github": "^6.0.0",
     "puppeteer-core": "^24.15.0",
     "@puppeteer/browsers": "^2.4.1",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "fast-xml-parser": "^4.3.5"
   },
   "devDependencies": {
     "@vercel/ncc": "^0.38.3"

@@ -18,9 +18,13 @@ async function readPhase1Dist(distDir = './dist') {
       base: path.join(distDir, 'grype', 'base.grype.json'),
       head: path.join(distDir, 'grype', 'head.grype.json'),
     },
+    pom: {
+      base: path.join(distDir, 'pom', 'base-deps.json'),
+      head: path.join(distDir, 'pom', 'head-deps.json'),
+    },
   };
 
-  const [meta, gitBase, gitHead, sbomBase, sbomHead, grypeBase, grypeHead] = await Promise.all([
+  const [meta, gitBase, gitHead, sbomBase, sbomHead, grypeBase, grypeHead, pomBase, pomHead] = await Promise.all([
     readJSON(files.meta),
     readJSON(files.git.base),
     readJSON(files.git.head),
@@ -28,6 +32,8 @@ async function readPhase1Dist(distDir = './dist') {
     readJSON(files.sbom.head),
     readJSON(files.grype.base),
     readJSON(files.grype.head),
+    readJSON(files.pom.base).catch(() => ({ dependencies: [] })),
+    readJSON(files.pom.head).catch(() => ({ dependencies: [] })),
   ]);
 
   return {
@@ -36,6 +42,7 @@ async function readPhase1Dist(distDir = './dist') {
     git: { base: gitBase, head: gitHead },
     sbom: { base: sbomBase, head: sbomHead },
     grype: { base: grypeBase, head: grypeHead },
+    pom: { base: pomBase, head: pomHead },
   };
 }
 

@@ -92,6 +92,35 @@ Commit: ${mdSafe(view.head.commitSubject)}
     lines.push(`| ${view.summary.totals.NEW} | ${view.summary.totals.REMOVED} | ${view.summary.totals.UNCHANGED} |`);
     lines.push('');
 
+    // Nueva sección: Cambios de dependencias POM
+    const pom = view.dependencyPomDiff || { items:[], totals:{} };
+    const pomInteresting = (pom.items||[]).filter(it => ['NEW','UPDATED','REMOVED'].includes(it.state));
+    lines.push('## POM Dependency Changes');
+    if (!pomInteresting.length) {
+      lines.push('No POM dependency changes detected.');
+    } else {
+      lines.push('| State | Group:Artifact | Base Version | Head Version |');
+      lines.push('| --- | --- | --- | --- |');
+      pomInteresting.sort((a,b)=>`${a.groupId}:${a.artifactId}`.localeCompare(`${b.groupId}:${b.artifactId}`,'en',{sensitivity:'base'}))
+        .forEach(it => {
+          let baseV = it.baseVersion || '—';
+          let headV = it.headVersion || '—';
+          lines.push(`| ${it.state} | \`${it.groupId}:${it.artifactId}\` | ${baseV} | ${headV} |`);
+        });
+      lines.push('');
+      // Lista enumerada con formato tipo 2.3.x
+      pomInteresting.forEach((it, idx) => {
+        if (it.state === 'UPDATED') {
+          lines.push(`- 2.3.${idx+1} \`${it.groupId}:${it.artifactId}\` UPDATED (${it.baseVersion || '—'} → ${it.headVersion || '—'})`);
+        } else if (it.state === 'NEW') {
+          lines.push(`- 2.3.${idx+1} \`${it.groupId}:${it.artifactId}\` NEW (${it.headVersion || '—'})`);
+        } else if (it.state === 'REMOVED') {
+          lines.push(`- 2.3.${idx+1} \`${it.groupId}:${it.artifactId}\` REMOVED (${it.baseVersion || '—'})`);
+        }
+      });
+    }
+    lines.push('');
+
     // Vulnerability listing (flattened) con columna Severity y ordenado.
     lines.push('## All Vulnerabilities');
     const header = '| Severity | Vulnerability | Package | State |\n|---|---|---|---|';

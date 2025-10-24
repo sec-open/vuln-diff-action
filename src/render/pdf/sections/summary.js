@@ -124,16 +124,6 @@ function renderModuleMatrixTable(num, mod, mData) {
 </table>`.trim();
 }
 
-/** Renders dependency changes table. */
-function renderDependencyChanges(dep) {
-  if (!dep || !Array.isArray(dep.items) || !dep.items.length) {
-    return '<p>No dependency changes detected.</p>';
-  }
-  const header = '<table class="compact no-break"><thead><tr><th>State</th><th>Group</th><th>Artifact</th><th>Base Versions</th><th>Head Versions</th><th>#NEW vulns</th><th>#REMOVED vulns</th><th>NEW IDs</th><th>REMOVED IDs</th></tr></thead><tbody>';
-  const rows = dep.items.map(it => `\n<tr><td>${it.state}</td><td>${it.groupId}</td><td>${it.artifactId}</td><td>${(it.baseVersions||[]).join(', ')}</td><td>${(it.headVersions||[]).join(', ')}</td><td>${it.new_vulns_count||0}</td><td>${it.removed_vulns_count||0}</td><td>${(it.new_vulns||[]).map(v=>v.id).join(', ')||'—'}</td><td>${(it.removed_vulns||[]).map(v=>v.id).join(', ')||'—'}</td></tr>`).join('');
-  return header + rows + '</tbody></table>';
-}
-
 /**
  * Builds summary section (overview + modules) HTML for PDF.
  * @param {Object} view
@@ -199,34 +189,11 @@ function summaryHtml(view) {
   }
 
   // 2.3 Dependency Changes
-  const directChanges = view?.directDependencyChanges || { changes:[] };
-  const depSection = `\n<section class="page" id="summary-dependency-changes">\n  <h3>2.3 Dependency Changes</h3>\n  ${renderDirectDependencyChangeSubsections(directChanges)}\n</section>`;
+  const pomDiff = view?.dependencyPomDiff || { totals:{}, items:[] };
+  const depSection = `\n<section class="page" id="summary-dependency-changes">\n  <h3>2.3 POM Dependency Changes</h3>\n  ${dependencyPomChangesTable(pomDiff)}\n  ${renderPomDependencyChangeSubsections(pomDiff)}\n</section>`;
 
   return [sec2_and_2_1, moduleSections, depSection].join('\n');
 }
 
-/** Renders subsections for direct dependency changes (if any). */
-function renderDirectDependencyChangeSubsections(directChanges) {
-  const changes = Array.isArray(directChanges?.changes) ? directChanges.changes : [];
-  if (!changes.length) return '<p>No direct dependency changes detected.</p>';
-  return changes.map((ch, idx) => {
-    const base = ch.baseVersions || []; const head = ch.headVersions || []; const ga = `${ch.groupId}:${ch.artifactId}`;
-    let title;
-    if (ch.change_type === 'UPDATED') title = `2.3.${idx+1} ${ga} updated (${base.join(', ')||'—'} -> ${head.join(', ')||'—'})`;
-    else if (ch.change_type === 'ADDED') title = `2.3.${idx+1} ${ga} added (${head.join(', ')||'—'})`;
-    else if (ch.change_type === 'REMOVED') title = `2.3.${idx+1} ${ga} removed (${base.join(', ')||'—'})`;
-    else title = `2.3.${idx+1} ${ga}`;
-    function vulnBlock(label, arr) {
-      if (!arr || !arr.length) return '';
-      const rows = arr.map(v=> `<tr><td>${v.id}</td><td>${v.version}</td><td>${String(v.severity||'UNKNOWN').toUpperCase()}</td><td>${v.state}</td></tr>`).join('');
-      return `<div class="vuln-block"><h5>${label} (${arr.length})</h5><table class="compact no-break"><thead><tr><th>ID</th><th>Version</th><th>Severity</th><th>State</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-    }
-    const NEW = vulnBlock('NEW vulnerabilities', ch.vulnerabilities?.NEW);
-    const REMOVED = vulnBlock('REMOVED vulnerabilities', ch.vulnerabilities?.REMOVED);
-    const UNCHANGED = vulnBlock('UNCHANGED vulnerabilities', ch.vulnerabilities?.UNCHANGED);
-    const content = NEW + REMOVED + UNCHANGED || '<p>No related vulnerabilities.</p>';
-    return `<div class="direct-dep-change"><h4>${title}</h4>${content}</div>`;
-  }).join('\n');
-}
 
 module.exports = { summaryHtml };

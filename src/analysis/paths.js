@@ -23,6 +23,10 @@ function layout() {
       base: path.join(root, 'grype', 'base.grype.json'),
       head: path.join(root, 'grype', 'head.grype.json'),
     },
+    pom: {
+      base: path.join(root, 'pom', 'base-deps.json'),
+      head: path.join(root, 'pom', 'head-deps.json'),
+    },
   };
 }
 

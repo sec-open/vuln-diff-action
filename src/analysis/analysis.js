@@ -17,6 +17,7 @@ const {
 const { generateSbom } = require('./sbom');
 const { scanSbomWithGrype } = require('./grype');
 const { makeMeta, writeMeta } = require('./meta');
+const { extractPomDependencies } = require('./pom');
 
 // Main driver: validates platform, resolves refs, prepares isolated checkouts,
 // builds SBOMs, runs Grype, writes meta, cleans up, and sets action outputs.
@@ -150,6 +151,19 @@ async function analysis() {
     core.info(`wrote meta.json -> ${l.meta}`);
     core.debug(`meta: ${JSON.stringify(meta, null, 2)}`);
     core.info(`metadata written in ${stop()}`);
+
+    // Extract POM dependencies from each workdir and persist as JSON.
+    core.endGroup();
+    core.startGroup('[analysis] POM dependencies extraction');
+    stop = time();
+    const basePomDeps = await extractPomDependencies(baseWorkdir);
+    const headPomDeps = await extractPomDependencies(headWorkdir);
+    await ensureDir(path.dirname(l.pom.base));
+    await ensureDir(path.dirname(l.pom.head));
+    await writeJson(l.pom.base, { dependencies: basePomDeps });
+    await writeJson(l.pom.head, { dependencies: headPomDeps });
+    core.info(`wrote pom deps -> ${l.pom.base} / ${l.pom.head}`);
+    core.info(`POM dependencies extraction done in ${stop()}`);
 
     // Cleanup worktrees (non-fatal if fails).
     core.endGroup();

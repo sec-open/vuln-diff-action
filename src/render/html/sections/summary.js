@@ -84,57 +84,13 @@ function sevStateTable(by) {
  * @param {Object} dep
  * @returns {string}
  */
-function dependencyDiffTable(dep) {
-  if (!dep || !Array.isArray(dep.items) || dep.items.length === 0) {
-    return '<p>No dependency changes detected.</p>';
-  }
-  const head = '<table><thead><tr><th>State</th><th>Group</th><th>Artifact</th><th>Base Versions</th><th>Head Versions</th><th>#NEW vulns</th><th>#REMOVED vulns</th><th>NEW IDs</th><th>REMOVED IDs</th></tr></thead><tbody>';
-  const rows = dep.items.map(it => {
-    const newIds = (it.new_vulns||[]).map(v=>v.id).join(', ');
-    const removedIds = (it.removed_vulns||[]).map(v=>v.id).join(', ');
-    return `<tr>
-      <td>${it.state}</td>
-      <td>${it.groupId}</td>
-      <td>${it.artifactId}</td>
-      <td>${(it.baseVersions||[]).join(', ')}</td>
-      <td>${(it.headVersions||[]).join(', ')}</td>
-      <td style="text-align:right">${it.new_vulns_count||0}</td>
-      <td style="text-align:right">${it.removed_vulns_count||0}</td>
-      <td>${newIds || '—'}</td>
-      <td>${removedIds || '—'}</td>
-    </tr>`;}).join('');
+function dependencyPomChangesTable(dep) {
+  if (!dep || !Array.isArray(dep.items)) return '<p>No dependency changes detected.</p>';
+  const interesting = dep.items.filter(it => ['NEW','UPDATED','REMOVED'].includes(it.state));
+  if (!interesting.length) return '<p>No dependency changes detected.</p>';
+  const head = '<table><thead><tr><th>State</th><th>Group:Artifact</th><th>Base Version</th><th>Head Version</th></tr></thead><tbody>';
+  const rows = interesting.map(it => `<tr><td>${it.state}</td><td>${it.groupId}:${it.artifactId}</td><td>${it.baseVersion || '—'}</td><td>${it.headVersion || '—'}</td></tr>`).join('');
   return head + rows + '</tbody></table>';
-}
-
-/**
- * Formats the heading for each direct dependency change subsection.
- * @param {number} idx - The index of the change in the list.
- * @param {Object} change - The change object containing details of the dependency change.
- * @returns {string} - Formatted heading string.
- */
-function formatDirectDepHeading(idx, change) {
-  const base = change.baseVersions || []; const head = change.headVersions || [];
-  const ga = `${change.groupId}:${change.artifactId}`;
-  if (change.change_type === 'UPDATED') {
-    return `2.3.${idx} ${ga} updated (${base.join(', ') || '—'} -> ${head.join(', ') || '—'})`;
-  } else if (change.change_type === 'ADDED') {
-    return `2.3.${idx} ${ga} added (${head.join(', ') || '—'})`;
-  } else if (change.change_type === 'REMOVED') {
-    return `2.3.${idx} ${ga} removed (${base.join(', ') || '—'})`;
-  }
-  return `2.3.${idx} ${ga}`;
-}
-
-/**
- * Renders a vulnerability table for a given set of vulnerabilities.
- * @param {string} title - The title for the vulnerability table.
- * @param {Array} vulns - The list of vulnerabilities to display.
- * @returns {string} - HTML string for the vulnerability table.
- */
-function renderVulnTable(title, vulns) {
-  if (!vulns || !vulns.length) return '';
-  const rows = vulns.map(v => `<tr><td>${v.id}</td><td>${v.version}</td><td>${String(v.severity||'UNKNOWN').toUpperCase()}</td><td>${v.state}</td></tr>`).join('');
-  return `<div class="vuln-block"><h5>${title} (${vulns.length})</h5><table><thead><tr><th>ID</th><th>Version</th><th>Severity</th><th>State</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 /**
@@ -142,20 +98,21 @@ function renderVulnTable(title, vulns) {
  * @param {Object} view - The view object containing directDependencyChanges data.
  * @returns {string} - HTML string for the direct dependency changes section.
  */
-function renderDirectDependencyChangesSection(view) {
-  const dc = view.directDependencyChanges || { changes:[] };
-  const changes = Array.isArray(dc.changes) ? dc.changes : [];
-  const header = `<h3>Dependency Changes</h3>`;
-  if (!changes.length) return `<div class="card">${header}<p>No direct dependency changes detected.</p></div>`;
-  const blocks = changes.map((ch, i) => {
-    const heading = formatDirectDepHeading(i+1, ch);
-    const NEW = renderVulnTable('NEW vulnerabilities', ch.vulnerabilities?.NEW);
-    const REMOVED = renderVulnTable('REMOVED vulnerabilities', ch.vulnerabilities?.REMOVED);
-    const UNCHANGED = renderVulnTable('UNCHANGED vulnerabilities', ch.vulnerabilities?.UNCHANGED);
-    const hasContent = NEW || REMOVED || UNCHANGED;
-    return `<div class="direct-dep-change"><h4>${heading}</h4>${hasContent || '<p>No related vulnerabilities.</p>'}${NEW}${REMOVED}${UNCHANGED}</div>`;
-  }).join('');
-  return `<div class="card">${header}${blocks}</div>`;
+function renderPomDependencyChangeSubsections(dep) {
+  const items = Array.isArray(dep?.items) ? dep.items : [];
+  const interesting = items.filter(it => ['NEW','UPDATED','REMOVED'].includes(it.state));
+  if (!interesting.length) return '<p>No dependency changes detected.</p>';
+  return interesting
+    .sort((a,b)=>`${a.groupId}:${a.artifactId}`.localeCompare(`${b.groupId}:${b.artifactId}`,'en',{sensitivity:'base'}))
+    .map((it, idx) => {
+      const ga = `${it.groupId}:${it.artifactId}`;
+      let heading;
+      if (it.state === 'UPDATED') heading = `2.3.${idx+1} ${ga} UPDATED (${it.baseVersion || '—'} → ${it.headVersion || '—'})`;
+      else if (it.state === 'NEW') heading = `2.3.${idx+1} ${ga} NEW (${it.headVersion || '—'})`;
+      else if (it.state === 'REMOVED') heading = `2.3.${idx+1} ${ga} REMOVED (${it.baseVersion || '—'})`;
+      else heading = `2.3.${idx+1} ${ga}`;
+      return `<div class="pom-dep-change"><h4>${heading}</h4></div>`;
+    }).join('\n');
 }
 
 /**
@@ -196,11 +153,14 @@ function renderSummary({ view } = {}) {
   <h3>Totals by Severity and State</h3>
   ${sevStateTable(view.summary.bySeverityAndState)}
 </div>`;
-
-  const dep = view.dependencyDiff || { totals:{}, items:[] };
-  // Reemplazamos depCard por subsecciones detalladas usando directDependencyChanges
-  const depCard = renderDirectDependencyChangesSection(view);
-
+  // Nueva sección de dependencias POM
+  const pom = view.dependencyPomDiff || { totals:{}, items:[] };
+  const depCard = `
+<div class="card">
+  <h3>POM Dependency Changes</h3>
+  ${dependencyPomChangesTable(pom)}
+  ${renderPomDependencyChangeSubsections(pom)}
+</div>`;
   return [intro, env, branches, sev, depCard].join('\n');
 }
 

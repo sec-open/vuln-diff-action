@@ -61,7 +61,9 @@ async function normalization(options = {}) {
   core.info('[vuln-diff][normalization] computing diff…');
   const baseComponents = extractComponentInventory(sbom.base);
   const headComponents = extractComponentInventory(sbom.head);
-  const diffDoc = buildDiff(baseDoc, headDoc, meta, { baseComponents, headComponents });
+  const basePomDeps = ctx.pom?.base?.dependencies || [];
+  const headPomDeps = ctx.pom?.head?.dependencies || [];
+  const diffDoc = buildDiff(baseDoc, headDoc, meta, { pomBaseDeps: basePomDeps, pomHeadDeps: headPomDeps });
   const diffOut = path.join(distDir, 'diff.json');
   await writeJSON(diffOut, diffDoc);
   core.info(
