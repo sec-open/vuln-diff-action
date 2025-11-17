@@ -19,8 +19,9 @@ const { scanSbomWithGrype } = require('./grype');
 const { makeMeta, writeMeta } = require('./meta');
 const { extractPomDependencies } = require('./pom');
 
-// Main driver: now acepta overrides opcionales en opts { base_ref, head_ref, path }
-async function analysis(opts = {}) {
+// Main driver: validates platform, resolves refs, prepares isolated checkouts,
+// builds SBOMs, runs Grype, writes meta, cleans up, and sets action outputs.
+async function analysis() {
   // Helper: returns a closure reporting elapsed milliseconds.
   const time = () => {
     const start = Date.now();
@@ -35,10 +36,11 @@ async function analysis(opts = {}) {
 
   core.startGroup('[analysis] Inputs');
   try {
-    // Read required action inputs (base/head refs and optional subdirectory) con overrides.
-    const base_ref = opts.base_ref || core.getInput('base_ref', { required: true });
-    const head_ref = opts.head_ref || core.getInput('head_ref', { required: true });
-    const subPath = (opts.path !== undefined ? opts.path : (core.getInput('path') || '.'));
+    core.info('[debug] Inicio de análisis');
+    // Read required action inputs (base/head refs and optional subdirectory).
+    const base_ref = core.getInput('base_ref', { required: true });
+    const head_ref = core.getInput('head_ref', { required: true });
+    const subPath = core.getInput('path') || '.';
 
     core.info(`base_ref: ${base_ref}`);
     core.info(`head_ref: ${head_ref}`);
@@ -146,6 +148,8 @@ async function analysis(opts = {}) {
       tools,
       paths: l,
     });
+    core.info('[debug] metaPath: ' + l.meta);
+    core.info('[debug] metaObj: ' + JSON.stringify(meta, null, 2));
     await writeMeta(l.meta, meta);
     core.info(`wrote meta.json -> ${l.meta}`);
     core.debug(`meta: ${JSON.stringify(meta, null, 2)}`);
@@ -172,6 +176,7 @@ async function analysis(opts = {}) {
       cleanupWorktree(baseCheckout, repoRoot),
       cleanupWorktree(headCheckout, repoRoot),
     ]);
+    core.info('[debug] Limpieza de worktrees');
     core.info(`cleanup done in ${stop()}`);
 
     // Action outputs: expose resolved SHAs.
@@ -180,8 +185,9 @@ async function analysis(opts = {}) {
     core.setOutput('base_sha', baseSha);
     core.setOutput('head_sha', headSha);
     core.info(`outputs: base_sha=${baseSha}, head_sha=${headSha}`);
+    core.info('[debug] Salida del análisis');
   } catch (err) {
-    // Failure path marks action failed and ends grouping.
+    core.error('[debug] Error atrapado en analysis: ' + (err?.stack || err));
     core.setFailed(`[analysis] failed: ${err?.message || err}`);
   } finally {
     core.endGroup();
