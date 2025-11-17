@@ -19,9 +19,8 @@ const { scanSbomWithGrype } = require('./grype');
 const { makeMeta, writeMeta } = require('./meta');
 const { extractPomDependencies } = require('./pom');
 
-// Main driver: validates platform, resolves refs, prepares isolated checkouts,
-// builds SBOMs, runs Grype, writes meta, cleans up, and sets action outputs.
-async function analysis() {
+// Main driver: now acepta overrides opcionales en opts { base_ref, head_ref, path }
+async function analysis(opts = {}) {
   // Helper: returns a closure reporting elapsed milliseconds.
   const time = () => {
     const start = Date.now();
@@ -36,10 +35,10 @@ async function analysis() {
 
   core.startGroup('[analysis] Inputs');
   try {
-    // Read required action inputs (base/head refs and optional subdirectory).
-    const base_ref = core.getInput('base_ref', { required: true });
-    const head_ref = core.getInput('head_ref', { required: true });
-    const subPath = core.getInput('path') || '.';
+    // Read required action inputs (base/head refs and optional subdirectory) con overrides.
+    const base_ref = opts.base_ref || core.getInput('base_ref', { required: true });
+    const head_ref = opts.head_ref || core.getInput('head_ref', { required: true });
+    const subPath = (opts.path !== undefined ? opts.path : (core.getInput('path') || '.'));
 
     core.info(`base_ref: ${base_ref}`);
     core.info(`head_ref: ${head_ref}`);

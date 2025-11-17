@@ -210,6 +210,37 @@ La sección POM se deriva exclusivamente de dependencias directas declaradas (tr
 
 ---
 
+## 🛠 Troubleshooting
+
+### Error: `Normalization failed: [normalization] dist not ready: missing dist/meta.json`
+
+Esto ocurre cuando intentas ejecutar la fase de normalización (Phase 2) sin haber generado primero los artefactos de la fase de análisis (Phase 1), que incluye `dist/meta.json`.
+
+Desde esta versión, el orquestador de normalización intenta automáticamente un **fallback** ejecutando `analysis()` si detecta que `dist/meta.json` no existe:
+- Si el fallback logra crear `meta.json`, la normalización continúa normalmente.
+- Si falla (por ejemplo refs inválidas, repos incompletos, herramientas ausentes), se mostrará un mensaje que incluye la causa original más el motivo del fallo del fallback.
+
+#### Causas comunes
+- `actions/checkout` con `fetch-depth: 1` sin traer la ref base completa (asegúrate de `fetch-depth: 0`).
+- Refs (`base_ref` / `head_ref`) mal escritos o inexistentes.
+- Ejecución manual local sin exportar las variables de entrada (`INPUT_BASE_REF`, `INPUT_HEAD_REF`).
+
+#### Validación local rápida
+```bash
+# En tu repo clonado
+export INPUT_BASE_REF="$(git rev-parse HEAD)"
+export INPUT_HEAD_REF="$(git rev-parse HEAD)"
+export INPUT_PATH=.
+rm -rf dist
+node -e "require('./src/normalization/normalization').normalization().then(()=>console.log('OK')).catch(e=>console.error(e))"
+ls -1 dist | grep -E 'meta.json|base.json|head.json|diff.json'
+```
+Deberías ver `meta.json`, `base.json`, `head.json`, `diff.json`.
+
+Si quieres desactivar el fallback automático (por ejemplo para forzar que Phase 1 se ejecute antes en otra etapa), puedes llamar a `normalization({ skipPhase1Fallback: true })` desde código propio. (No expuesto como input del Action todavía.)
+
+---
+
 ## 📄 License
 
 Apache-2.0

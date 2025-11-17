@@ -9,7 +9,7 @@ const { buildDiff } = require('./diff');
 const { writeJSON } = require('./utils');
 
 // Phase 2 orchestrator:
-// 1. Validates Phase 1 output presence.
+// 1. Validates Phase 1 output presence (meta.json). Falls back to Phase 1 if missing.
 // 2. Reads meta, git, sbom, and grype data for base/head.
 // 3. Indexes SBOM components for each side.
 // 4. Normalizes vulnerabilities per side into occurrence documents.
@@ -19,14 +19,42 @@ const { writeJSON } = require('./utils');
 async function normalization(options = {}) {
   const distDir = options.distDir || './dist';
   const absDist = path.resolve(distDir);
+  const skipPhase1Fallback = options.skipPhase1Fallback === true; // allow explicit disable
 
   core.info(`[vuln-diff][normalization] dist directory: ${absDist}`);
 
-  // Ensure meta.json exists (Phase 1 completion check).
+  const metaPath = path.join(absDist, 'meta.json');
+  let metaExists = false;
   try {
-    await fs.access(path.join(absDist, 'meta.json'));
+    await fs.access(metaPath);
+    metaExists = true;
   } catch {
-    throw new Error(`[normalization] dist not ready: missing ${path.join(absDist, 'meta.json')}. Was Phase 1 executed?`);
+    metaExists = false;
+  }
+
+  if (!metaExists) {
+    if (skipPhase1Fallback) {
+      throw new Error(`[normalization] dist not ready: missing ${metaPath}. Was Phase 1 executed?`);
+    }
+    core.warning(`[vuln-diff][normalization] meta.json missing. Attempting Phase 1 analysis fallback…`);
+    try {
+      const { analysis } = require('../analysis/analysis');
+      if (typeof analysis === 'function') {
+        await analysis();
+        // re-check
+        try {
+          await fs.access(metaPath);
+          metaExists = true;
+          core.info('[vuln-diff][normalization] Phase 1 fallback succeeded; meta.json present now.');
+        } catch {
+          throw new Error(`[normalization] dist not ready after fallback: missing ${metaPath}.`);
+        }
+      } else {
+        throw new Error('[normalization] analysis() not available for fallback.');
+      }
+    } catch (e) {
+      throw new Error(`[normalization] dist not ready: missing ${metaPath}. Phase 1 fallback failed: ${e?.message || e}`);
+    }
   }
 
   // Read Phase 1 outputs.
