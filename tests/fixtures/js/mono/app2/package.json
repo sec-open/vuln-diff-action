@@ -1,0 +1,11 @@
+{
+  "name": "app2",
+  "version": "2.0.0",
+  "dependencies": {
+    "react": "18.2.0"
+  },
+  "devDependencies": {
+    "typescript": "5.4.0"
+  }
+}
+

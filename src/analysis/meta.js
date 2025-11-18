@@ -19,6 +19,9 @@ function makeMeta({ inputs, repo, tools, paths }) {
       syft: tools.versions.syft || null,
       grype: tools.versions.grype || null,
       node: tools.versions.node || null,
+      npm: tools.versions.npm || null, // JS SUPPORT START
+      yarn: tools.versions.yarn || null,
+      pnpm: tools.versions.pnpm || null, // JS SUPPORT END
     },
     environment: {
       runner_os: os.platform(),

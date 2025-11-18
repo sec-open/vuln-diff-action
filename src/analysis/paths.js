@@ -32,6 +32,10 @@ function layout() {
       base: path.join(root, 'pom', 'base-deps.json'),
       head: path.join(root, 'pom', 'head-deps.json'),
     },
+    js: {
+      base: path.join(root, 'js', 'base-deps.json'),
+      head: path.join(root, 'js', 'head-deps.json'),
+    },
   };
 }
 

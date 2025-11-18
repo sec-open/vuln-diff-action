@@ -26,6 +26,10 @@ inputs:
     description: 'Optional logo URL (absolute or relative within the bundle) for the HTML header'
     required: false
     default: ''
+  include_dev_dependencies:
+    description: 'Include devDependencies from package.json when analyzing JavaScript projects'
+    required: false
+    default: 'false'
 
 outputs:
   base_sha:

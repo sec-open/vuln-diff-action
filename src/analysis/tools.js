@@ -167,11 +167,18 @@ async function detectTools() {
   const syftPath  = await ensureSyft(toolsDir);
   const grypePath = await ensureGrype(toolsDir);
 
+  async function tryVersion(bin, args = ['--version']) {
+    try { const { stdout } = await execCmd(bin, args); return stdout.trim().split('\n')[0]; } catch { return null; }
+  }
+
   const versions = {
     node: process.version,
     cyclonedx_maven: await tryGetMavenVersion(mvnPath),
     syft: syftPath ? await tryGetJsonVersion(syftPath, ['version', '-o', 'json']) : null,
     grype: grypePath ? await tryGetJsonVersion(grypePath, ['version', '-o', 'json']) : null,
+    npm: await tryVersion('npm'), // JS SUPPORT START
+    yarn: await tryVersion('yarn'),
+    pnpm: await tryVersion('pnpm'), // JS SUPPORT END
   };
 
   return {

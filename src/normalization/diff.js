@@ -34,9 +34,41 @@ function computePomDependencyDiff(pomBaseDeps = [], pomHeadDeps = []) {
   return { totals: { NEW, REMOVED, UPDATED, UNCHANGED }, items };
 }
 
+function computeJsDependencyDiff(jsBaseDeps = [], jsHeadDeps = []) { // JS SUPPORT START
+  const baseMap = new Map();
+  const headMap = new Map();
+  for (const d of jsBaseDeps || []) {
+    if (!d.name) continue;
+    const key = `${d.packagePath}::${d.name}::${d.type}`;
+    baseMap.set(key, d.version || '');
+  }
+  for (const d of jsHeadDeps || []) {
+    if (!d.name) continue;
+    const key = `${d.packagePath}::${d.name}::${d.type}`;
+    headMap.set(key, d.version || '');
+  }
+  const allKeys = new Set([...baseMap.keys(), ...headMap.keys()]);
+  const items = [];
+  let NEW = 0, REMOVED = 0, UPDATED = 0, UNCHANGED = 0;
+  for (const key of [...allKeys].sort()) {
+    const [packagePath, name, type] = key.split('::');
+    const bVer = baseMap.get(key);
+    const hVer = headMap.get(key);
+    let state; let baseVersion = bVer || null; let headVersion = hVer || null;
+    if (bVer && hVer) {
+      if (bVer === hVer) { state = 'UNCHANGED'; UNCHANGED++; }
+      else { state = 'UPDATED'; UPDATED++; }
+    } else if (bVer && !hVer) { state = 'REMOVED'; REMOVED++; }
+    else if (!bVer && hVer) { state = 'NEW'; NEW++; }
+    else continue;
+    items.push({ packagePath, name, type, baseVersion, headVersion, state });
+  }
+  return { totals: { NEW, REMOVED, UPDATED, UNCHANGED }, items };
+} // JS SUPPORT END
+
 function mapByKey(arr) { const m = new Map(); for (const v of arr || []) m.set(v.match_key, v); return m; }
 
-function buildDiff(baseDoc, headDoc, meta, { pomBaseDeps = [], pomHeadDeps = [] } = {}) {
+function buildDiff(baseDoc, headDoc, meta, { pomBaseDeps = [], pomHeadDeps = [], jsBaseDeps = [], jsHeadDeps = [] } = {}) {
   const B = mapByKey(baseDoc?.vulnerabilities || []);
   const H = mapByKey(headDoc?.vulnerabilities || []);
   const items = []; const seen = new Set();
@@ -55,6 +87,7 @@ function buildDiff(baseDoc, headDoc, meta, { pomBaseDeps = [], pomHeadDeps = [] 
   }
   const summary = buildDiffSummary(items);
   const dependency_pom_diff = computePomDependencyDiff(pomBaseDeps, pomHeadDeps);
+  const dependency_js_diff = computeJsDependencyDiff(jsBaseDeps, jsHeadDeps); // JS SUPPORT
   return {
     schema_version: '2.0.0',
     generated_at: new Date().toISOString(),
@@ -65,8 +98,9 @@ function buildDiff(baseDoc, headDoc, meta, { pomBaseDeps = [], pomHeadDeps = [] 
     head: headDoc?.git || null,
     summary,
     dependency_pom_diff,
+    dependency_js_diff, // JS SUPPORT
     items,
   };
 }
 
-module.exports = { buildDiff, computePomDependencyDiff };
+module.exports = { buildDiff, computePomDependencyDiff, computeJsDependencyDiff };

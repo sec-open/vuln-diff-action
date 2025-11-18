@@ -129,6 +129,7 @@ It generates an **SBOM (CycloneDX JSON)** for each ref, scans them with Grype, a
 | `github_token`       | ❌       | –                               | Token for PR comment (`secrets.GITHUB_TOKEN`). |
 | `slack_webhook_url`  | ❌       | –                               | Slack Incoming Webhook URL (store it as a secret, e.g., `SLACK_SECURITY_WEBHOOK_URL`). |
 | `slack_channel`      | ❌       | –                               | Optional channel override (e.g., `#security-alerts`). Many webhooks **ignore** overrides and always post to their configured channel. |
+| `include_dev_dependencies` | ❌   | `false`                         | Incluir `devDependencies` de los `package.json` en el análisis de dependencias JS. |
 
 ---
 
@@ -161,6 +162,32 @@ It generates an **SBOM (CycloneDX JSON)** for each ref, scans them with Grype, a
 
 ---
 
+## 🔧 Soporte de lenguajes
+
+Actualmente soporta Java (Maven) y JavaScript (npm/yarn/pnpm):
+- Java: genera SBOM agregada con CycloneDX Maven plugin si hay `pom.xml` en el directorio analizado; si falla usa Syft.
+- JavaScript: siempre usa Syft para el SBOM (escaneo del árbol), y adicionalmente extrae dependencias declaradas en cada `package.json` (monorepo compatible). Las devDependencies se incluyen sólo si `include_dev_dependencies: true`.
+
+Artefactos adicionales:
+- `dist/pom/base-deps.json` & `dist/pom/head-deps.json` para dependencias Maven explícitas.
+- `dist/js/base-deps.json` & `dist/js/head-deps.json` para dependencias JavaScript explícitas.
+- En `dist/diff.json` encontrarás `dependency_pom_diff` y `dependency_js_diff` con el mismo esquema de estados (NEW, REMOVED, UPDATED, UNCHANGED).
+
+### Nuevo input
+| Name | Required | Default | Description |
+|------|:--------:|---------|-------------|
+| `include_dev_dependencies` | ❌ | `false` | Incluir `devDependencies` de los `package.json` en el análisis de dependencias JS. |
+
+Ejemplo activando dev deps:
+```yaml
+with:
+  base_ref: origin/main
+  head_ref: feature/js-upgrade
+  include_dev_dependencies: 'true'
+```
+
+---
+
 ## 📄 Diff JSON Structure (v2.0.0)
 
 El archivo `dist/diff.json` incluye ahora una sección adicional para dependencias declaradas explícitamente en `pom.xml`:
@@ -186,6 +213,17 @@ Reglas de estado:
 - `UNCHANGED`: versión idéntica en ambos refs (no se muestra en tablas resumen HTML/PDF/Markdown).
 
 La sección POM se deriva exclusivamente de dependencias directas declaradas (tras resolver `${property}`), sin inferir transitivas.
+
+Adicional para JavaScript:
+```jsonc
+"dependency_js_diff": {
+  "totals": { "NEW": 1, "REMOVED": 0, "UPDATED": 2, "UNCHANGED": 5 },
+  "items": [
+    { "packagePath": "apps/api", "name": "express", "type": "prod", "baseVersion": "4.18.1", "headVersion": "4.19.0", "state": "UPDATED" },
+    { "packagePath": "apps/web", "name": "react", "type": "prod", "headVersion": "19.0.0", "state": "NEW" }
+  ]
+}
+```
 
 ---
 
@@ -238,6 +276,83 @@ ls -1 dist | grep -E 'meta.json|base.json|head.json|diff.json'
 Deberías ver `meta.json`, `base.json`, `head.json`, `diff.json`.
 
 Si quieres desactivar el fallback automático (por ejemplo para forzar que Phase 1 se ejecute antes en otra etapa), puedes llamar a `normalization({ skipPhase1Fallback: true })` desde código propio. (No expuesto como input del Action todavía.)
+
+---
+
+## 📘 Ejemplo (Workflow manual para proyecto JavaScript)
+
+Este workflow permite lanzar manualmente la comparación de vulnerabilidades entre dos refs en un proyecto JavaScript (monorepo compatible). Copia y adapta en `.github/workflows/vuln-diff-js.yml`:
+
+```yaml
+name: Vulnerability Diff (JavaScript Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "Base ref (branch/tag/SHA) e.g. main"
+        required: true
+        default: "main"
+      head_ref:
+        description: "Head ref (branch/tag/SHA) e.g. feature/my-change"
+        required: true
+        default: "feature/my-change"
+      include_dev_dependencies:
+        description: "Include devDependencies from package.json? (true/false)"
+        required: true
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  vuln-diff-js:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout head ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.head_ref }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Ensure base ref is fetched
+        run: |
+          git fetch origin ${{ inputs.base_ref }}:refs/remotes/origin/${{ inputs.base_ref }} --tags --prune || echo "Base ref might be a SHA already present"
+
+      - name: Vulnerability Diff (JavaScript)
+        uses: sec-open/vuln-diff-action@v1
+        with:
+          base_ref: ${{ inputs.base_ref }}
+          head_ref: ${{ inputs.head_ref }}
+          path: .
+          min_severity: "LOW"
+          write_summary: "true"
+          upload_artifact: "true"
+          report_pdf: "false"
+          include_dev_dependencies: ${{ inputs.include_dev_dependencies }}
+          # github_token: ${{ secrets.GITHUB_TOKEN }}
+          # slack_webhook_url: ${{ secrets.SLACK_SECURITY_WEBHOOK_URL }}
+
+      - name: Show diff.json (debug)
+        if: always()
+        run: |
+          echo "--- diff.json snippet ---"
+          sed -n '1,200p' dist/diff.json || echo "diff.json not found"
+
+      - name: List dependency artifacts
+        if: always()
+        run: |
+          echo "JS dependencies (base/head):"
+          ls -1 dist/js || true
+          echo "POM dependencies (if Java present):"
+          ls -1 dist/pom || true
+```
+
+Notas:
+- `include_dev_dependencies` controla si se incluyen devDependencies.
+- Para proyectos mixtos Java + JS se generarán ambos diffs (`dependency_pom_diff` y `dependency_js_diff`).
+- Ajusta `report_pdf` a `true` si quieres el informe PDF.
 
 ---
 

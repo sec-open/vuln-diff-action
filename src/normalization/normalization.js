@@ -91,7 +91,9 @@ async function normalization(options = {}) {
   const headComponents = extractComponentInventory(sbom.head);
   const basePomDeps = ctx.pom?.base?.dependencies || [];
   const headPomDeps = ctx.pom?.head?.dependencies || [];
-  const diffDoc = buildDiff(baseDoc, headDoc, meta, { pomBaseDeps: basePomDeps, pomHeadDeps: headPomDeps });
+  const baseJsDeps = ctx.js?.base?.dependencies || []; // JS SUPPORT
+  const headJsDeps = ctx.js?.head?.dependencies || []; // JS SUPPORT
+  const diffDoc = buildDiff(baseDoc, headDoc, meta, { pomBaseDeps: basePomDeps, pomHeadDeps: headPomDeps, jsBaseDeps: baseJsDeps, jsHeadDeps: headJsDeps });
   const diffOut = path.join(distDir, 'diff.json');
   await writeJSON(diffOut, diffDoc);
   core.info(

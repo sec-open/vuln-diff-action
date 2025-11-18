@@ -18,6 +18,7 @@ const { generateSbom } = require('./sbom');
 const { scanSbomWithGrype } = require('./grype');
 const { makeMeta, writeMeta } = require('./meta');
 const { extractPomDependencies } = require('./pom');
+const { extractJsDependencies } = require('./js'); // JS SUPPORT
 
 // Main driver: validates platform, resolves refs, prepares isolated checkouts,
 // builds SBOMs, runs Grype, writes meta, cleans up, and sets action outputs.
@@ -167,6 +168,20 @@ async function analysis() {
     await writeJson(l.pom.head, { dependencies: headPomDeps });
     core.info(`wrote pom deps -> ${l.pom.base} / ${l.pom.head}`);
     core.info(`POM dependencies extraction done in ${stop()}`);
+
+    // JS dependency extraction (package.json) // JS SUPPORT START
+    core.endGroup();
+    core.startGroup('[analysis] JS dependencies extraction');
+    stop = time();
+    const includeDev = (core.getInput('include_dev_dependencies') || 'false').toLowerCase() === 'true';
+    const baseJsDeps = await extractJsDependencies(baseWorkdir, { includeDev });
+    const headJsDeps = await extractJsDependencies(headWorkdir, { includeDev });
+    await ensureDir(path.dirname(l.js.base));
+    await ensureDir(path.dirname(l.js.head));
+    await writeJson(l.js.base, { dependencies: baseJsDeps });
+    await writeJson(l.js.head, { dependencies: headJsDeps });
+    core.info(`wrote js deps -> ${l.js.base} / ${l.js.head}`);
+    core.info(`JS dependencies extraction done in ${stop()}`); // JS SUPPORT END
 
     // Cleanup worktrees (non-fatal if fails).
     core.endGroup();
