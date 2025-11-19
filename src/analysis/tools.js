@@ -159,27 +159,48 @@ async function tryGetMavenVersion(mvnPath) {
   catch { return null; }
 }
 
+// Ensures node & npm are available; attempts APT install if missing.
+async function ensureNode() {
+  let nodeBin = await which('node');
+  let npmBin  = await which('npm');
+  if (nodeBin && npmBin) return { nodeBin, npmBin };
+  if (isLinux() && await aptExists()) {
+    try {
+      await runApt('apt-get update -y');
+      await runApt('apt-get install -y nodejs npm');
+      nodeBin = await which('node');
+      npmBin  = await which('npm');
+    } catch (e) {
+      throw new Error(`Node/npm install failed: ${e.stderr || e.message}`);
+    }
+  }
+  if (!nodeBin || !npmBin) {
+    throw new Error('Node/npm not found and automatic installation failed. Configure setup-node action.');
+  }
+  return { nodeBin, npmBin };
+}
+
 // Detects/installs required tools and returns their paths and versions.
 async function detectTools() {
   const toolsDir = path.resolve(process.cwd(), '.tools');
+
+  // NEW: ensure node/npm first
+  const { nodeBin, npmBin } = await ensureNode();
 
   const mvnPath   = await ensureMaven();
   const syftPath  = await ensureSyft(toolsDir);
   const grypePath = await ensureGrype(toolsDir);
 
   // Detect npm (para reportar versión aunque no lo instalemos)
-  const npmPath = await which('npm');
-
   const versions = {
     node: process.version,
-    npm: npmPath ? (await execCmd(npmPath, ['-v']).then(r => r.stdout.trim()).catch(() => null)) : null,
+    npm: npmBin ? (await execCmd(npmBin, ['-v']).then(r => r.stdout.trim()).catch(() => null)) : null,
     cyclonedx_maven: await tryGetMavenVersion(mvnPath),
     syft: syftPath ? await tryGetJsonVersion(syftPath, ['version', '-o', 'json']) : null,
     grype: grypePath ? await tryGetJsonVersion(grypePath, ['version', '-o', 'json']) : null,
   };
-
   return {
-    paths: { syft: syftPath, grype: grypePath, mvn: mvnPath, npm: npmPath },
+    paths: { syft: syftPath, grype: grypePath, mvn: mvnPath, npm: npmBin, node: nodeBin },
     versions
   };
 }

@@ -48,6 +48,7 @@ async function generateSbomWithSyft(cwd, syftPath) {
 
 // Uses npx @cyclonedx/cyclonedx-npm to generate SBOM if package.json is present
 async function generateSbomWithNpm(cwd, opts = {}) {
+  await ensureNodeDependencies(cwd, !!opts.includeDevDependencies);
   const outPath = require('path').join(cwd, 'sbom.npm.json');
   const baseArgs = [
     '@cyclonedx/cyclonedx-npm',
@@ -115,6 +116,32 @@ async function generateSbom(opts) {
   // Fallback to Syft
   if (!tools.paths.syft) throw new Error('Syft not available and Maven/NPM SBOM generation failed or not applicable.');
   return await generateSbomWithSyft(checkoutDir, tools.paths.syft);
+}
+
+// NEW: asegura que las dependencias de node estén instaladas (npm install) antes de generar el SBOM
+async function ensureNodeDependencies(cwd, includeDev) {
+  if (!await hasPackageJson(cwd)) return;
+  if (process.env.VULN_DIFF_SKIP_NPM_INSTALL === 'true') return;
+
+  const lockExists = fs.existsSync(path.join(cwd, 'package-lock.json'));
+  const modulesDir = path.join(cwd, 'node_modules');
+  const needInstall = process.env.VULN_DIFF_FORCE_NPM_INSTALL === 'true' || !fs.existsSync(modulesDir);
+
+  if (!needInstall && lockExists) return; // ya instaladas
+
+  const baseArgs = lockExists ? ['ci'] : ['install'];
+  if (!includeDev) {
+    // npm v7+ soporta --omit=dev para excluir devDependencies
+    baseArgs.push('--omit=dev');
+  }
+  // evitar auditorías y fondos para rapidez
+  baseArgs.push('--no-audit', '--no-fund');
+  try {
+    await execCmd('npm', baseArgs, { cwd });
+  } catch (e) {
+    // si falla pero existe node_modules lo toleramos
+    if (!fs.existsSync(modulesDir)) throw new Error(`npm install failed: ${e.stderr || e.message}`);
+  }
 }
 
 module.exports = { generateSbom };
