@@ -2,6 +2,7 @@
 const path = require('path');
 const { execCmd } = require('./exec');
 const { ensureDir } = require('./fsx');
+const fs = require('fs');
 
 // Fetches all remote refs and tags (prunes stale references).
 async function gitFetchAll(cwd) {
@@ -65,7 +66,12 @@ async function commitInfo(sha, cwd) {
 // Creates a detached worktree at the specified SHA (read-only operations).
 async function prepareIsolatedCheckout(sha, targetDir, repoRoot) {
   await ensureDir(path.dirname(targetDir));
-  // Use a detached worktree at the specific commit, read-only operations
+  if (fs.existsSync(targetDir)) {
+    // intentar remover worktree previo si existe
+    try { await execCmd('git', ['worktree', 'remove', targetDir, '--force'], { cwd: repoRoot }); } catch { /* ignore */ }
+    // eliminar restos del directorio
+    try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
   await execCmd('git', ['worktree', 'add', '--detach', targetDir, sha], { cwd: repoRoot });
   return targetDir;
 }

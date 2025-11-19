@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { execCmd } = require('./exec');
 const { writeFile } = require('./fsx');
+const { layout } = require('./paths');
 
 // Detects presence of a Maven reactor (pom.xml at root); returns boolean.
 async function hasMavenReactor(cwd, mvnPath) {
@@ -65,63 +66,59 @@ async function ensureNodeDependencies(cwd, includeDev) {
 
 // Usa CycloneDX-NPM de forma estricta; si falla ambos intentos, aborta
 async function generateSbomWithNpm(cwd, opts = {}) {
-  // Strict NPM SBOM: two attempts, both must succeed producing file
   await ensureNodeDependencies(cwd, !!opts.includeDevDependencies);
-  const outPath = path.join(cwd, 'sbom.npm.json');
+  const outPathQuick = path.join(cwd, 'sbom.npm.quick.json');
+  const outPathFull = path.join(cwd, 'sbom.npm.json');
   const baseArgs = [
     '@cyclonedx/cyclonedx-npm',
     '--ignore-npm-errors',
-    '--output-format', 'JSON',
-    '--output-file', outPath
+    '--output-format', 'JSON'
   ];
-  if (opts.includeDevDependencies) baseArgs.push('--include-dev-dependencies');
-  let firstErr = null;
+  // intento rápido opcional
   try {
-    await execCmd('npx', [...baseArgs, '--package-lock-only'], { cwd });
-    if (!fs.existsSync(outPath)) throw new Error('CycloneDX-NPM did not produce file after --package-lock-only attempt.');
-    return outPath;
-  } catch (e) {
-    firstErr = e;
-  }
-  await execCmd('npx', baseArgs, { cwd }).catch(e2 => {
-    throw new Error(
-      `Strict NPM SBOM failed.\nAttempt 1 (--package-lock-only):\n${firstErr.stderr || firstErr.message}\n\nAttempt 2 (full):\n${e2.stderr || e2.message}`
-    );
+    await execCmd('npx', [...baseArgs, '--output-file', outPathQuick, '--package-lock-only'], { cwd });
+  } catch { /* ignore */ }
+  // intento completo obligatorio
+  await execCmd('npx', [...baseArgs, '--output-file', outPathFull], { cwd }).catch(e2 => {
+    throw new Error(`Strict NPM SBOM full attempt failed:\n${e2.stderr || e2.message}`);
   });
-  if (!fs.existsSync(outPath)) {
-    throw new Error('CycloneDX-NPM did not produce file after full attempt.');
+  if (!fs.existsSync(outPathFull)) {
+    throw new Error('CycloneDX-NPM did not produce SBOM file (full attempt).');
   }
-  return outPath;
+  return outPathFull;
+}
+
+function resolveSideTarget(dist, side) {
+  if (side === 'base') return dist.sbom.base;
+  if (side === 'head') return dist.sbom.head;
+  // heurística: si no existe base aún, usar base; si existe usar head
+  return fs.existsSync(dist.sbom.base) ? dist.sbom.head : dist.sbom.base;
 }
 
 // Orquestación estricta
 async function generateSbom(opts) {
-  // Orchestrates strict SBOM selection based on presence of package.json or pom.xml
-  const { checkoutDir, tools } = opts;
+  const { checkoutDir, tools, side } = opts;
   const hasPackage = await hasPackageJson(checkoutDir);
   const hasPom = await hasPomXml(checkoutDir);
-  const includeDev = hasPackage
-    ? true // include dev dependencies for JS projects by default
-    : !!(opts.includeDevDependencies || process.env.VULN_DIFF_INCLUDE_DEV_DEPS === 'true');
-
-  // JavaScript strict (preferred if package.json present)
+  const includeDev = hasPackage ? true : !!(opts.includeDevDependencies || process.env.VULN_DIFF_INCLUDE_DEV_DEPS === 'true');
+  let sbomPath;
   if (hasPackage) {
-    return await generateSbomWithNpm(checkoutDir, { includeDevDependencies: includeDev });
+    sbomPath = await generateSbomWithNpm(checkoutDir, { includeDevDependencies: includeDev });
+  } else if (!hasPackage && hasPom) {
+    if (!tools.paths.mvn) throw new Error('Java project requires Maven (mvn) for SBOM generation, not available.');
+    sbomPath = await generateSbomWithMaven(checkoutDir);
+  } else {
+    if (!tools.paths.syft) throw new Error('Syft required for projects without package.json or pom.xml.');
+    sbomPath = await generateSbomWithSyft(checkoutDir, tools.paths.syft);
   }
-
-  // Java strict (only when no package.json and pom.xml present)
-  if (!hasPackage && hasPom) {
-    if (!tools.paths.mvn) {
-      throw new Error('Java project requires Maven (mvn) for SBOM generation, not available.');
-    }
-    return await generateSbomWithMaven(checkoutDir);
+  const dist = layout();
+  const target = resolveSideTarget(dist, side);
+  try {
+    await writeFile(target, fs.readFileSync(sbomPath));
+    return target;
+  } catch (e) {
+    throw new Error(`Failed to persist SBOM into dist: ${e.message}`);
   }
-
-  // Generic fallback (no package.json, no pom.xml)
-  if (!tools.paths.syft) {
-    throw new Error('Syft required for projects without package.json or pom.xml.');
-  }
-  return await generateSbomWithSyft(checkoutDir, tools.paths.syft);
 }
 
 module.exports = { generateSbom };

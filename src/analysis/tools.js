@@ -199,10 +199,18 @@ async function detectTools() {
     }
   }
 
+  let cyclonedxNpmVersion = null;
+  if (npmBin) {
+    try {
+      const { stdout } = await execCmd('npx', ['@cyclonedx/cyclonedx-npm', '--version']);
+      cyclonedxNpmVersion = stdout.trim() || null;
+    } catch { cyclonedxNpmVersion = null; }
+  }
   const versions = {
     node: process.version,
     npm: npmBin ? (await execCmd(npmBin, ['-v']).then(r => r.stdout.trim()).catch(() => null)) : null,
     cyclonedx_maven: await tryGetMavenVersion(mvnPath),
+    cyclonedx_npm: cyclonedxNpmVersion,
     syft: syftPath ? await tryGetJsonVersion(syftPath, ['version', '-o', 'json']) : null,
     grype: grypePath ? await tryGetJsonVersion(grypePath, ['version', '-o', 'json']) : null,
   };
