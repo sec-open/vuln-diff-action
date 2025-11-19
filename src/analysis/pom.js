@@ -81,4 +81,3 @@ async function extractPomDependencies(rootDir) {
 }
 
 module.exports = { extractPomDependencies };
-

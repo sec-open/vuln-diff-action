@@ -36,7 +36,7 @@ async function analysis() {
 
   core.startGroup('[analysis] Inputs');
   try {
-    core.info('[debug] Inicio de análisis');
+    core.info('[debug] Analysis start');
     // Read required action inputs (base/head refs and optional subdirectory).
     const base_ref = core.getInput('base_ref', { required: true });
     const head_ref = core.getInput('head_ref', { required: true });
@@ -108,15 +108,11 @@ async function analysis() {
     stop = time();
     await ensureDir(path.dirname(l.sbom.base));
     await ensureDir(path.dirname(l.sbom.head));
-
-    const baseSbomPathLocal = await generateSbom({ checkoutDir: baseWorkdir, tools });
-    const headSbomPathLocal = await generateSbom({ checkoutDir: headWorkdir, tools });
-
-    // Copy generated SBOMs into canonical dist locations.
-    const fs = require('fs/promises');
-    await fs.copyFile(baseSbomPathLocal, l.sbom.base);
-    await fs.copyFile(headSbomPathLocal, l.sbom.head);
-
+    const baseSbomPathLocal = await generateSbom({ checkoutDir: baseWorkdir, tools, side: 'base' });
+    const headSbomPathLocal = await generateSbom({ checkoutDir: headWorkdir, tools, side: 'head' });
+    const fsProm = require('fs/promises');
+    if (baseSbomPathLocal !== l.sbom.base) await fsProm.copyFile(baseSbomPathLocal, l.sbom.base);
+    if (headSbomPathLocal !== l.sbom.head) await fsProm.copyFile(headSbomPathLocal, l.sbom.head);
     core.info(`wrote SBOMs -> ${l.sbom.base} / ${l.sbom.head}`);
     core.info(`SBOM generation done in ${stop()}`);
 
@@ -176,7 +172,7 @@ async function analysis() {
       cleanupWorktree(baseCheckout, repoRoot),
       cleanupWorktree(headCheckout, repoRoot),
     ]);
-    core.info('[debug] Limpieza de worktrees');
+    core.info('[debug] Worktrees cleanup');
     core.info(`cleanup done in ${stop()}`);
 
     // Action outputs: expose resolved SHAs.
@@ -185,9 +181,9 @@ async function analysis() {
     core.setOutput('base_sha', baseSha);
     core.setOutput('head_sha', headSha);
     core.info(`outputs: base_sha=${baseSha}, head_sha=${headSha}`);
-    core.info('[debug] Salida del análisis');
+    core.info('[debug] Analysis finished');
   } catch (err) {
-    core.error('[debug] Error atrapado en analysis: ' + (err?.stack || err));
+    core.error('[debug] Error caught in analysis: ' + (err?.stack || err));
     core.setFailed(`[analysis] failed: ${err?.message || err}`);
   } finally {
     core.endGroup();

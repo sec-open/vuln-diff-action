@@ -66,6 +66,7 @@ async function ensureNodeDependencies(cwd, includeDev) {
 
 // Usa CycloneDX-NPM de forma estricta; si falla ambos intentos, aborta
 async function generateSbomWithNpm(cwd, opts = {}) {
+  // Strict NPM SBOM: quick optional attempt then required full attempt
   await ensureNodeDependencies(cwd, !!opts.includeDevDependencies);
   const outPathQuick = path.join(cwd, 'sbom.npm.quick.json');
   const outPathFull = path.join(cwd, 'sbom.npm.json');
@@ -74,11 +75,11 @@ async function generateSbomWithNpm(cwd, opts = {}) {
     '--ignore-npm-errors',
     '--output-format', 'JSON'
   ];
-  // intento rápido opcional
+  // optional quick attempt
   try {
     await execCmd('npx', [...baseArgs, '--output-file', outPathQuick, '--package-lock-only'], { cwd });
   } catch { /* ignore */ }
-  // intento completo obligatorio
+  // required full attempt
   await execCmd('npx', [...baseArgs, '--output-file', outPathFull], { cwd }).catch(e2 => {
     throw new Error(`Strict NPM SBOM full attempt failed:\n${e2.stderr || e2.message}`);
   });
@@ -91,7 +92,7 @@ async function generateSbomWithNpm(cwd, opts = {}) {
 function resolveSideTarget(dist, side) {
   if (side === 'base') return dist.sbom.base;
   if (side === 'head') return dist.sbom.head;
-  // heurística: si no existe base aún, usar base; si existe usar head
+  // heuristic: if base not present yet use base else head
   return fs.existsSync(dist.sbom.base) ? dist.sbom.head : dist.sbom.base;
 }
 

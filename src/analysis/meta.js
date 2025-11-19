@@ -16,6 +16,7 @@ function makeMeta({ inputs, repo, tools, paths }) {
     repo,
     tools: {
       cyclonedx_maven: tools.versions.cyclonedx_maven || null,
+      cyclonedx_npm: tools.versions.cyclonedx_npm || null,
       syft: tools.versions.syft || null,
       grype: tools.versions.grype || null,
       node: tools.versions.node || null,

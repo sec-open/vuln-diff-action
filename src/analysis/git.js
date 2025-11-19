@@ -67,10 +67,13 @@ async function commitInfo(sha, cwd) {
 async function prepareIsolatedCheckout(sha, targetDir, repoRoot) {
   await ensureDir(path.dirname(targetDir));
   if (fs.existsSync(targetDir)) {
-    // intentar remover worktree previo si existe
+    // Attempt to remove prior worktree if registered
     try { await execCmd('git', ['worktree', 'remove', targetDir, '--force'], { cwd: repoRoot }); } catch { /* ignore */ }
-    // eliminar restos del directorio
-    try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    // Force delete directory if still present
+    for (let i = 0; i < 3 && fs.existsSync(targetDir); i++) {
+      try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+    if (fs.existsSync(targetDir)) throw new Error(`Cannot reuse worktree path (still exists): ${targetDir}`);
   }
   await execCmd('git', ['worktree', 'add', '--detach', targetDir, sha], { cwd: repoRoot });
   return targetDir;
