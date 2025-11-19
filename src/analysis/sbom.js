@@ -46,102 +46,76 @@ async function generateSbomWithSyft(cwd, syftPath) {
   return outPath;
 }
 
-// Uses npx @cyclonedx/cyclonedx-npm to generate SBOM if package.json is present
+// NEW estricto: instalación dependencias; cualquier fallo aborta
+async function ensureNodeDependencies(cwd, includeDev) {
+  if (!await hasPackageJson(cwd)) return;
+  if (process.env.VULN_DIFF_SKIP_NPM_INSTALL === 'true') {
+    throw new Error('VULN_DIFF_SKIP_NPM_INSTALL=true impide instalar dependencias necesarias para SBOM NPM estricto.');
+  }
+  const lockExists = fs.existsSync(path.join(cwd, 'package-lock.json'));
+  const modulesDir = path.join(cwd, 'node_modules');
+  const needInstall = process.env.VULN_DIFF_FORCE_NPM_INSTALL === 'true' || !fs.existsSync(modulesDir);
+  if (!needInstall && lockExists && fs.existsSync(modulesDir)) return;
+  const baseArgs = lockExists ? ['ci'] : ['install'];
+  if (!includeDev) baseArgs.push('--omit=dev');
+  baseArgs.push('--no-audit', '--no-fund');
+  await execCmd('npm', baseArgs, { cwd }); // si falla lanza
+}
+
+// Usa CycloneDX-NPM de forma estricta; si falla ambos intentos, aborta
 async function generateSbomWithNpm(cwd, opts = {}) {
   await ensureNodeDependencies(cwd, !!opts.includeDevDependencies);
-  const outPath = require('path').join(cwd, 'sbom.npm.json');
+  const outPath = path.join(cwd, 'sbom.npm.json');
   const baseArgs = [
     '@cyclonedx/cyclonedx-npm',
     '--ignore-npm-errors',
     '--output-format', 'JSON',
     '--output-file', outPath
   ];
-  if (opts.includeDevDependencies) {
-    // Flag documentada por la herramienta; si no existe se ignora silenciosamente
-    baseArgs.push('--include-dev-dependencies');
-  }
-
-  // Primer intento: usando package-lock-only (rápido)
-  let generated = false;
+  if (opts.includeDevDependencies) baseArgs.push('--include-dev-dependencies');
+  let firstErr = null;
+  // Intento 1 rápido
   try {
     await execCmd('npx', [...baseArgs, '--package-lock-only'], { cwd });
-    generated = true;
-  } catch (e1) {
-    // Si fallo ELSPROBLEMS reintentar sin --package-lock-only
-    const stderr = (e1.stderr || e1.message || '');
-    if (/ELSPROBLEMS/i.test(stderr) || /invalid:/i.test(stderr)) {
-      try {
-        await execCmd('npx', baseArgs, { cwd });
-        generated = true;
-      } catch (e2) {
-        // Último recurso: si el fichero existe aunque haya error, usarlo
-        if (fs.existsSync(outPath)) {
-          generated = true;
-        } else {
-          throw new Error(`CycloneDX NPM failed.\nFirst attempt:\n${stderr}\nSecond attempt:\n${e2.stderr || e2.message}`);
-        }
-      }
-    } else {
-      // Error distinto: si no hay fichero abortar
-      if (!fs.existsSync(outPath)) throw e1;
-      generated = true;
-    }
+    if (!fs.existsSync(outPath)) throw new Error('CycloneDX-NPM no produjo fichero tras intento --package-lock-only.');
+    return outPath;
+  } catch (e) {
+    firstErr = e;
   }
-  if (!generated) throw new Error('CycloneDX NPM SBOM not generated');
+  // Intento 2 completo
+  await execCmd('npx', baseArgs, { cwd }).catch(e2 => {
+    throw new Error(
+      `Fallo SBOM NPM estricto.\nIntento 1 (--package-lock-only):\n${firstErr.stderr || firstErr.message}\n\nIntento 2 (completo):\n${e2.stderr || e2.message}`
+    );
+  });
+  if (!fs.existsSync(outPath)) {
+    throw new Error('CycloneDX-NPM no produjo fichero tras intento completo.');
+  }
   return outPath;
 }
 
-// Orchestrates SBOM generation: attempt Maven, fallback to NPM if applicable, then to Syft.
+// Orquestación estricta
 async function generateSbom(opts) {
   const { checkoutDir, tools } = opts;
   const includeDev = !!(opts.includeDevDependencies || process.env.VULN_DIFF_INCLUDE_DEV_DEPS === 'true');
-  const useMaven = await hasMavenReactor(checkoutDir, tools.paths.mvn);
   const hasPackage = await hasPackageJson(checkoutDir);
   const hasPom = await hasPomXml(checkoutDir);
-
-  if (useMaven) {
-    try {
-      return await generateSbomWithMaven(checkoutDir);
-    } catch {
-      // fall through
+  // Java estricto
+  if (hasPom) {
+    if (!tools.paths.mvn) {
+      throw new Error('Proyecto Java con pom.xml requiere Maven (mvn) para SBOM agregada, no disponible.');
     }
+    return await generateSbomWithMaven(checkoutDir); // si falla lanza
   }
+  // JavaScript estricto
   if (hasPackage && !hasPom) {
-    try {
-      return await generateSbomWithNpm(checkoutDir, { includeDevDependencies: includeDev });
-    } catch {
-      // continúa al fallback
-    }
+    return await generateSbomWithNpm(checkoutDir, { includeDevDependencies: includeDev }); // si falla lanza
   }
-  // Fallback to Syft
-  if (!tools.paths.syft) throw new Error('Syft not available and Maven/NPM SBOM generation failed or not applicable.');
+  // Caso genérico (sin pom.xml ni package.json)
+  if (!tools.paths.syft) {
+    throw new Error('Syft requerido para proyectos sin pom.xml ni package.json.');
+  }
   return await generateSbomWithSyft(checkoutDir, tools.paths.syft);
-}
-
-// NEW: asegura que las dependencias de node estén instaladas (npm install) antes de generar el SBOM
-async function ensureNodeDependencies(cwd, includeDev) {
-  if (!await hasPackageJson(cwd)) return;
-  if (process.env.VULN_DIFF_SKIP_NPM_INSTALL === 'true') return;
-
-  const lockExists = fs.existsSync(path.join(cwd, 'package-lock.json'));
-  const modulesDir = path.join(cwd, 'node_modules');
-  const needInstall = process.env.VULN_DIFF_FORCE_NPM_INSTALL === 'true' || !fs.existsSync(modulesDir);
-
-  if (!needInstall && lockExists) return; // ya instaladas
-
-  const baseArgs = lockExists ? ['ci'] : ['install'];
-  if (!includeDev) {
-    // npm v7+ soporta --omit=dev para excluir devDependencies
-    baseArgs.push('--omit=dev');
-  }
-  // evitar auditorías y fondos para rapidez
-  baseArgs.push('--no-audit', '--no-fund');
-  try {
-    await execCmd('npm', baseArgs, { cwd });
-  } catch (e) {
-    // si falla pero existe node_modules lo toleramos
-    if (!fs.existsSync(modulesDir)) throw new Error(`npm install failed: ${e.stderr || e.message}`);
-  }
 }
 
 module.exports = { generateSbom };
