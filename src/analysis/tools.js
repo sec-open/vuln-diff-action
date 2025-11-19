@@ -6,7 +6,7 @@ const { ensureDir } = require('./fsx');
 
 const DEFAULTS = {
   syft: process.env.SYFT_VERSION || 'v1.13.0',
-  grype: process.env.GRYPE_VERSION || 'v0.79.2',
+  grype: process.env.GRYPE_VERSION || 'v0.104.0', // actualizado
 };
 
 // Returns true if running on Linux.
@@ -167,15 +167,19 @@ async function detectTools() {
   const syftPath  = await ensureSyft(toolsDir);
   const grypePath = await ensureGrype(toolsDir);
 
+  // Detect npm (para reportar versión aunque no lo instalemos)
+  const npmPath = await which('npm');
+
   const versions = {
     node: process.version,
+    npm: npmPath ? (await execCmd(npmPath, ['-v']).then(r => r.stdout.trim()).catch(() => null)) : null,
     cyclonedx_maven: await tryGetMavenVersion(mvnPath),
     syft: syftPath ? await tryGetJsonVersion(syftPath, ['version', '-o', 'json']) : null,
     grype: grypePath ? await tryGetJsonVersion(grypePath, ['version', '-o', 'json']) : null,
   };
 
   return {
-    paths: { syft: syftPath, grype: grypePath, mvn: mvnPath },
+    paths: { syft: syftPath, grype: grypePath, mvn: mvnPath, npm: npmPath },
     versions
   };
 }

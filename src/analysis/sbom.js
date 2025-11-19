@@ -47,21 +47,53 @@ async function generateSbomWithSyft(cwd, syftPath) {
 }
 
 // Uses npx @cyclonedx/cyclonedx-npm to generate SBOM if package.json is present
-async function generateSbomWithNpm(cwd) {
+async function generateSbomWithNpm(cwd, opts = {}) {
   const outPath = require('path').join(cwd, 'sbom.npm.json');
-  await execCmd('npx', [
+  const baseArgs = [
     '@cyclonedx/cyclonedx-npm',
-    '--package-lock-only',
     '--ignore-npm-errors',
     '--output-format', 'JSON',
     '--output-file', outPath
-  ], { cwd });
+  ];
+  if (opts.includeDevDependencies) {
+    // Flag documentada por la herramienta; si no existe se ignora silenciosamente
+    baseArgs.push('--include-dev-dependencies');
+  }
+
+  // Primer intento: usando package-lock-only (rápido)
+  let generated = false;
+  try {
+    await execCmd('npx', [...baseArgs, '--package-lock-only'], { cwd });
+    generated = true;
+  } catch (e1) {
+    // Si fallo ELSPROBLEMS reintentar sin --package-lock-only
+    const stderr = (e1.stderr || e1.message || '');
+    if (/ELSPROBLEMS/i.test(stderr) || /invalid:/i.test(stderr)) {
+      try {
+        await execCmd('npx', baseArgs, { cwd });
+        generated = true;
+      } catch (e2) {
+        // Último recurso: si el fichero existe aunque haya error, usarlo
+        if (fs.existsSync(outPath)) {
+          generated = true;
+        } else {
+          throw new Error(`CycloneDX NPM failed.\nFirst attempt:\n${stderr}\nSecond attempt:\n${e2.stderr || e2.message}`);
+        }
+      }
+    } else {
+      // Error distinto: si no hay fichero abortar
+      if (!fs.existsSync(outPath)) throw e1;
+      generated = true;
+    }
+  }
+  if (!generated) throw new Error('CycloneDX NPM SBOM not generated');
   return outPath;
 }
 
 // Orchestrates SBOM generation: attempt Maven, fallback to NPM if applicable, then to Syft.
 async function generateSbom(opts) {
   const { checkoutDir, tools } = opts;
+  const includeDev = !!(opts.includeDevDependencies || process.env.VULN_DIFF_INCLUDE_DEV_DEPS === 'true');
   const useMaven = await hasMavenReactor(checkoutDir, tools.paths.mvn);
   const hasPackage = await hasPackageJson(checkoutDir);
   const hasPom = await hasPomXml(checkoutDir);
@@ -69,16 +101,15 @@ async function generateSbom(opts) {
   if (useMaven) {
     try {
       return await generateSbomWithMaven(checkoutDir);
-    } catch (e) {
+    } catch {
       // fall through
     }
   }
-  // If package.json exists and pom.xml does not, use npx CycloneDX-NPM
   if (hasPackage && !hasPom) {
     try {
-      return await generateSbomWithNpm(checkoutDir);
-    } catch (e) {
-      // fall through
+      return await generateSbomWithNpm(checkoutDir, { includeDevDependencies: includeDev });
+    } catch {
+      // continúa al fallback
     }
   }
   // Fallback to Syft

@@ -53,6 +53,13 @@ function buildSbomIndex(bom) {
         groupId = parts[0];
         artifactId = parts.slice(1).join('/');
       }
+    } else if (c?.purl?.startsWith('pkg:npm/')) {
+      // Formato: pkg:npm/<nombre>@<version>
+      const after = c.purl.slice('pkg:npm/'.length);
+      const atIdx = after.indexOf('@');
+      const pkgName = atIdx >= 0 ? after.slice(0, atIdx) : after;
+      groupId = 'npm';
+      artifactId = pkgName;
     } else if (c?.group && c?.name) {
       groupId = c.group;
       artifactId = c.name;
@@ -116,7 +123,6 @@ function buildSbomIndex(bom) {
   function gavFromComponent(comp) {
     let groupId, artifactId, version;
     version = comp?.version || null;
-
     if (comp?.purl?.startsWith('pkg:maven/')) {
       const after = comp.purl.slice('pkg:maven/'.length);
       const atIdx = after.indexOf('@');
@@ -126,6 +132,13 @@ function buildSbomIndex(bom) {
         groupId = parts[0];
         artifactId = parts.slice(1).join('/');
       }
+    }
+    if (comp?.purl?.startsWith('pkg:npm/')) {
+      const after = comp.purl.slice('pkg:npm/'.length);
+      const atIdx = after.indexOf('@');
+      const pkgName = atIdx >= 0 ? after.slice(0, atIdx) : after;
+      groupId = 'npm';
+      artifactId = pkgName;
     }
     if (!groupId && comp?.group && comp?.name) {
       groupId = comp.group;
@@ -166,6 +179,14 @@ function extractComponentInventory(bom) {
       }
       if (atIdx >= 0) version = after.slice(atIdx + 1) || version;
     }
+    if (purl && purl.startsWith('pkg:npm/')) {
+      const after = purl.slice('pkg:npm/'.length);
+      const atIdx = after.indexOf('@');
+      const pkgName = atIdx >= 0 ? after.slice(0, atIdx) : after;
+      groupId = 'npm';
+      artifactId = pkgName;
+      if (atIdx >= 0) version = after.slice(atIdx + 1) || version;
+    }
     if (!groupId && c.group && c.name) {
       groupId = c.group;
       artifactId = c.name;
@@ -179,4 +200,3 @@ function extractComponentInventory(bom) {
 }
 
 module.exports = { buildSbomIndex, extractComponentInventory };
-
