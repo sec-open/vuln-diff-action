@@ -1,5 +1,6 @@
 // SBOM generation helper: prefers Maven CycloneDX aggregate, falls back to Syft.
 const path = require('path');
+const fs = require('fs');
 const { execCmd } = require('./exec');
 const { writeFile } = require('./fsx');
 
@@ -9,6 +10,16 @@ async function hasMavenReactor(cwd, mvnPath) {
   // quick heuristic: presence of pom.xml in root
   const { stdout } = await execCmd('bash', ['-lc', 'test -f pom.xml && echo yes || echo no'], { cwd });
   return stdout.trim() === 'yes';
+}
+
+// Detects presence of package.json in the root; returns boolean.
+async function hasPackageJson(cwd) {
+  return fs.existsSync(require('path').join(cwd, 'package.json'));
+}
+
+// Detects presence of pom.xml in the root; returns boolean.
+async function hasPomXml(cwd) {
+  return fs.existsSync(require('path').join(cwd, 'pom.xml'));
 }
 
 // Invokes CycloneDX Maven plugin to generate aggregate JSON SBOM; returns file path.
@@ -35,18 +46,43 @@ async function generateSbomWithSyft(cwd, syftPath) {
   return outPath;
 }
 
-// Orchestrates SBOM generation: attempt Maven, fallback to Syft if unavailable/failure.
+// Uses npx @cyclonedx/cyclonedx-npm to generate SBOM if package.json is present
+async function generateSbomWithNpm(cwd) {
+  const outPath = require('path').join(cwd, 'sbom.npm.json');
+  await execCmd('npx', [
+    '@cyclonedx/cyclonedx-npm',
+    '--package-lock-only',
+    '--ignore-npm-errors',
+    '--output-format', 'JSON',
+    '--output-file', outPath
+  ], { cwd });
+  return outPath;
+}
+
+// Orchestrates SBOM generation: attempt Maven, fallback to NPM if applicable, then to Syft.
 async function generateSbom(opts) {
   const { checkoutDir, tools } = opts;
   const useMaven = await hasMavenReactor(checkoutDir, tools.paths.mvn);
+  const hasPackage = await hasPackageJson(checkoutDir);
+  const hasPom = await hasPomXml(checkoutDir);
+
   if (useMaven) {
     try {
       return await generateSbomWithMaven(checkoutDir);
     } catch (e) {
-      // fall through to syft
+      // fall through
     }
   }
-  if (!tools.paths.syft) throw new Error('Syft not available and Maven SBOM generation failed or not applicable.');
+  // If package.json exists and pom.xml does not, use npx CycloneDX-NPM
+  if (hasPackage && !hasPom) {
+    try {
+      return await generateSbomWithNpm(checkoutDir);
+    } catch (e) {
+      // fall through
+    }
+  }
+  // Fallback to Syft
+  if (!tools.paths.syft) throw new Error('Syft not available and Maven/NPM SBOM generation failed or not applicable.');
   return await generateSbomWithSyft(checkoutDir, tools.paths.syft);
 }
 
