@@ -6,7 +6,7 @@ const { ensureDir } = require('./fsx');
 
 const DEFAULTS = {
   syft: process.env.SYFT_VERSION || 'v1.13.0',
-  grype: process.env.GRYPE_VERSION || 'v0.104.0', // actualizado
+  grype: process.env.GRYPE_VERSION || 'v0.104.0',
 };
 
 // Returns true if running on Linux.
@@ -28,7 +28,7 @@ async function aptExists() {
 
 // Executes apt command with sudo fallback; propagates combined error details if both attempts fail.
 async function runApt(cmd) {
-  // try sudo first, then without (algunos runners no necesitan sudo)
+  // attempt with sudo then without; propagate both failure outputs
   try { return await execCmd('bash', ['-lc', `sudo ${cmd}`]); } catch (e1) {
     try { return await execCmd('bash', ['-lc', cmd]); } catch (e2) {
       // re-lanza con info para detectar "Permission denied"/locks
@@ -86,7 +86,7 @@ async function ensureSyft(toolsDir) {
       syft = await which('syft');
       if (syft) return syft;
     } catch (eAPT) {
-      // Fallback sin sudo
+      // Fallback to tarball if APT fails
       try {
         if (!toolsDir) toolsDir = path.resolve(process.cwd(), '.tools');
         return await downloadTarballTool({ repo: 'syft', ver: DEFAULTS.syft, binName: 'syft', toolsDir });
@@ -112,9 +112,11 @@ async function ensureGrype(toolsDir) {
       grype = await which('grype');
       if (grype) return grype;
     } catch (eAPT) {
+      // Fallback to tarball if APT fails
       try {
         if (!toolsDir) toolsDir = path.resolve(process.cwd(), '.tools');
-        return await downloadTarballTool({ repo: 'grype', ver: DEFAULTS.grype, binName: 'grype', toolsDir });
+        const bin = await downloadTarballTool({ repo: 'grype', ver: DEFAULTS.grype, binName: 'grype', toolsDir });
+        return bin;
       } catch (eDL) {
         throw new Error(`Grype install failed.\nAPT error:\n${eAPT.stderr || eAPT.message}\n\nTarball error:\n${eDL.stderr || eDL.message}`);
       }
@@ -122,12 +124,13 @@ async function ensureGrype(toolsDir) {
   }
 
   if (!toolsDir) toolsDir = path.resolve(process.cwd(), '.tools');
-  return await downloadTarballTool({ repo: 'grype', ver: DEFAULTS.grype, binName: 'grype', toolsDir });
+  const bin = await downloadTarballTool({ repo: 'grype', ver: DEFAULTS.grype, binName: 'grype', toolsDir });
+  return bin;
 }
 
 // Attempts Maven installation via APT; returns path or null if unavailable.
 async function ensureMaven() {
-  // Maven es opcional (fallback Syft ya lo cubre); si APT no está disponible o no hay permisos, seguimos sin Maven
+  // Optional: only used when Java project detected
   let mvn = await which('mvn');
   if (mvn) return mvn;
 
@@ -137,7 +140,7 @@ async function ensureMaven() {
       await runApt('apt-get install -y maven');
       return await which('mvn');
     } catch {
-      return null; // sin Maven, usaremos Syft para SBOM
+      return null;
     }
   }
   return null;
@@ -161,6 +164,7 @@ async function tryGetMavenVersion(mvnPath) {
 
 // Ensures node & npm are available; attempts APT install if missing.
 async function ensureNode() {
+  // Ensure node & npm present; install via APT if missing
   let nodeBin = await which('node');
   let npmBin  = await which('npm');
   if (nodeBin && npmBin) return { nodeBin, npmBin };
@@ -183,15 +187,18 @@ async function ensureNode() {
 // Detects/installs required tools and returns their paths and versions.
 async function detectTools() {
   const toolsDir = path.resolve(process.cwd(), '.tools');
-
-  // NEW: ensure node/npm first
   const { nodeBin, npmBin } = await ensureNode();
-
   const mvnPath   = await ensureMaven();
   const syftPath  = await ensureSyft(toolsDir);
   const grypePath = await ensureGrype(toolsDir);
 
-  // Detect npm (para reportar versión aunque no lo instalemos)
+  // Update Grype DB for latest vulnerability data
+  if (grypePath) {
+    try { await execCmd(grypePath, ['db', 'update']); } catch (e) {
+      throw new Error(`Grype DB update failed: ${e.stderr || e.message}`);
+    }
+  }
+
   const versions = {
     node: process.version,
     npm: npmBin ? (await execCmd(npmBin, ['-v']).then(r => r.stdout.trim()).catch(() => null)) : null,

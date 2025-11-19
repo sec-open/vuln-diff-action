@@ -1,4 +1,4 @@
-// SBOM generation helper: prefers Maven CycloneDX aggregate, falls back to Syft.
+// SBOM generation helper: strict mode chooses Maven, NPM, or Syft based on project type.
 const path = require('path');
 const fs = require('fs');
 const { execCmd } = require('./exec');
@@ -48,9 +48,10 @@ async function generateSbomWithSyft(cwd, syftPath) {
 
 // NEW estricto: instalación dependencias; cualquier fallo aborta
 async function ensureNodeDependencies(cwd, includeDev) {
+  // Strict: fail if dependencies cannot be installed
   if (!await hasPackageJson(cwd)) return;
   if (process.env.VULN_DIFF_SKIP_NPM_INSTALL === 'true') {
-    throw new Error('VULN_DIFF_SKIP_NPM_INSTALL=true impide instalar dependencias necesarias para SBOM NPM estricto.');
+    throw new Error('VULN_DIFF_SKIP_NPM_INSTALL=true blocks required NPM install for strict SBOM.');
   }
   const lockExists = fs.existsSync(path.join(cwd, 'package-lock.json'));
   const modulesDir = path.join(cwd, 'node_modules');
@@ -59,11 +60,12 @@ async function ensureNodeDependencies(cwd, includeDev) {
   const baseArgs = lockExists ? ['ci'] : ['install'];
   if (!includeDev) baseArgs.push('--omit=dev');
   baseArgs.push('--no-audit', '--no-fund');
-  await execCmd('npm', baseArgs, { cwd }); // si falla lanza
+  await execCmd('npm', baseArgs, { cwd });
 }
 
 // Usa CycloneDX-NPM de forma estricta; si falla ambos intentos, aborta
 async function generateSbomWithNpm(cwd, opts = {}) {
+  // Strict NPM SBOM: two attempts, both must succeed producing file
   await ensureNodeDependencies(cwd, !!opts.includeDevDependencies);
   const outPath = path.join(cwd, 'sbom.npm.json');
   const baseArgs = [
@@ -74,46 +76,50 @@ async function generateSbomWithNpm(cwd, opts = {}) {
   ];
   if (opts.includeDevDependencies) baseArgs.push('--include-dev-dependencies');
   let firstErr = null;
-  // Intento 1 rápido
   try {
     await execCmd('npx', [...baseArgs, '--package-lock-only'], { cwd });
-    if (!fs.existsSync(outPath)) throw new Error('CycloneDX-NPM no produjo fichero tras intento --package-lock-only.');
+    if (!fs.existsSync(outPath)) throw new Error('CycloneDX-NPM did not produce file after --package-lock-only attempt.');
     return outPath;
   } catch (e) {
     firstErr = e;
   }
-  // Intento 2 completo
   await execCmd('npx', baseArgs, { cwd }).catch(e2 => {
     throw new Error(
-      `Fallo SBOM NPM estricto.\nIntento 1 (--package-lock-only):\n${firstErr.stderr || firstErr.message}\n\nIntento 2 (completo):\n${e2.stderr || e2.message}`
+      `Strict NPM SBOM failed.\nAttempt 1 (--package-lock-only):\n${firstErr.stderr || firstErr.message}\n\nAttempt 2 (full):\n${e2.stderr || e2.message}`
     );
   });
   if (!fs.existsSync(outPath)) {
-    throw new Error('CycloneDX-NPM no produjo fichero tras intento completo.');
+    throw new Error('CycloneDX-NPM did not produce file after full attempt.');
   }
   return outPath;
 }
 
 // Orquestación estricta
 async function generateSbom(opts) {
+  // Orchestrates strict SBOM selection based on presence of package.json or pom.xml
   const { checkoutDir, tools } = opts;
-  const includeDev = !!(opts.includeDevDependencies || process.env.VULN_DIFF_INCLUDE_DEV_DEPS === 'true');
   const hasPackage = await hasPackageJson(checkoutDir);
   const hasPom = await hasPomXml(checkoutDir);
-  // Java estricto
-  if (hasPom) {
+  const includeDev = hasPackage
+    ? true // include dev dependencies for JS projects by default
+    : !!(opts.includeDevDependencies || process.env.VULN_DIFF_INCLUDE_DEV_DEPS === 'true');
+
+  // JavaScript strict (preferred if package.json present)
+  if (hasPackage) {
+    return await generateSbomWithNpm(checkoutDir, { includeDevDependencies: includeDev });
+  }
+
+  // Java strict (only when no package.json and pom.xml present)
+  if (!hasPackage && hasPom) {
     if (!tools.paths.mvn) {
-      throw new Error('Proyecto Java con pom.xml requiere Maven (mvn) para SBOM agregada, no disponible.');
+      throw new Error('Java project requires Maven (mvn) for SBOM generation, not available.');
     }
-    return await generateSbomWithMaven(checkoutDir); // si falla lanza
+    return await generateSbomWithMaven(checkoutDir);
   }
-  // JavaScript estricto
-  if (hasPackage && !hasPom) {
-    return await generateSbomWithNpm(checkoutDir, { includeDevDependencies: includeDev }); // si falla lanza
-  }
-  // Caso genérico (sin pom.xml ni package.json)
+
+  // Generic fallback (no package.json, no pom.xml)
   if (!tools.paths.syft) {
-    throw new Error('Syft requerido para proyectos sin pom.xml ni package.json.');
+    throw new Error('Syft required for projects without package.json or pom.xml.');
   }
   return await generateSbomWithSyft(checkoutDir, tools.paths.syft);
 }

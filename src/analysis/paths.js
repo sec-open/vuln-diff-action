@@ -3,7 +3,7 @@ const path = require('path');
 
 // Resolves canonical dist root (under current working directory or env override).
 function distRoot() {
-  // Permite override por variable de entorno para compatibilidad con workspace
+  // Allow override via env var for workspace compatibility
   return process.env.VULN_DIFF_DIST_ROOT
     ? path.resolve(process.env.VULN_DIFF_DIST_ROOT, 'dist')
     : path.resolve(process.cwd(), 'dist');
