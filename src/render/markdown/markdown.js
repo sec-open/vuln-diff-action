@@ -92,30 +92,32 @@ Commit: ${mdSafe(view.head.commitSubject)}
     lines.push(`| ${view.summary.totals.NEW} | ${view.summary.totals.REMOVED} | ${view.summary.totals.UNCHANGED} |`);
     lines.push('');
 
-    // Nueva sección: Cambios de dependencias POM
-    const pom = view.dependencyPomDiff || { items:[], totals:{} };
-    const pomInteresting = (pom.items||[]).filter(it => ['NEW','UPDATED','REMOVED'].includes(it.state));
-    lines.push('## POM Dependency Changes');
-    if (!pomInteresting.length) {
-      lines.push('No POM dependency changes detected.');
+    // Nueva sección: Cambios de dependencias (multi-ecosistema)
+    const changes = view.dependencyChanges || { maven: view.dependencyPomDiff }; // fallback legacy
+    const ecos = Object.keys(changes);
+    lines.push('## Dependency Changes');
+    if (!ecos.length) {
+      lines.push('No dependency changes detected.');
     } else {
-      lines.push('| State | Group:Artifact | Base Version | Head Version |');
-      lines.push('| --- | --- | --- | --- |');
-      pomInteresting.sort((a,b)=>`${a.groupId}:${a.artifactId}`.localeCompare(`${b.groupId}:${b.artifactId}`,'en',{sensitivity:'base'}))
-        .forEach(it => {
-          let baseV = it.baseVersion || '—';
-          let headV = it.headVersion || '—';
-          lines.push(`| ${it.state} | \`${it.groupId}:${it.artifactId}\` | ${baseV} | ${headV} |`);
-        });
-      lines.push('');
-      // Lista enumerada con formato tipo 2.3.x
-      pomInteresting.forEach((it, idx) => {
-        if (it.state === 'UPDATED') {
-          lines.push(`- 2.3.${idx+1} \`${it.groupId}:${it.artifactId}\` UPDATED (${it.baseVersion || '—'} → ${it.headVersion || '—'})`);
-        } else if (it.state === 'NEW') {
-          lines.push(`- 2.3.${idx+1} \`${it.groupId}:${it.artifactId}\` NEW (${it.headVersion || '—'})`);
-        } else if (it.state === 'REMOVED') {
-          lines.push(`- 2.3.${idx+1} \`${it.groupId}:${it.artifactId}\` REMOVED (${it.baseVersion || '—'})`);
+      ecos.forEach(eco => {
+        const dep = changes[eco] || { items:[], totals:{} };
+        const interesting = (dep.items||[]).filter(it => ['NEW','UPDATED','REMOVED'].includes(it.state));
+        const titleEco = eco === 'maven' ? 'Maven' : (eco === 'npm' ? 'npm' : eco);
+        lines.push(`### ${titleEco}`);
+        if (!interesting.length) {
+          lines.push('No dependency changes detected.');
+        } else {
+          lines.push('| State | Package | Base Version | Head Version |');
+          lines.push('| --- | --- | --- | --- |');
+          interesting.sort((a,b)=>{
+            const na = `${a.groupId || a.group || ''}:${a.artifactId || a.name || ''}`;
+            const nb = `${b.groupId || b.group || ''}:${b.artifactId || b.name || ''}`;
+            return na.localeCompare(nb,'en',{sensitivity:'base'});
+          }).forEach((it, idx) => {
+            const label = (it.groupId && it.artifactId) ? `${it.groupId}:${it.artifactId}` : (it.group ? `${it.group}/${it.name}` : (it.name || 'unknown'));
+            lines.push(`| ${it.state} | \`${label}\` | ${it.baseVersion || '—'} | ${it.headVersion || '—'} |`);
+          });
+          lines.push('');
         }
       });
     }

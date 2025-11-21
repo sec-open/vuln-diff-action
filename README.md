@@ -129,6 +129,7 @@ It generates an **SBOM (CycloneDX JSON)** for each ref, scans them with Grype, a
 | `github_token`       | ❌       | –                               | Token for PR comment (`secrets.GITHUB_TOKEN`). |
 | `slack_webhook_url`  | ❌       | –                               | Slack Incoming Webhook URL (store it as a secret, e.g., `SLACK_SECURITY_WEBHOOK_URL`). |
 | `slack_channel`      | ❌       | –                               | Optional channel override (e.g., `#security-alerts`). Many webhooks **ignore** overrides and always post to their configured channel. |
+| `include_dev_dependencies` | ❌   | `false`                         | Include devDependencies (JavaScript) in the diff. Default is false to maintain parity with current analysis. |
 
 ---
 
@@ -186,6 +187,36 @@ Reglas de estado:
 - `UNCHANGED`: versión idéntica en ambos refs (no se muestra en tablas resumen HTML/PDF/Markdown).
 
 La sección POM se deriva exclusivamente de dependencias directas declaradas (tras resolver `${property}`), sin inferir transitivas.
+
+---
+
+## 9e9 Multi-ecosystem Dependency Changes (Early Support)
+
+Esta acción está preparada para soportar múltiples ecosistemas. La versión actual produce cambios de dependencias para Maven (POM). El renderer ya soporta una estructura neutra (`dependencyChanges`) de forma que, cuando se añada extracción para proyectos JavaScript (npm/yarn/pnpm), se mostrarán subsecciones por ecosistema:
+
+```
+diff.json
+  dependency_changes: {
+    maven: { totals:{...}, items:[...] },
+    npm:   { totals:{...}, items:[...] }
+  }
+```
+
+Cada ecosistema lista dependencias **directas** con estados:
+- NEW: sólo en HEAD
+- REMOVED: sólo en BASE
+- UPDATED: misma coordenada, versión distinta
+- UNCHANGED: igual en ambos (no siempre visible en tablas)
+
+### Nuevo input: `include_dev_dependencies`
+Permite incluir (cuando se implemente la extracción JS) las `devDependencies`. Por defecto `false` para mantener paridad con el análisis actual centrado en dependencias de runtime/productivas.
+
+```yaml
+with:
+  include_dev_dependencies: "false"  # cambiar a "true" para incluir devDependencies en el futuro
+```
+
+> Nota: Por ahora, si el repositorio sólo es Java, la sección se muestra como *POM Dependency Changes (Legacy)* y un bloque general *Dependency Changes* preparado para más ecosistemas.
 
 ---
 

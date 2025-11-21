@@ -115,6 +115,35 @@ function renderPomDependencyChangeSubsections(dep) {
 }
 
 /**
+ * Genera cambios de dependencias para ecosistemas.
+ * @param {Object} view
+ * @returns {string}
+ */
+function dependencyChangesGeneric(view) {
+  const changes = view.dependencyChanges || {};
+  const ecos = Object.keys(changes);
+  if (!ecos.length) return '<p>No dependency changes detected.</p>';
+  return ecos.map(eco => {
+    const dep = changes[eco];
+    const interesting = Array.isArray(dep.items) ? dep.items.filter(it => ['NEW','UPDATED','REMOVED'].includes(it.state)) : [];
+    const titleEco = eco === 'maven' ? 'Maven' : (eco === 'npm' ? 'npm' : eco);
+    if (!interesting.length) return `<div class="card"><h3>${titleEco} Dependency Changes</h3><p>No dependency changes detected.</p></div>`;
+    const head = `<table><thead><tr><th>State</th><th>Package</th><th>Base Version</th><th>Head Version</th></tr></thead><tbody>`;
+    const rows = interesting
+      .sort((a,b)=>{
+        const na = `${a.groupId || a.group || ''}:${a.artifactId || a.name || ''}`;
+        const nb = `${b.groupId || b.group || ''}:${b.artifactId || b.name || ''}`;
+        return na.localeCompare(nb,'en',{sensitivity:'base'});
+      })
+      .map(it => {
+        const pkgLabel = (it.groupId && it.artifactId) ? `${it.groupId}:${it.artifactId}` : (it.group ? `${it.group}/${it.name}` : (it.name || 'unknown'));
+        return `<tr><td>${it.state}</td><td>${pkgLabel}</td><td>${it.baseVersion || '—'}</td><td>${it.headVersion || '—'}</td></tr>`;
+      }).join('');
+    return `<div class="card"><h3>${titleEco} Dependency Changes</h3>${head + rows + '</tbody></table>'}</div>`;
+  }).join('\n');
+}
+
+/**
  * Produces full summary section HTML.
  * @param {{view:Object}} param0
  * @returns {string}
@@ -154,13 +183,10 @@ function renderSummary({ view } = {}) {
 </div>`;
   // Nueva sección de dependencias POM
   const pom = view.dependencyPomDiff || { totals:{}, items:[] };
-  const depCard = `
-<div class="card">
-  <h3>POM Dependency Changes</h3>
-  ${dependencyPomChangesTable(pom)}
-  ${renderPomDependencyChangeSubsections(pom)}
-</div>`;
-  return [intro, env, branches, sev, depCard].join('\n');
+  // LEGACY card mantenido (solo se muestra si hay items interesantes y ecosistema maven presente únicamente)
+  const showLegacyPom = view.dependencyChanges && Object.keys(view.dependencyChanges).length === 1 && view.dependencyChanges.maven;
+  const depGeneric = `<div class="card"><h3>Dependency Changes (Multi-ecosystem)</h3><p class="small">Shows NEW / UPDATED / REMOVED direct dependencies per ecosystem.</p></div>` + dependencyChangesGeneric(view);
+  return [intro, env, branches, sev, showLegacyPom ? (`<div class="card"><h3>POM Dependency Changes (Legacy)</h3>${dependencyPomChangesTable(pom)}${renderPomDependencyChangeSubsections(pom)}</div>`) : '', depGeneric].filter(Boolean).join('\n');
 }
 
 module.exports = { renderSummary };

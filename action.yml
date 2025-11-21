@@ -26,6 +26,10 @@ inputs:
     description: 'Optional logo URL (absolute or relative within the bundle) for the HTML header'
     required: false
     default: ''
+  include_dev_dependencies:
+    description: 'Include devDependencies for JavaScript projects (npm/yarn/pnpm). Placeholder; extraction logic forthcoming.'
+    required: false
+    default: 'false'
 
 outputs:
   base_sha:

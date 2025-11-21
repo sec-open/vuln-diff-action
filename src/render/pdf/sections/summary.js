@@ -150,6 +150,30 @@ function renderPomDependencyChangeSubsections(pomDiff) {
     }).join('\n');
 }
 
+function dependencyChangesPdfBlocks(view){
+  const changes = view.dependencyChanges || (view.dependencyPomDiff ? { maven: view.dependencyPomDiff } : {});
+  const ecos = Object.keys(changes);
+  if (!ecos.length) return '<p>No dependency changes detected.</p>';
+  return ecos.map((eco, idx) => {
+    const dep = changes[eco];
+    const interesting = Array.isArray(dep.items) ? dep.items.filter(it => ['NEW','UPDATED','REMOVED'].includes(it.state)) : [];
+    const titleEco = eco === 'maven' ? 'Maven' : (eco === 'npm' ? 'npm' : eco);
+    if (!interesting.length) return `<div><h4>${titleEco}</h4><p>No dependency changes detected.</p></div>`;
+    const head = '<table class="compact no-break"><thead><tr><th>State</th><th>Package</th><th>Base Version</th><th>Head Version</th></tr></thead><tbody>';
+    const rows = interesting
+      .sort((a,b)=>{
+        const na = `${a.groupId || a.group || ''}:${a.artifactId || a.name || ''}`;
+        const nb = `${b.groupId || b.group || ''}:${b.artifactId || b.name || ''}`;
+        return na.localeCompare(nb,'en',{sensitivity:'base'});
+      })
+      .map(it => {
+        const label = (it.groupId && it.artifactId) ? `${it.groupId}:${it.artifactId}` : (it.group ? `${it.group}/${it.name}` : (it.name || 'unknown'));
+        return `<tr><td>${it.state}</td><td>${label}</td><td>${it.baseVersion || '—'}</td><td>${it.headVersion || '—'}</td></tr>`;
+      }).join('');
+    return `<div><h4>${titleEco}</h4>${head + rows + '</tbody></table>'}</div>`;
+  }).join('\n');
+}
+
 function summaryHtml(view) {
   const repo = view?.repo || '';
   const baseRef = view?.inputs?.baseRef || view?.base?.ref || '';
@@ -208,7 +232,15 @@ function summaryHtml(view) {
   const pomDiff = view?.dependencyPomDiff || { totals:{}, items:[] };
   const depSection = `\n<section class="page" id="summary-dependency-changes">\n  <h3>2.3 POM Dependency Changes</h3>\n  ${dependencyPomChangesTable(pomDiff)}\n  ${renderPomDependencyChangeSubsections(pomDiff)}\n</section>`;
 
-  return [sec2_and_2_1, moduleSections, depSection].join('\n');
+  // JS SUPPORT START: si hay múltiples ecosistemas, añadimos bloque 2.4
+  let multiEcoSection = '';
+  const ecosCount = Object.keys(view.dependencyChanges || {}).length;
+  if (ecosCount > 1 || (ecosCount === 1 && !view.dependencyChanges.maven)) {
+    multiEcoSection = `\n<section class="page" id="summary-dependency-changes-multi">\n  <h3>2.4 Dependency Changes (Multi-ecosystem)</h3>\n  <p class="small">Direct dependency NEW / UPDATED / REMOVED across detected ecosystems.</p>\n  ${dependencyChangesPdfBlocks(view)}\n</section>`;
+  }
+  // JS SUPPORT END
+
+  return [sec2_and_2_1, moduleSections, depSection, multiEcoSection].join('\n');
 }
 
 module.exports = { summaryHtml };

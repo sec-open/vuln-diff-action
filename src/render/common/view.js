@@ -80,6 +80,26 @@ function buildView(distDir = './dist') {
     } : { totals:{ NEW:0, REMOVED:0, UPDATED:0, UNCHANGED:0 }, items:[] },
   };
 
+  // JS SUPPORT START: estructura neutral futura para dependency changes
+  // Si diff.dependency_changes existe, úsalo. Si no, crea uno sintetizando Maven a partir de dependencyPomDiff.
+  if (diff.dependency_changes && typeof diff.dependency_changes === 'object') {
+    // Normalizamos cada ecosistema asegurando shape { totals, items }
+    const dc = {};
+    for (const [eco, val] of Object.entries(diff.dependency_changes)) {
+      dc[eco] = {
+        totals: (val && val.totals) ? val.totals : { NEW:0, REMOVED:0, UPDATED:0, UNCHANGED:0 },
+        items: Array.isArray(val?.items) ? val.items : [],
+      };
+    }
+    view.dependencyChanges = dc;
+  } else {
+    // Fallback legacy: sólo Maven (pom)
+    view.dependencyChanges = {
+      maven: { ...view.dependencyPomDiff }
+    };
+  }
+  // JS SUPPORT END
+
   view.precomputed = precomputeFromDiff(diff);
   return view;
 }
