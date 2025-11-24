@@ -4,6 +4,14 @@ const { parseScannerOutput } = require('../utils/scannerUtils');
 async function scanJavaScriptVulnerabilities(repoPath, sbomPath) {
     const vulnerabilities = [];
 
+    // Instalar dependencias antes de ejecutar npm audit
+    try {
+        execSync('npm install', { cwd: repoPath });
+    } catch (err) {
+        console.error('npm install failed:', err);
+        return vulnerabilities; // No continuar si las dependencias no están instaladas
+    }
+
     // npm audit
     try {
         const npmAuditOutput = execSync('npm audit --json', { cwd: repoPath }).toString();
@@ -40,4 +48,3 @@ async function scanJavaScriptVulnerabilities(repoPath, sbomPath) {
 }
 
 module.exports = { scanJavaScriptVulnerabilities };
-

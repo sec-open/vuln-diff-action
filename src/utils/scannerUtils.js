@@ -3,19 +3,22 @@ function parseScannerOutput(source, output) {
     const vulnerabilities = [];
 
     if (source === 'npm-audit') {
-        for (const [key, vuln] of Object.entries(rawResults.advisories || {})) {
-            vulnerabilities.push({
-                id: vuln.id,
-                source,
-                packageName: vuln.module_name,
-                version: vuln.findings[0]?.version,
-                severity: mapSeverity(vuln.severity),
-                description: vuln.overview,
-                urls: [vuln.url],
-                fixVersion: vuln.fix_available ? vuln.fix_version : null,
-                locations: vuln.findings.map(f => f.paths).flat(),
-                matchKey: `${vuln.id}:${vuln.module_name}:${vuln.findings[0]?.version}`
-            });
+        // Manejar el formato actual de npm audit
+        if (rawResults.vulnerabilities) {
+            for (const [packageName, vuln] of Object.entries(rawResults.vulnerabilities)) {
+                vulnerabilities.push({
+                    id: vuln.id || vuln.advisory,
+                    source,
+                    packageName,
+                    version: vuln.version,
+                    severity: mapSeverity(vuln.severity),
+                    description: vuln.title || vuln.overview,
+                    urls: vuln.url ? [vuln.url] : [],
+                    fixVersion: vuln.fixAvailable ? vuln.fixAvailable.version : null,
+                    locations: vuln.nodes || [],
+                    matchKey: `${vuln.id}:${packageName}:${vuln.version}`
+                });
+            }
         }
     }
 
