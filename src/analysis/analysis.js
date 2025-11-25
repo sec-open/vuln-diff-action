@@ -18,6 +18,8 @@ const { generateSbom } = require('./sbom');
 const { scanSbomWithGrype } = require('./grype');
 const { makeMeta, writeMeta } = require('./meta');
 const { extractPomDependencies } = require('./pom');
+const { scanWithNpmAudit } = require('./npm');
+const { mergeVulnerabilities } = require('./merge');
 
 // Main driver: validates platform, resolves refs, prepares isolated checkouts,
 // builds SBOMs, runs Grype, writes meta, cleans up, and sets action outputs.
@@ -116,22 +118,29 @@ async function analysis() {
     core.info(`wrote SBOMs -> ${l.sbom.base} / ${l.sbom.head}`);
     core.info(`SBOM generation done in ${stop()}`);
 
-    // Vulnerability scanning using Grype against CycloneDX SBOMs.
+    // Vulnerability scanning using Grype and npm audit.
     core.endGroup();
-    core.startGroup('[analysis] Vulnerability scanning (Grype)');
+    core.startGroup('[analysis] Vulnerability scanning (Grype + npm audit)');
     stop = time();
-    await ensureDir(path.dirname(l.grype.base));
-    await ensureDir(path.dirname(l.grype.head));
+    await ensureDir(path.dirname(l.npm.base));
+    await ensureDir(path.dirname(l.npm.head));
+    await ensureDir(path.dirname(l.merged.base));
+    await ensureDir(path.dirname(l.merged.head));
 
-    const baseGrypeJson = await scanSbomWithGrype(tools.paths.grype, l.sbom.base, baseWorkdir);
-    const headGrypeJson = await scanSbomWithGrype(tools.paths.grype, l.sbom.head, headWorkdir);
+    // Ejecuta npm audit para base y head
+    await scanWithNpmAudit(baseWorkdir, l.npm.base);
+    await scanWithNpmAudit(headWorkdir, l.npm.head);
 
-    // Persist raw scan output.
-    await writeFile(l.grype.base, Buffer.from(baseGrypeJson, 'utf8'));
-    await writeFile(l.grype.head, Buffer.from(headGrypeJson, 'utf8'));
+    // Fusiona los resultados de Grype y npm audit
+    const baseMerged = await mergeVulnerabilities([l.grype.base, l.npm.base]);
+    const headMerged = await mergeVulnerabilities([l.grype.head, l.npm.head]);
 
-    core.info(`wrote Grype outputs -> ${l.grype.base} / ${l.grype.head}`);
-    core.info(`Grype scans done in ${stop()}`);
+    // Guarda los resultados fusionados
+    await writeFile(l.merged.base, JSON.stringify(baseMerged, null, 2));
+    await writeFile(l.merged.head, JSON.stringify(headMerged, null, 2));
+
+    core.info(`wrote merged outputs -> ${l.merged.base} / ${l.merged.head}`);
+    core.info(`Vulnerability scanning done in ${stop()}`);
 
     // Metadata document describing inputs, environment, tool versions, and artifact paths.
     core.endGroup();

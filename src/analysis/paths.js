@@ -28,6 +28,14 @@ function layout() {
       base: path.join(root, 'grype', 'base.grype.json'),
       head: path.join(root, 'grype', 'head.grype.json'),
     },
+    npm: {
+      base: path.join(root, 'npm', 'base.npm.json'),
+      head: path.join(root, 'npm', 'head.npm.json'),
+    },
+    merged: {
+      base: path.join(root, 'merged', 'base.merged.json'),
+      head: path.join(root, 'merged', 'head.merged.json'),
+    },
     pom: {
       base: path.join(root, 'pom', 'base-deps.json'),
       head: path.join(root, 'pom', 'head-deps.json'),
