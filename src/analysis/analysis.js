@@ -21,7 +21,7 @@ const { extractPomDependencies } = require('./pom');
 const { scanWithNpmAudit } = require('./npm');
 const { mergeVulnerabilities } = require('./merge');
 const { detectProjectType } = require('./detectProjectType');
-
+const { scanJavaScriptVulnerabilities } = require('./scan/javascriptScanner');
 // Main driver: validates platform, resolves refs, prepares isolated checkouts,
 // builds SBOMs, runs Grype, writes meta, cleans up, and sets action outputs.
 async function analysis() {
@@ -110,10 +110,7 @@ async function analysis() {
     core.info(`[analysis] Detected project type: ${projectType}`);
     core.endGroup();
     //
-    core.startGroup('[analysis] Detect project type');
-    const projectType = detectProjectType(headWorkdir); // HEAD representa lo que PR cambia
-    core.info(`[analysis] Detected project type: ${projectType}`);
-    core.endGroup();
+
 
     core.startGroup('[analysis] SBOM generation');
     stop = time();
