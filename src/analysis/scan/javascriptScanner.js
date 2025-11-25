@@ -1,6 +1,6 @@
 // src/scan/javascriptScanner.js
 const { execSync } = require('child_process');
-const { parseScannerOutput } = require('../utils/scannerUtils');
+const { parseScannerOutput } = require('../../utils/scannerUtils');
 
 /**
  * Run a shell command and return stdout as string.
