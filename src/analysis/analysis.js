@@ -20,6 +20,7 @@ const { makeMeta, writeMeta } = require('./meta');
 const { extractPomDependencies } = require('./pom');
 const { scanWithNpmAudit } = require('./npm');
 const { mergeVulnerabilities } = require('./merge');
+const { detectProjectType } = require('./detectProjectType');
 
 // Main driver: validates platform, resolves refs, prepares isolated checkouts,
 // builds SBOMs, runs Grype, writes meta, cleans up, and sets action outputs.
@@ -103,9 +104,17 @@ async function analysis() {
     core.info(`base workdir: ${baseWorkdir}`);
     core.info(`head workdir: ${headWorkdir}`);
     core.info(`refs & worktrees ready in ${stop()}`);
-
-    // SBOM generation for each side (Maven aggregate or Syft fallback).
     core.endGroup();
+    core.startGroup('[analysis] Project type detection');
+    const projectType = detectProjectType(headWorkdir);
+    core.info(`[analysis] Detected project type: ${projectType}`);
+    core.endGroup();
+    //
+    core.startGroup('[analysis] Detect project type');
+    const projectType = detectProjectType(headWorkdir); // HEAD representa lo que PR cambia
+    core.info(`[analysis] Detected project type: ${projectType}`);
+    core.endGroup();
+
     core.startGroup('[analysis] SBOM generation');
     stop = time();
     await ensureDir(path.dirname(l.sbom.base));
@@ -121,6 +130,7 @@ async function analysis() {
     // Vulnerability scanning using Grype and npm audit.
     core.endGroup();
     core.startGroup('[analysis] Vulnerability scanning (Grype + npm audit)');
+
     stop = time();
     await ensureDir(path.dirname(l.npm.base));
     await ensureDir(path.dirname(l.npm.head));
@@ -130,6 +140,26 @@ async function analysis() {
     // Ejecuta npm audit para base y head
     await scanWithNpmAudit(baseWorkdir, l.npm.base);
     await scanWithNpmAudit(headWorkdir, l.npm.head);
+
+    if (projectType === 'javascript' || projectType === 'mixed') {
+      core.startGroup('[analysis] Running enhanced JavaScript scanners');
+
+      try {
+        const baseJsResults = await scanJavaScriptVulnerabilities(baseWorkdir, l.sbom.base);
+        const headJsResults = await scanJavaScriptVulnerabilities(headWorkdir, l.sbom.head);
+
+        // Persist to Phase-1 structure (same style as npm)
+        await writeJson(path.join(path.dirname(l.npm.base), 'javascript.json'), baseJsResults);
+        await writeJson(path.join(path.dirname(l.npm.head), 'javascript.json'), headJsResults);
+
+        core.info(`JavaScript scanning: BASE=${baseJsResults.length}, HEAD=${headJsResults.length}`);
+      } catch (err) {
+        core.warning(`[analysis] JavaScript scanning failed: ${err.message || err}`);
+      }
+
+      core.endGroup();
+    }
+
 
     // Fusiona los resultados de Grype y npm audit
     const baseMerged = await mergeVulnerabilities([l.grype.base, l.npm.base]);
@@ -152,6 +182,7 @@ async function analysis() {
       repo: repoFull,
       tools,
       paths: l,
+      projectType, // nuevo campo
     });
     core.info('[debug] metaPath: ' + l.meta);
     core.info('[debug] metaObj: ' + JSON.stringify(meta, null, 2));

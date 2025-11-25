@@ -1,0 +1,94 @@
+.
+├── action.yml
+├── build.sh
+├── LICENSE
+├── merge.js
+├── package.json
+├── package-lock.json
+├── project-structure.txt
+├── README.md
+├── scripts
+│   └── copy-html-assets.js
+├── src
+│   ├── analysis
+│   │   ├── analysis.js
+│   │   ├── exec.js
+│   │   ├── fsx.js
+│   │   ├── git.js
+│   │   ├── grype.js
+│   │   ├── meta.js
+│   │   ├── npm.js
+│   │   ├── paths.js
+│   │   ├── pom.js
+│   │   ├── sbom.js
+│   │   ├── scan
+│   │   │   ├── javascriptScanner.js
+│   │   │   └── scanners
+│   │   │       └── npmAuditScanner.js
+│   │   └── tools.js
+│   ├── index.js
+│   ├── normalization
+│   │   ├── diff.js
+│   │   ├── normalization.js
+│   │   ├── normalize.js
+│   │   ├── readers.js
+│   │   ├── sbom.js
+│   │   ├── summarize.js
+│   │   └── utils.js
+│   ├── render
+│   │   ├── common
+│   │   │   ├── path-helpers.js
+│   │   │   ├── precompute.js
+│   │   │   └── view.js
+│   │   ├── html
+│   │   │   ├── assets
+│   │   │   │   ├── css
+│   │   │   │   │   └── style.css
+│   │   │   │   └── js
+│   │   │   │       ├── dashboard.js
+│   │   │   │       ├── dep-graph.js
+│   │   │   │       ├── fix-insights.js
+│   │   │   │       ├── runtime.js
+│   │   │   │       ├── tables.js
+│   │   │   │       └── vendor
+│   │   │   │           ├── chartjs-plugin-datalabels.min.js
+│   │   │   │           ├── chart.umd.js
+│   │   │   │           └── mermaid.min.js
+│   │   │   ├── html.js
+│   │   │   ├── sections
+│   │   │   │   ├── dashboard.js
+│   │   │   │   ├── dep-graph.js
+│   │   │   │   ├── dep-paths.js
+│   │   │   │   ├── fix-insights.js
+│   │   │   │   ├── overview.js
+│   │   │   │   ├── summary.js
+│   │   │   │   └── vuln-table.js
+│   │   │   └── ui
+│   │   │       ├── header.js
+│   │   │       └── menu.js
+│   │   ├── markdown
+│   │   │   └── markdown.js
+│   │   ├── pdf
+│   │   │   ├── pdf.js
+│   │   │   ├── print.css.js
+│   │   │   ├── sections
+│   │   │   │   ├── cover.js
+│   │   │   │   ├── dashboard.js
+│   │   │   │   ├── dependencyGraphs.js
+│   │   │   │   ├── depPaths.js
+│   │   │   │   ├── fix.js
+│   │   │   │   ├── headerFooter.js
+│   │   │   │   ├── introduction.js
+│   │   │   │   ├── results.js
+│   │   │   │   ├── summary.js
+│   │   │   │   └── toc.js
+│   │   │   └── utils
+│   │   │       └── exporter.js
+│   │   └── render.js
+│   ├── scan
+│   │   └── scanners
+│   └── utils
+│       └── artifact.js
+└── use-git-helpers.patch
+
+22 directories, 69 files
