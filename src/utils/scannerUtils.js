@@ -3,9 +3,10 @@ function parseScannerOutput(source, output) {
     const vulnerabilities = [];
 
     if (source === 'npm-audit') {
-        // Manejar el formato actual de npm audit
+        console.log('Parsing npm audit output...');
         if (rawResults.vulnerabilities) {
             for (const [packageName, vuln] of Object.entries(rawResults.vulnerabilities)) {
+                console.log(`Processing vulnerability for package: ${packageName}`);
                 vulnerabilities.push({
                     id: vuln.id || vuln.advisory,
                     source,
@@ -19,6 +20,8 @@ function parseScannerOutput(source, output) {
                     matchKey: `${vuln.id}:${packageName}:${vuln.version}`
                 });
             }
+        } else {
+            console.log('No vulnerabilities found in npm audit output.');
         }
     }
 

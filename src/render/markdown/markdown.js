@@ -54,7 +54,7 @@ async function renderSummaryMarkdown(ctx = {}) {
 
     // Collect markdown lines progressively.
     const lines = [];
-    lines.push('# Vulnerability Diff — Summary');
+    lines.push('# Vulnerability Diff — Summary 1');
     lines.push('');
     lines.push(`_Generated at ${view.generatedAt}_`);
     lines.push('');
