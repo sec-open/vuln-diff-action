@@ -91,12 +91,7 @@ async function normalization(options = {}) {
   const headComponents = extractComponentInventory(sbom.head);
   const basePomDeps = ctx.pom?.base?.dependencies || [];
   const headPomDeps = ctx.pom?.head?.dependencies || [];
-  const diffDoc = buildDiff(baseDoc, headDoc, meta, {
-    pomBaseDeps: basePomDeps,
-    pomHeadDeps: headPomDeps,
-    sbomBaseComponents: baseComponents,
-    sbomHeadComponents: headComponents
-  });
+  const diffDoc = buildDiff(baseDoc, headDoc, meta, { pomBaseDeps: basePomDeps, pomHeadDeps: headPomDeps });
   const diffOut = path.join(distDir, 'diff.json');
   await writeJSON(diffOut, diffDoc);
   core.info(
