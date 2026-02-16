@@ -129,14 +129,42 @@ async function analysis() {
     core.startGroup('[analysis] Vulnerability scanning (Grype + npm audit)');
 
     stop = time();
+
+    // Escaneo con Grype contra SBOMs CycloneDX
+    await ensureDir(path.dirname(l.grype.base));
+    await ensureDir(path.dirname(l.grype.head));
+
+    const baseGrypeJson = await scanSbomWithGrype(tools.paths.grype, l.sbom.base, baseWorkdir);
+    const headGrypeJson = await scanSbomWithGrype(tools.paths.grype, l.sbom.head, headWorkdir);
+
+    // Guarda las salidas raw de Grype
+    await writeFile(l.grype.base, Buffer.from(baseGrypeJson, 'utf8'));
+    await writeFile(l.grype.head, Buffer.from(headGrypeJson, 'utf8'));
+
+    core.info(`wrote Grype outputs -> ${l.grype.base} / ${l.grype.head}`);
+    core.info(`Grype scans done`);
+
+    // Escaneo con npm audit (solo para proyectos JavaScript o Mixed)
     await ensureDir(path.dirname(l.npm.base));
     await ensureDir(path.dirname(l.npm.head));
     await ensureDir(path.dirname(l.merged.base));
     await ensureDir(path.dirname(l.merged.head));
 
-    // Ejecuta npm audit para base y head
-    await scanWithNpmAudit(baseWorkdir, l.npm.base);
-    await scanWithNpmAudit(headWorkdir, l.npm.head);
+    if (projectType === 'javascript' || projectType === 'mixed') {
+      try {
+        await scanWithNpmAudit(baseWorkdir, l.npm.base);
+        await scanWithNpmAudit(headWorkdir, l.npm.head);
+        core.info(`npm audit scanning completed`);
+      } catch (err) {
+        core.warning(`[analysis] npm audit scanning failed: ${err.message || err}`);
+        // Continúa sin fallar, el escaneo de Grype ya está hecho
+      }
+    } else {
+      core.info(`Skipping npm audit for non-JavaScript project type: ${projectType}`);
+      // Crear archivos vacíos para mantener la estructura
+      await writeFile(l.npm.base, JSON.stringify({ vulnerabilities: [] }, null, 2));
+      await writeFile(l.npm.head, JSON.stringify({ vulnerabilities: [] }, null, 2));
+    }
 
     if (projectType === 'javascript' || projectType === 'mixed') {
       core.startGroup('[analysis] Running enhanced JavaScript scanners');
