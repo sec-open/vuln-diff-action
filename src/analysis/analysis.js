@@ -222,6 +222,25 @@ async function analysis() {
     stop = time();
     const basePomDeps = await extractPomDependencies(baseWorkdir);
     const headPomDeps = await extractPomDependencies(headWorkdir);
+
+    core.info(`[analysis] BASE pom dependencies extracted: ${basePomDeps.length} items`);
+    if (basePomDeps.length > 0) {
+      basePomDeps.slice(0, 3).forEach(d => {
+        core.info(`  - ${d.groupId}:${d.artifactId}:${d.version}`);
+      });
+    } else {
+      core.warning(`[analysis] WARNING: No dependencies extracted from BASE`);
+    }
+
+    core.info(`[analysis] HEAD pom dependencies extracted: ${headPomDeps.length} items`);
+    if (headPomDeps.length > 0) {
+      headPomDeps.slice(0, 3).forEach(d => {
+        core.info(`  - ${d.groupId}:${d.artifactId}:${d.version}`);
+      });
+    } else {
+      core.warning(`[analysis] WARNING: No dependencies extracted from HEAD`);
+    }
+
     await ensureDir(path.dirname(l.pom.base));
     await ensureDir(path.dirname(l.pom.head));
     await writeJson(l.pom.base, { dependencies: basePomDeps });

@@ -91,9 +91,31 @@ async function normalization(options = {}) {
   const headComponents = extractComponentInventory(sbom.head);
   const basePomDeps = ctx.pom?.base?.dependencies || [];
   const headPomDeps = ctx.pom?.head?.dependencies || [];
+
+  core.info(`[vuln-diff][normalization] BASE pom deps: ${basePomDeps.length} items`);
+  if (basePomDeps.length > 0) {
+    basePomDeps.slice(0, 3).forEach(d => {
+      core.info(`  - ${d.groupId}:${d.artifactId}:${d.version}`);
+    });
+  } else {
+    core.warning(`[vuln-diff][normalization] WARNING: No BASE dependencies in context`);
+  }
+
+  core.info(`[vuln-diff][normalization] HEAD pom deps: ${headPomDeps.length} items`);
+  if (headPomDeps.length > 0) {
+    headPomDeps.slice(0, 3).forEach(d => {
+      core.info(`  - ${d.groupId}:${d.artifactId}:${d.version}`);
+    });
+  } else {
+    core.warning(`[vuln-diff][normalization] WARNING: No HEAD dependencies in context`);
+  }
+
   const diffDoc = buildDiff(baseDoc, headDoc, meta, { pomBaseDeps: basePomDeps, pomHeadDeps: headPomDeps });
   const diffOut = path.join(distDir, 'diff.json');
   await writeJSON(diffOut, diffDoc);
+
+  core.info(`[vuln-diff][normalization] dependency diff totals: NEW=${diffDoc.dependency_pom_diff.totals.NEW}, UPDATED=${diffDoc.dependency_pom_diff.totals.UPDATED}, REMOVED=${diffDoc.dependency_pom_diff.totals.REMOVED}, UNCHANGED=${diffDoc.dependency_pom_diff.totals.UNCHANGED}`);
+
   core.info(
     `[vuln-diff][normalization] wrote diff.json — totals: ` +
     `NEW=${diffDoc.summary.totals.NEW}, ` +
