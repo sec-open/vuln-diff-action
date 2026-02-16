@@ -1,480 +1,517 @@
-2026-02-16T14:30:30.9123639Z Current runner version: '2.331.0'
-2026-02-16T14:30:30.9159433Z ##[group]Runner Image Provisioner
-2026-02-16T14:30:30.9160802Z Hosted Compute Agent
-2026-02-16T14:30:30.9161720Z Version: 20260123.484
-2026-02-16T14:30:30.9162636Z Commit: 6bd6555ca37d84114959e1c76d2c01448ff61c5d
-2026-02-16T14:30:30.9163922Z Build Date: 2026-01-23T19:41:17Z
-2026-02-16T14:30:30.9165121Z Worker ID: {42511d8b-31aa-4261-9c60-5a99e2dbc57f}
-2026-02-16T14:30:30.9166305Z Azure Region: northcentralus
-2026-02-16T14:30:30.9167434Z ##[endgroup]
-2026-02-16T14:30:30.9170048Z ##[group]Operating System
-2026-02-16T14:30:30.9171102Z Ubuntu
-2026-02-16T14:30:30.9172401Z 24.04.3
-2026-02-16T14:30:30.9173328Z LTS
-2026-02-16T14:30:30.9174143Z ##[endgroup]
-2026-02-16T14:30:30.9175086Z ##[group]Runner Image
-2026-02-16T14:30:30.9176034Z Image: ubuntu-24.04
-2026-02-16T14:30:30.9176843Z Version: 20260209.23.1
-2026-02-16T14:30:30.9179093Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260209.23/images/ubuntu/Ubuntu2404-Readme.md
-2026-02-16T14:30:30.9181763Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260209.23
-2026-02-16T14:30:30.9183508Z ##[endgroup]
-2026-02-16T14:30:30.9188464Z ##[group]GITHUB_TOKEN Permissions
-2026-02-16T14:30:30.9191763Z Actions: write
-2026-02-16T14:30:30.9192857Z ArtifactMetadata: write
-2026-02-16T14:30:30.9193796Z Attestations: write
-2026-02-16T14:30:30.9194593Z Checks: write
-2026-02-16T14:30:30.9195636Z Contents: write
-2026-02-16T14:30:30.9196561Z Deployments: write
-2026-02-16T14:30:30.9197469Z Discussions: write
-2026-02-16T14:30:30.9198797Z Issues: write
-2026-02-16T14:30:30.9199719Z Metadata: read
-2026-02-16T14:30:30.9200548Z Models: read
-2026-02-16T14:30:30.9201514Z Packages: write
-2026-02-16T14:30:30.9202330Z Pages: write
-2026-02-16T14:30:30.9203340Z PullRequests: write
-2026-02-16T14:30:30.9204463Z RepositoryProjects: write
-2026-02-16T14:30:30.9205451Z SecurityEvents: write
-2026-02-16T14:30:30.9206323Z Statuses: write
-2026-02-16T14:30:30.9207282Z ##[endgroup]
-2026-02-16T14:30:30.9210685Z Secret source: Actions
-2026-02-16T14:30:30.9212060Z Prepare workflow directory
-2026-02-16T14:30:30.9696465Z Prepare all required actions
-2026-02-16T14:30:30.9754287Z Getting action download info
-2026-02-16T14:30:31.3564805Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
-2026-02-16T14:30:31.4751006Z Download action repository 'actions/cache@v4' (SHA:0057852bfaa89a56745cba8c7296529d2fc39830)
-2026-02-16T14:30:31.5798048Z Download action repository 'actions/setup-java@v4' (SHA:c1e323688fd81a25caa38c78aa6df2d33d3e20d9)
-2026-02-16T14:30:32.1067053Z Download action repository 'sec-open/vuln-diff-action@v2.0.0-alpha.3' (SHA:81568eaaf0b0c2f4927d0d967db35ef02b841fdf)
-2026-02-16T14:30:33.3914040Z Complete job name: compare-branches
-2026-02-16T14:30:33.4765798Z ##[group]Run actions/checkout@v4
-2026-02-16T14:30:33.4767115Z with:
-2026-02-16T14:30:33.4768234Z   ref: TASK-7908
-2026-02-16T14:30:33.4769050Z   fetch-depth: 0
-2026-02-16T14:30:33.4769829Z   fetch-tags: true
-2026-02-16T14:30:33.4770705Z   repository: opencb/java-common-libs
-2026-02-16T14:30:33.4772022Z   token: ***
-2026-02-16T14:30:33.4772783Z   ssh-strict: true
-2026-02-16T14:30:33.4773557Z   ssh-user: git
-2026-02-16T14:30:33.4774361Z   persist-credentials: true
-2026-02-16T14:30:33.4775273Z   clean: true
-2026-02-16T14:30:33.4776099Z   sparse-checkout-cone-mode: true
-2026-02-16T14:30:33.4777083Z   show-progress: true
-2026-02-16T14:30:33.4778139Z   lfs: false
-2026-02-16T14:30:33.4778894Z   submodules: false
-2026-02-16T14:30:33.4779717Z   set-safe-directory: true
-2026-02-16T14:30:33.4780917Z ##[endgroup]
-2026-02-16T14:30:33.5946667Z Syncing repository: opencb/java-common-libs
-2026-02-16T14:30:33.5949745Z ##[group]Getting Git version info
-2026-02-16T14:30:33.5951557Z Working directory is '/home/runner/work/java-common-libs/java-common-libs'
-2026-02-16T14:30:33.5953836Z [command]/usr/bin/git version
-2026-02-16T14:30:33.5954906Z git version 2.52.0
-2026-02-16T14:30:33.5963258Z ##[endgroup]
-2026-02-16T14:30:33.5978139Z Temporarily overriding HOME='/home/runner/work/_temp/9e92b2a8-ec55-4ada-90fe-111dfbb6aafd' before making global git config changes
-2026-02-16T14:30:33.5981078Z Adding repository directory to the temporary git global config as a safe directory
-2026-02-16T14:30:33.5991475Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/java-common-libs/java-common-libs
-2026-02-16T14:30:33.6033874Z Deleting the contents of '/home/runner/work/java-common-libs/java-common-libs'
-2026-02-16T14:30:33.6037687Z ##[group]Initializing the repository
-2026-02-16T14:30:33.6042319Z [command]/usr/bin/git init /home/runner/work/java-common-libs/java-common-libs
-2026-02-16T14:30:33.6134540Z hint: Using 'master' as the name for the initial branch. This default branch name
-2026-02-16T14:30:33.6136798Z hint: will change to "main" in Git 3.0. To configure the initial branch name
-2026-02-16T14:30:33.6139289Z hint: to use in all of your new repositories, which will suppress this warning,
-2026-02-16T14:30:33.6141703Z hint: call:
-2026-02-16T14:30:33.6142521Z hint:
-2026-02-16T14:30:33.6143549Z hint: 	git config --global init.defaultBranch <name>
-2026-02-16T14:30:33.6144872Z hint:
-2026-02-16T14:30:33.6146381Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
-2026-02-16T14:30:33.6148462Z hint: 'development'. The just-created branch can be renamed via this command:
-2026-02-16T14:30:33.6149950Z hint:
-2026-02-16T14:30:33.6151018Z hint: 	git branch -m <name>
-2026-02-16T14:30:33.6152133Z hint:
-2026-02-16T14:30:33.6153416Z hint: Disable this message with "git config set advice.defaultBranchName false"
-2026-02-16T14:30:33.6155769Z Initialized empty Git repository in /home/runner/work/java-common-libs/java-common-libs/.git/
-2026-02-16T14:30:33.6159675Z [command]/usr/bin/git remote add origin https://github.com/opencb/java-common-libs
-2026-02-16T14:30:33.6192642Z ##[endgroup]
-2026-02-16T14:30:33.6194307Z ##[group]Disabling automatic garbage collection
-2026-02-16T14:30:33.6196562Z [command]/usr/bin/git config --local gc.auto 0
-2026-02-16T14:30:33.6227329Z ##[endgroup]
-2026-02-16T14:30:33.6229092Z ##[group]Setting up auth
-2026-02-16T14:30:33.6234594Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
-2026-02-16T14:30:33.6269966Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
-2026-02-16T14:30:33.6624047Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
-2026-02-16T14:30:33.6661395Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
-2026-02-16T14:30:33.6896979Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
-2026-02-16T14:30:33.6931325Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
-2026-02-16T14:30:33.7182005Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
-2026-02-16T14:30:33.7218873Z ##[endgroup]
-2026-02-16T14:30:33.7228314Z ##[group]Fetching the repository
-2026-02-16T14:30:33.7232517Z [command]/usr/bin/git -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
-2026-02-16T14:30:34.4823369Z From https://github.com/opencb/java-common-libs
-2026-02-16T14:30:34.4829362Z  * [new branch]        TASK-1113               -> origin/TASK-1113
-2026-02-16T14:30:34.4834642Z  * [new branch]        TASK-1120               -> origin/TASK-1120
-2026-02-16T14:30:34.4837261Z  * [new branch]        TASK-1309               -> origin/TASK-1309
-2026-02-16T14:30:34.4840061Z  * [new branch]        TASK-1415               -> origin/TASK-1415
-2026-02-16T14:30:34.4842659Z  * [new branch]        TASK-1718               -> origin/TASK-1718
-2026-02-16T14:30:34.4845500Z  * [new branch]        TASK-2290               -> origin/TASK-2290
-2026-02-16T14:30:34.4848387Z  * [new branch]        TASK-2297               -> origin/TASK-2297
-2026-02-16T14:30:34.4850863Z  * [new branch]        TASK-2315               -> origin/TASK-2315
-2026-02-16T14:30:34.4853518Z  * [new branch]        TASK-2347               -> origin/TASK-2347
-2026-02-16T14:30:34.4856083Z  * [new branch]        TASK-2390               -> origin/TASK-2390
-2026-02-16T14:30:34.4858406Z  * [new branch]        TASK-2496               -> origin/TASK-2496
-2026-02-16T14:30:34.4860004Z  * [new branch]        TASK-3808               -> origin/TASK-3808
-2026-02-16T14:30:34.4861412Z  * [new branch]        TASK-3900               -> origin/TASK-3900
-2026-02-16T14:30:34.4862845Z  * [new branch]        TASK-504                -> origin/TASK-504
-2026-02-16T14:30:34.4864343Z  * [new branch]        TASK-5174               -> origin/TASK-5174
-2026-02-16T14:30:34.4865802Z  * [new branch]        TASK-5681               -> origin/TASK-5681
-2026-02-16T14:30:34.4867211Z  * [new branch]        TASK-5696               -> origin/TASK-5696
-2026-02-16T14:30:34.4868911Z  * [new branch]        TASK-6165               -> origin/TASK-6165
-2026-02-16T14:30:34.4870335Z  * [new branch]        TASK-6187               -> origin/TASK-6187
-2026-02-16T14:30:34.4871719Z  * [new branch]        TASK-6521               -> origin/TASK-6521
-2026-02-16T14:30:34.4873192Z  * [new branch]        TASK-694                -> origin/TASK-694
-2026-02-16T14:30:34.4874639Z  * [new branch]        TASK-6981               -> origin/TASK-6981
-2026-02-16T14:30:34.4876011Z  * [new branch]        TASK-7037               -> origin/TASK-7037
-2026-02-16T14:30:34.4877489Z  * [new branch]        TASK-7353               -> origin/TASK-7353
-2026-02-16T14:30:34.4879087Z  * [new branch]        TASK-7400               -> origin/TASK-7400
-2026-02-16T14:30:34.4880508Z  * [new branch]        TASK-7461               -> origin/TASK-7461
-2026-02-16T14:30:34.4882003Z  * [new branch]        TASK-7532               -> origin/TASK-7532
-2026-02-16T14:30:34.4883421Z  * [new branch]        TASK-7612               -> origin/TASK-7612
-2026-02-16T14:30:34.4884874Z  * [new branch]        TASK-7693               -> origin/TASK-7693
-2026-02-16T14:30:34.4886291Z  * [new branch]        TASK-7731               -> origin/TASK-7731
-2026-02-16T14:30:34.4887923Z  * [new branch]        TASK-7751               -> origin/TASK-7751
-2026-02-16T14:30:34.4889480Z  * [new branch]        TASK-7809               -> origin/TASK-7809
-2026-02-16T14:30:34.4890909Z  * [new branch]        TASK-7908               -> origin/TASK-7908
-2026-02-16T14:30:34.4892387Z  * [new branch]        TASK-7958               -> origin/TASK-7958
-2026-02-16T14:30:34.4894022Z  * [new branch]        TASK-7966               -> origin/TASK-7966
-2026-02-16T14:30:34.4895515Z  * [new branch]        TASK-8055               -> origin/TASK-8055
-2026-02-16T14:30:34.4896958Z  * [new branch]        TASK-8067               -> origin/TASK-8067
-2026-02-16T14:30:34.4898757Z  * [new branch]        TASK-832                -> origin/TASK-832
-2026-02-16T14:30:34.4900225Z  * [new branch]        develop                 -> origin/develop
-2026-02-16T14:30:34.4901757Z  * [new branch]        develop-facet-venn      -> origin/develop-facet-venn
-2026-02-16T14:30:34.4903373Z  * [new branch]        develop-mongo6          -> origin/develop-mongo6
-2026-02-16T14:30:34.4904948Z  * [new branch]        feature-status          -> origin/feature-status
-2026-02-16T14:30:34.4906614Z  * [new branch]        feature/new-mongo-schema -> origin/feature/new-mongo-schema
-2026-02-16T14:30:34.4908530Z  * [new branch]        halender-patch-1        -> origin/halender-patch-1
-2026-02-16T14:30:34.4910016Z  * [new branch]        hotfix-3.2              -> origin/hotfix-3.2
-2026-02-16T14:30:34.4911589Z  * [new branch]        hotfix-3.3              -> origin/hotfix-3.3
-2026-02-16T14:30:34.4913054Z  * [new branch]        hotfix-3.4.x            -> origin/hotfix-3.4.x
-2026-02-16T14:30:34.4914651Z  * [new branch]        hotfix-3.5.x            -> origin/hotfix-3.5.x
-2026-02-16T14:30:34.4916225Z  * [new branch]        hotfix-3.7.x            -> origin/hotfix-3.7.x
-2026-02-16T14:30:34.4917625Z  * [new branch]        issue-40                -> origin/issue-40
-2026-02-16T14:30:34.4919174Z  * [new branch]        main                    -> origin/main
-2026-02-16T14:30:34.4920592Z  * [new branch]        mvntest                 -> origin/mvntest
-2026-02-16T14:30:34.4922068Z  * [new branch]        release-4.0.0           -> origin/release-4.0.0
-2026-02-16T14:30:34.4923565Z  * [new branch]        release-4.1.x           -> origin/release-4.1.x
-2026-02-16T14:30:34.4925100Z  * [new branch]        release-4.10.x          -> origin/release-4.10.x
-2026-02-16T14:30:34.4926638Z  * [new branch]        release-4.11.x          -> origin/release-4.11.x
-2026-02-16T14:30:34.4928337Z  * [new branch]        release-4.12.x          -> origin/release-4.12.x
-2026-02-16T14:30:34.4929987Z  * [new branch]        release-4.2.x           -> origin/release-4.2.x
-2026-02-16T14:30:34.4931508Z  * [new branch]        release-4.3.x           -> origin/release-4.3.x
-2026-02-16T14:30:34.4932975Z  * [new branch]        release-4.4.x           -> origin/release-4.4.x
-2026-02-16T14:30:34.4934533Z  * [new branch]        release-4.5.x           -> origin/release-4.5.x
-2026-02-16T14:30:34.4936005Z  * [new branch]        release-4.6.x           -> origin/release-4.6.x
-2026-02-16T14:30:34.4937529Z  * [new branch]        release-4.7.x           -> origin/release-4.7.x
-2026-02-16T14:30:34.4939326Z  * [new branch]        release-4.8.x           -> origin/release-4.8.x
-2026-02-16T14:30:34.4940816Z  * [new branch]        release-4.9.x           -> origin/release-4.9.x
-2026-02-16T14:30:34.4942329Z  * [new branch]        release-5.0.x           -> origin/release-5.0.x
-2026-02-16T14:30:34.4943932Z  * [new branch]        release-5.0.x-beta      -> origin/release-5.0.x-beta
-2026-02-16T14:30:34.4945465Z  * [new branch]        release-5.1.x           -> origin/release-5.1.x
-2026-02-16T14:30:34.4947013Z  * [new branch]        release-5.2.x           -> origin/release-5.2.x
-2026-02-16T14:30:34.4948854Z  * [new branch]        release-5.x.x           -> origin/release-5.x.x
-2026-02-16T14:30:34.4950395Z  * [new branch]        release-6.0.x           -> origin/release-6.0.x
-2026-02-16T14:30:34.4951904Z  * [new branch]        release-6.x.x           -> origin/release-6.x.x
-2026-02-16T14:30:34.4953528Z  * [new branch]        revert-4-newGOAnnotator -> origin/revert-4-newGOAnnotator
-2026-02-16T14:30:34.4955176Z  * [new branch]        v1.0-fixes              -> origin/v1.0-fixes
-2026-02-16T14:30:34.4956490Z  * [new tag]           1.0.0                   -> 1.0.0
-2026-02-16T14:30:34.4958112Z  * [new tag]           v3.0.0                  -> v3.0.0
-2026-02-16T14:30:34.4959441Z  * [new tag]           v3.1.0                  -> v3.1.0
-2026-02-16T14:30:34.4960636Z  * [new tag]           v3.2.0                  -> v3.2.0
-2026-02-16T14:30:34.4961879Z  * [new tag]           v3.2.1                  -> v3.2.1
-2026-02-16T14:30:34.4963049Z  * [new tag]           v3.3.0                  -> v3.3.0
-2026-02-16T14:30:34.4964266Z  * [new tag]           v3.3.1                  -> v3.3.1
-2026-02-16T14:30:34.4965386Z  * [new tag]           v3.3.2                  -> v3.3.2
-2026-02-16T14:30:34.4966643Z  * [new tag]           v3.4.0                  -> v3.4.0
-2026-02-16T14:30:34.4968029Z  * [new tag]           v3.4.1                  -> v3.4.1
-2026-02-16T14:30:34.4969229Z  * [new tag]           v3.4.2                  -> v3.4.2
-2026-02-16T14:30:34.4970493Z  * [new tag]           v3.5.0                  -> v3.5.0
-2026-02-16T14:30:34.4971664Z  * [new tag]           v3.5.1                  -> v3.5.1
-2026-02-16T14:30:34.4972828Z  * [new tag]           v3.6.0                  -> v3.6.0
-2026-02-16T14:30:34.4974050Z  * [new tag]           v3.7.0                  -> v3.7.0
-2026-02-16T14:30:34.4975235Z  * [new tag]           v3.7.1                  -> v3.7.1
-2026-02-16T14:30:34.4976395Z  * [new tag]           v3.7.2                  -> v3.7.2
-2026-02-16T14:30:34.4978346Z  * [new tag]           v3.7.3                  -> v3.7.3
-2026-02-16T14:30:34.4979675Z  * [new tag]           v3.7.4                  -> v3.7.4
-2026-02-16T14:30:34.4980830Z  * [new tag]           v3.7.5                  -> v3.7.5
-2026-02-16T14:30:34.4982167Z  * [new tag]           v4.0.0                  -> v4.0.0
-2026-02-16T14:30:34.4983313Z  * [new tag]           v4.0.1                  -> v4.0.1
-2026-02-16T14:30:34.4984512Z  * [new tag]           v4.0.2                  -> v4.0.2
-2026-02-16T14:30:34.4985787Z  * [new tag]           v4.0.3                  -> v4.0.3
-2026-02-16T14:30:34.4986971Z  * [new tag]           v4.0.4                  -> v4.0.4
-2026-02-16T14:30:34.4988599Z  * [new tag]           v4.0.5                  -> v4.0.5
-2026-02-16T14:30:34.4989850Z  * [new tag]           v4.0.6                  -> v4.0.6
-2026-02-16T14:30:34.4991050Z  * [new tag]           v4.1.0                  -> v4.1.0
-2026-02-16T14:30:34.4992176Z  * [new tag]           v4.1.1                  -> v4.1.1
-2026-02-16T14:30:34.4993398Z  * [new tag]           v4.1.2                  -> v4.1.2
-2026-02-16T14:30:34.4994601Z  * [new tag]           v4.10.0                 -> v4.10.0
-2026-02-16T14:30:34.4995748Z  * [new tag]           v4.11.0                 -> v4.11.0
-2026-02-16T14:30:34.4997001Z  * [new tag]           v4.12.0                 -> v4.12.0
-2026-02-16T14:30:34.4998526Z  * [new tag]           v4.2.0                  -> v4.2.0
-2026-02-16T14:30:34.4999720Z  * [new tag]           v4.2.1                  -> v4.2.1
-2026-02-16T14:30:34.5000939Z  * [new tag]           v4.3.0                  -> v4.3.0
-2026-02-16T14:30:34.5002109Z  * [new tag]           v4.4.0                  -> v4.4.0
-2026-02-16T14:30:34.5003294Z  * [new tag]           v4.4.1                  -> v4.4.1
-2026-02-16T14:30:34.5004450Z  * [new tag]           v4.4.2                  -> v4.4.2
-2026-02-16T14:30:34.5005692Z  * [new tag]           v4.4.3                  -> v4.4.3
-2026-02-16T14:30:34.5006859Z  * [new tag]           v4.4.4                  -> v4.4.4
-2026-02-16T14:30:34.5008233Z  * [new tag]           v4.4.5                  -> v4.4.5
-2026-02-16T14:30:34.5009519Z  * [new tag]           v4.5.0                  -> v4.5.0
-2026-02-16T14:30:34.5010669Z  * [new tag]           v4.6.0                  -> v4.6.0
-2026-02-16T14:30:34.5042187Z  * [new tag]           v4.6.1                  -> v4.6.1
-2026-02-16T14:30:34.5043876Z  * [new tag]           v4.7.0                  -> v4.7.0
-2026-02-16T14:30:34.5045848Z  * [new tag]           v4.7.1                  -> v4.7.1
-2026-02-16T14:30:34.5047649Z  * [new tag]           v4.8.0                  -> v4.8.0
-2026-02-16T14:30:34.5049703Z  * [new tag]           v4.9.0                  -> v4.9.0
-2026-02-16T14:30:34.5051789Z  * [new tag]           v5.0.0                  -> v5.0.0
-2026-02-16T14:30:34.5053668Z  * [new tag]           v5.1.0                  -> v5.1.0
-2026-02-16T14:30:34.5055485Z  * [new tag]           v5.2.0                  -> v5.2.0
-2026-02-16T14:30:34.5057190Z  * [new tag]           v5.2.1                  -> v5.2.1
-2026-02-16T14:30:34.5058714Z  * [new tag]           v5.2.2                  -> v5.2.2
-2026-02-16T14:30:34.5059801Z  * [new tag]           v5.2.3                  -> v5.2.3
-2026-02-16T14:30:34.5060886Z  * [new tag]           v5.3.0                  -> v5.3.0
-2026-02-16T14:30:34.5061962Z  * [new tag]           v5.4.0                  -> v5.4.0
-2026-02-16T14:30:34.5063023Z  * [new tag]           v5.5.0                  -> v5.5.0
-2026-02-16T14:30:34.5064105Z  * [new tag]           v5.6.0                  -> v5.6.0
-2026-02-16T14:30:34.5065183Z  * [new tag]           v6.0.0                  -> v6.0.0
-2026-02-16T14:30:34.5066252Z  * [new tag]           v6.1.0                  -> v6.1.0
-2026-02-16T14:30:34.5069219Z ##[endgroup]
-2026-02-16T14:30:34.5070370Z ##[group]Determining the checkout info
-2026-02-16T14:30:34.5071520Z [command]/usr/bin/git branch --list --remote origin/TASK-7908
-2026-02-16T14:30:34.5079277Z   origin/TASK-7908
-2026-02-16T14:30:34.5084827Z ##[endgroup]
-2026-02-16T14:30:34.5089561Z [command]/usr/bin/git sparse-checkout disable
-2026-02-16T14:30:34.5133629Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
-2026-02-16T14:30:34.5164505Z ##[group]Checking out the ref
-2026-02-16T14:30:34.5169623Z [command]/usr/bin/git checkout --progress --force -B TASK-7908 refs/remotes/origin/TASK-7908
-2026-02-16T14:30:34.5539126Z Switched to a new branch 'TASK-7908'
-2026-02-16T14:30:34.5541251Z branch 'TASK-7908' set up to track 'origin/TASK-7908'.
-2026-02-16T14:30:34.5552468Z ##[endgroup]
-2026-02-16T14:30:34.5598447Z [command]/usr/bin/git log -1 --format=%H
-2026-02-16T14:30:34.5627237Z 6ea5bda43331f60dd07514b84dc9a1eded4e4515
-2026-02-16T14:30:34.5926415Z ##[group]Run actions/cache@v4
-2026-02-16T14:30:34.5927320Z with:
-2026-02-16T14:30:34.5928109Z   path: ~/.cache/puppeteer
-2026-02-16T14:30:34.5928901Z   key: puppeteer-Linux
-2026-02-16T14:30:34.5929670Z   enableCrossOsArchive: false
-2026-02-16T14:30:34.5930501Z   fail-on-cache-miss: false
-2026-02-16T14:30:34.5931297Z   lookup-only: false
-2026-02-16T14:30:34.5931995Z   save-always: false
-2026-02-16T14:30:34.5932678Z ##[endgroup]
-2026-02-16T14:30:34.9006777Z Cache not found for input keys: puppeteer-Linux
-2026-02-16T14:30:34.9182262Z ##[group]Run actions/setup-java@v4
-2026-02-16T14:30:34.9182632Z with:
-2026-02-16T14:30:34.9182902Z   distribution: temurin
-2026-02-16T14:30:34.9183201Z   java-version: 8
-2026-02-16T14:30:34.9183472Z   cache: maven
-2026-02-16T14:30:34.9183754Z   java-package: jdk
-2026-02-16T14:30:34.9184042Z   check-latest: false
-2026-02-16T14:30:34.9184342Z   server-id: github
-2026-02-16T14:30:34.9184636Z   server-username: GITHUB_ACTOR
-2026-02-16T14:30:34.9184979Z   server-password: GITHUB_TOKEN
-2026-02-16T14:30:34.9185311Z   overwrite-settings: true
-2026-02-16T14:30:34.9185632Z   job-status: success
-2026-02-16T14:30:34.9186095Z   token: ***
-2026-02-16T14:30:34.9186361Z ##[endgroup]
-2026-02-16T14:30:35.1300339Z ##[group]Installed distributions
-2026-02-16T14:30:35.1383073Z Resolved Java 8.0.482+8 from tool-cache
-2026-02-16T14:30:35.1383698Z Setting Java 8.0.482+8 as the default
-2026-02-16T14:30:35.1403614Z Creating toolchains.xml for JDK version 8 from temurin
-2026-02-16T14:30:35.1518130Z Writing to /home/runner/.m2/toolchains.xml
-2026-02-16T14:30:35.1518711Z
-2026-02-16T14:30:35.1519166Z Java configuration:
-2026-02-16T14:30:35.1519989Z   Distribution: temurin
-2026-02-16T14:30:35.1520439Z   Version: 8.0.482+8
-2026-02-16T14:30:35.1521648Z   Path: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/8.0.482-8/x64
-2026-02-16T14:30:35.1522261Z
-2026-02-16T14:30:35.1522811Z ##[endgroup]
-2026-02-16T14:30:35.1542028Z Creating settings.xml with server-id: github
-2026-02-16T14:30:35.1556806Z Writing to /home/runner/.m2/settings.xml
-2026-02-16T14:30:35.4006871Z Cache hit for: setup-java-Linux-x64-maven-889aaee0e25954e57424c0210c205a884f3a0cef53d9e59dc7bd124e1655559a
-2026-02-16T14:30:36.1633518Z Received 38202848 of 38202848 (100.0%), 58.1 MBs/sec
-2026-02-16T14:30:36.1634601Z Cache Size: ~36 MB (38202848 B)
-2026-02-16T14:30:36.1669378Z [command]/usr/bin/tar -xf /home/runner/work/_temp/158773ef-f388-4571-858f-889e05f483b2/cache.tzst -P -C /home/runner/work/java-common-libs/java-common-libs --use-compress-program unzstd
-2026-02-16T14:30:36.2823666Z Cache restored successfully
-2026-02-16T14:30:36.2908573Z Cache restored from key: setup-java-Linux-x64-maven-889aaee0e25954e57424c0210c205a884f3a0cef53d9e59dc7bd124e1655559a
-2026-02-16T14:30:36.3109936Z ##[group]Run sec-open/vuln-diff-action@v2.0.0-alpha.3
-2026-02-16T14:30:36.3110291Z with:
-2026-02-16T14:30:36.3110473Z   base_ref: develop
-2026-02-16T14:30:36.3110667Z   head_ref: TASK-7908
-2026-02-16T14:30:36.3111195Z   html_logo_url: https://zettagenomics.com/wp-content/uploads/2022/10/Zetta-reversed-out-full-logo-dark-background.png
-2026-02-16T14:30:36.3111737Z   path: .
-2026-02-16T14:30:36.3112070Z   github_token: ***
-2026-02-16T14:30:36.3112283Z   include_dev_dependencies: false
-2026-02-16T14:30:36.3112524Z env:
-2026-02-16T14:30:36.3112819Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/8.0.482-8/x64
-2026-02-16T14:30:36.3113546Z   JAVA_HOME_8_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/8.0.482-8/x64
-2026-02-16T14:30:36.3113902Z ##[endgroup]
-2026-02-16T14:30:36.4876732Z [vuln-diff] Analysis: start
-2026-02-16T14:30:36.4883753Z ##[group][analysis] Inputs
-2026-02-16T14:30:36.4884260Z [debug] Analysis start
-2026-02-16T14:30:36.4884551Z base_ref: develop
-2026-02-16T14:30:36.4884875Z head_ref: TASK-7908
-2026-02-16T14:30:36.4885154Z path: .
-2026-02-16T14:30:36.4894770Z ##[endgroup]
-2026-02-16T14:30:36.4895666Z ##[group][analysis] Tools detection
-2026-02-16T14:31:52.8706412Z tools detected in 76381ms
-2026-02-16T14:31:52.8709709Z ##[endgroup]
-2026-02-16T14:31:52.8710413Z ##[group][analysis] Resolve refs & prepare worktrees
-2026-02-16T14:31:53.1094194Z resolved base_sha: 1cc8a1f06371e32e8ead07a1eb402c7121857159 (1cc8a1f)
-2026-02-16T14:31:53.1096070Z resolved head_sha: 6ea5bda43331f60dd07514b84dc9a1eded4e4515 (6ea5bda)
-2026-02-16T14:31:53.1980343Z base workdir: /home/runner/work/java-common-libs/java-common-libs/dist/refs/1cc8a1f
-2026-02-16T14:31:53.1981454Z head workdir: /home/runner/work/java-common-libs/java-common-libs/dist/refs/6ea5bda
-2026-02-16T14:31:53.1982238Z refs & worktrees ready in 327ms
-2026-02-16T14:31:53.1983094Z ##[endgroup]
-2026-02-16T14:31:53.1983699Z ##[group][analysis] Project type detection
-2026-02-16T14:31:53.1984256Z [analysis] Detected project type: java
-2026-02-16T14:31:53.1984947Z ##[endgroup]
-2026-02-16T14:31:53.1986759Z ##[group][analysis] SBOM generation
-2026-02-16T14:32:06.5789123Z wrote SBOMs -> /home/runner/work/java-common-libs/java-common-libs/dist/sbom/base.sbom.json / /home/runner/work/java-common-libs/java-common-libs/dist/sbom/head.sbom.json
-2026-02-16T14:32:06.5792739Z SBOM generation done in 13380ms
-2026-02-16T14:32:06.5793639Z ##[endgroup]
-2026-02-16T14:32:06.5794331Z ##[group][analysis] Vulnerability scanning (Grype + npm audit)
-2026-02-16T14:32:07.4095960Z wrote Grype outputs -> /home/runner/work/java-common-libs/java-common-libs/dist/grype/base.grype.json / /home/runner/work/java-common-libs/java-common-libs/dist/grype/head.grype.json
-2026-02-16T14:32:07.4097090Z Grype scans done
-2026-02-16T14:32:07.4104117Z Skipping npm audit for non-JavaScript project type: java
-2026-02-16T14:32:07.4175731Z wrote merged outputs -> /home/runner/work/java-common-libs/java-common-libs/dist/merged/base.merged.json / /home/runner/work/java-common-libs/java-common-libs/dist/merged/head.merged.json
-2026-02-16T14:32:07.4176870Z Vulnerability scanning done in 839ms
-2026-02-16T14:32:07.4177967Z ##[endgroup]
-2026-02-16T14:32:07.4178607Z ##[group][analysis] Metadata
-2026-02-16T14:32:07.4180458Z [debug] metaPath: /home/runner/work/java-common-libs/java-common-libs/dist/meta.json
-2026-02-16T14:32:07.4181093Z [debug] metaObj: {
-2026-02-16T14:32:07.4181319Z   "schema_version": "1.0",
-2026-02-16T14:32:07.4181750Z   "generated_at": "2026-02-16T14:32:07.417Z",
-2026-02-16T14:32:07.4182384Z   "inputs": {
-2026-02-16T14:32:07.4182758Z     "base_ref": "develop",
-2026-02-16T14:32:07.4183173Z     "head_ref": "TASK-7908",
-2026-02-16T14:32:07.4183556Z     "path": "."
-2026-02-16T14:32:07.4183854Z   },
-2026-02-16T14:32:07.4184176Z   "repo": "opencb/java-common-libs",
-2026-02-16T14:32:07.4184626Z   "tools": {
-2026-02-16T14:32:07.4185220Z     "cyclonedx_maven": "Apache Maven 3.9.12 (848fbb4bf2d427b72bdb2471c22fced7ebd9a7a1)",
-2026-02-16T14:32:07.4186289Z     "cyclonedx_npm": "4.1.2",
-2026-02-16T14:32:07.4186736Z     "syft": "1.13.0",
-2026-02-16T14:32:07.4187067Z     "grype": "0.104.0",
-2026-02-16T14:32:07.4187384Z     "node": "v20.19.6"
-2026-02-16T14:32:07.4187683Z   },
-2026-02-16T14:32:07.4188208Z   "environment": {
-2026-02-16T14:32:07.4188556Z     "runner_os": "linux",
-2026-02-16T14:32:07.4188912Z     "arch": "x64"
-2026-02-16T14:32:07.4189209Z   },
-2026-02-16T14:32:07.4189469Z   "paths": {
-2026-02-16T14:32:07.4189740Z     "sbom": {
-2026-02-16T14:32:07.4190337Z       "base": "/home/runner/work/java-common-libs/java-common-libs/dist/sbom/base.sbom.json",
-2026-02-16T14:32:07.4191608Z       "head": "/home/runner/work/java-common-libs/java-common-libs/dist/sbom/head.sbom.json"
-2026-02-16T14:32:07.4192305Z     },
-2026-02-16T14:32:07.4192582Z     "grype": {
-2026-02-16T14:32:07.4193187Z       "base": "/home/runner/work/java-common-libs/java-common-libs/dist/grype/base.grype.json",
-2026-02-16T14:32:07.4194212Z       "head": "/home/runner/work/java-common-libs/java-common-libs/dist/grype/head.grype.json"
-2026-02-16T14:32:07.4194906Z     }
-2026-02-16T14:32:07.4195171Z   }
-2026-02-16T14:32:07.4195417Z }
-2026-02-16T14:32:07.4197398Z wrote meta.json -> /home/runner/work/java-common-libs/java-common-libs/dist/meta.json
-2026-02-16T14:32:07.4198748Z metadata written in 2ms
-2026-02-16T14:32:07.4199313Z ##[endgroup]
-2026-02-16T14:32:07.4199927Z ##[group][analysis] POM dependencies extraction
-2026-02-16T14:32:07.4801956Z wrote pom deps -> /home/runner/work/java-common-libs/java-common-libs/dist/pom/base-deps.json / /home/runner/work/java-common-libs/java-common-libs/dist/pom/head-deps.json
-2026-02-16T14:32:07.4803269Z POM dependencies extraction done in 61ms
-2026-02-16T14:32:07.4804373Z ##[endgroup]
-2026-02-16T14:32:07.4804950Z ##[group][analysis] Cleanup worktrees
-2026-02-16T14:32:07.5020246Z [debug] Worktrees cleanup
-2026-02-16T14:32:07.5020671Z cleanup done in 21ms
-2026-02-16T14:32:07.5021297Z ##[endgroup]
-2026-02-16T14:32:07.5021990Z ##[group][analysis] Outputs
-2026-02-16T14:32:07.5029944Z outputs: base_sha=1cc8a1f06371e32e8ead07a1eb402c7121857159, head_sha=6ea5bda43331f60dd07514b84dc9a1eded4e4515
-2026-02-16T14:32:07.5030817Z [debug] Analysis finished
-2026-02-16T14:32:07.5031428Z ##[endgroup]
-2026-02-16T14:32:07.5031749Z [vuln-diff] Analysis: done
-2026-02-16T14:32:07.5032151Z [vuln-diff] Normalization: start
-2026-02-16T14:32:07.5032940Z [vuln-diff][normalization] dist directory: /home/runner/work/java-common-libs/java-common-libs/dist
-2026-02-16T14:32:07.5034717Z [vuln-diff][normalization] reading Phase 1 outputs…
-2026-02-16T14:32:07.5074563Z [vuln-diff][normalization] indexing SBOM (base)…
-2026-02-16T14:32:07.5088250Z [vuln-diff][normalization] indexing SBOM (head)…
-2026-02-16T14:32:07.5091268Z [vuln-diff][normalization] normalizing BASE…
-2026-02-16T14:32:07.5108090Z [vuln-diff][normalization] BASE occurrences: 15
-2026-02-16T14:32:07.5108784Z [vuln-diff][normalization] normalizing HEAD…
-2026-02-16T14:32:07.5115777Z [vuln-diff][normalization] HEAD occurrences: 26
-2026-02-16T14:32:07.5133164Z [vuln-diff][normalization] wrote base.json and head.json
-2026-02-16T14:32:07.5133887Z [vuln-diff][normalization] computing diff…
-2026-02-16T14:32:07.5151413Z [vuln-diff][normalization] wrote diff.json — totals: NEW=19, REMOVED=8, UNCHANGED=7
-2026-02-16T14:32:07.5152167Z [vuln-diff] Normalization: done
-2026-02-16T14:32:07.5152604Z [vuln-diff] Render: start
-2026-02-16T14:32:07.5152957Z [render] start
-2026-02-16T14:32:07.5154039Z ##[group][render] Markdown
-2026-02-16T14:32:07.5163772Z ##[group][render/markdown] summary
-2026-02-16T14:32:07.5280675Z [render/markdown] wrote /home/runner/work/java-common-libs/java-common-libs/dist/markdown/summary.md
-2026-02-16T14:32:07.5286855Z [render/markdown] appended to $GITHUB_STEP_SUMMARY
-2026-02-16T14:32:07.5287671Z ##[endgroup]
-2026-02-16T14:32:07.5288236Z [render] Markdown completed
-2026-02-16T14:32:07.5288854Z ##[endgroup]
-2026-02-16T14:32:07.5289372Z ##[group][render] HTML
-2026-02-16T14:32:07.5294790Z ##[group][render/html] buildHtmlBundle
-2026-02-16T14:32:07.5315866Z [render/html] repo=opencb/java-common-libs base=develop@1cc8a1f0 head=TASK-7908@6ea5bda4
-2026-02-16T14:32:07.5472880Z [render/html] assets copied from /home/runner/work/_actions/sec-open/vuln-diff-action/v2.0.0-alpha.3/.bundle/assets -> /home/runner/work/java-common-libs/java-common-libs/dist/html/assets
-2026-02-16T14:32:07.5474634Z [render/html] bundle written to /home/runner/work/java-common-libs/java-common-libs/dist/html
-2026-02-16T14:32:07.5475595Z ##[endgroup]
-2026-02-16T14:32:07.5476252Z [render/html] bundle generated at /home/runner/work/java-common-libs/java-common-libs/dist/html
-2026-02-16T14:32:07.5477534Z ##[endgroup]
-2026-02-16T14:32:07.5478325Z ##[group][render] PDF
-2026-02-16T14:32:07.6244867Z [pdf/orch] start
-2026-02-16T14:32:19.4446154Z [pdf] written: /home/runner/work/java-common-libs/java-common-libs/dist/pdf/report.pdf
-2026-02-16T14:32:19.6030056Z [pdf/orch] done
-2026-02-16T14:32:19.6030491Z [render/pdf] PDF skeleton generated under ./dist/pdf
-2026-02-16T14:32:19.6031155Z ##[endgroup]
-2026-02-16T14:32:19.6031513Z [render] done
-2026-02-16T14:32:19.6031774Z [vuln-diff] Render: done
-2026-02-16T14:32:19.6044873Z [vuln-diff][upload] files to upload in artifact: 52930
-2026-02-16T14:32:19.6045567Z [vuln-diff][upload] uploading single artifact…
-2026-02-16T14:32:19.6792712Z [artifact] @actions/artifact: source=default.uploadArtifact, version=2.3.2
-2026-02-16T14:32:19.6793798Z [artifact] rootDirectory=/home/runner/work/java-common-libs/java-common-libs/dist
-2026-02-16T14:32:19.6959101Z [artifact] files found: 43
-2026-02-16T14:32:19.6960822Z [artifact] uploading: name="report-files" (continueOnError=false)
-2026-02-16T14:32:19.6965658Z Artifact name is valid!
-2026-02-16T14:32:19.6967208Z Root directory input is valid!
-2026-02-16T14:32:19.7978916Z Beginning upload of artifact content to blob storage
-2026-02-16T14:32:20.2815793Z Uploaded bytes 1545079
-2026-02-16T14:32:20.3169059Z Finished uploading artifact content to blob storage!
-2026-02-16T14:32:20.3169981Z SHA256 digest of uploaded artifact zip is d1c0d6345660d1ff598d83094c673346bc73c2ea9803a7ff22665a974a95d524
-2026-02-16T14:32:20.3171619Z Finalizing artifact upload
-2026-02-16T14:32:20.4814086Z Artifact report-files.zip successfully finalized. Artifact ID 5526742436
-2026-02-16T14:32:20.4815538Z [artifact] upload result: {"size":1545079,"digest":"d1c0d6345660d1ff598d83094c673346bc73c2ea9803a7ff22665a974a95d524","id":5526742436}
-2026-02-16T14:32:20.4817349Z [vuln-diff][upload] artifact upload OK: {"size":1545079,"digest":"d1c0d6345660d1ff598d83094c673346bc73c2ea9803a7ff22665a974a95d524","id":5526742436}
-2026-02-16T14:32:20.5022800Z ##[group]Run actions/cache@v4
-2026-02-16T14:32:20.5023060Z with:
-2026-02-16T14:32:20.5023244Z   path: ~/.cache/puppeteer
-2026-02-16T14:32:20.5023465Z   key: puppeteer-Linux
-2026-02-16T14:32:20.5023676Z   enableCrossOsArchive: false
-2026-02-16T14:32:20.5023905Z   fail-on-cache-miss: false
-2026-02-16T14:32:20.5024112Z   lookup-only: false
-2026-02-16T14:32:20.5024301Z   save-always: false
-2026-02-16T14:32:20.5024482Z env:
-2026-02-16T14:32:20.5024761Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/8.0.482-8/x64
-2026-02-16T14:32:20.5025221Z   JAVA_HOME_8_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/8.0.482-8/x64
-2026-02-16T14:32:20.5025574Z ##[endgroup]
-2026-02-16T14:32:20.7742299Z Cache not found for input keys: puppeteer-Linux
-2026-02-16T14:32:20.7834996Z Post job cleanup.
-2026-02-16T14:32:20.9238567Z [warning]Path Validation Error: Path(s) specified in the action for caching do(es) not exist, hence no cache is being saved.
-2026-02-16T14:32:20.9351547Z Post job cleanup.
-2026-02-16T14:32:21.1040009Z Cache hit occurred on the primary key setup-java-Linux-x64-maven-889aaee0e25954e57424c0210c205a884f3a0cef53d9e59dc7bd124e1655559a, not saving cache.
-2026-02-16T14:32:21.1162575Z Post job cleanup.
-2026-02-16T14:32:21.2572776Z [warning]Path Validation Error: Path(s) specified in the action for caching do(es) not exist, hence no cache is being saved.
-2026-02-16T14:32:21.2677490Z Post job cleanup.
-2026-02-16T14:32:21.3628834Z [command]/usr/bin/git version
-2026-02-16T14:32:21.3666241Z git version 2.52.0
-2026-02-16T14:32:21.3710668Z Temporarily overriding HOME='/home/runner/work/_temp/418ef233-548c-4067-b14d-0823386fbc8c' before making global git config changes
-2026-02-16T14:32:21.3711987Z Adding repository directory to the temporary git global config as a safe directory
-2026-02-16T14:32:21.3717254Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/java-common-libs/java-common-libs
-2026-02-16T14:32:21.3756444Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
-2026-02-16T14:32:21.3791614Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
-2026-02-16T14:32:21.4035550Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
-2026-02-16T14:32:21.4058861Z http.https://github.com/.extraheader
-2026-02-16T14:32:21.4071852Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
-2026-02-16T14:32:21.4103976Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
-2026-02-16T14:32:21.4339517Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
-2026-02-16T14:32:21.4371165Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
-2026-02-16T14:32:21.4732202Z Cleaning up orphan processes
+2026-02-16T14:40:39.6857515Z Current runner version: '2.331.0'
+2026-02-16T14:40:39.6881016Z ##[group]Runner Image Provisioner
+2026-02-16T14:40:39.6881746Z Hosted Compute Agent
+2026-02-16T14:40:39.6882442Z Version: 20260123.484
+2026-02-16T14:40:39.6883014Z Commit: 6bd6555ca37d84114959e1c76d2c01448ff61c5d
+2026-02-16T14:40:39.6883706Z Build Date: 2026-01-23T19:41:17Z
+2026-02-16T14:40:39.6884481Z Worker ID: {dde0c0ca-c69f-44a3-a78b-25385fbc78c1}
+2026-02-16T14:40:39.6885390Z Azure Region: northcentralus
+2026-02-16T14:40:39.6885961Z ##[endgroup]
+2026-02-16T14:40:39.6887417Z ##[group]Operating System
+2026-02-16T14:40:39.6888017Z Ubuntu
+2026-02-16T14:40:39.6888445Z 24.04.3
+2026-02-16T14:40:39.6889014Z LTS
+2026-02-16T14:40:39.6889435Z ##[endgroup]
+2026-02-16T14:40:39.6889934Z ##[group]Runner Image
+2026-02-16T14:40:39.6890522Z Image: ubuntu-24.04
+2026-02-16T14:40:39.6890998Z Version: 20260209.23.1
+2026-02-16T14:40:39.6892153Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260209.23/images/ubuntu/Ubuntu2404-Readme.md
+2026-02-16T14:40:39.6893762Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260209.23
+2026-02-16T14:40:39.6894975Z ##[endgroup]
+2026-02-16T14:40:39.6897670Z ##[group]GITHUB_TOKEN Permissions
+2026-02-16T14:40:39.6899801Z Actions: write
+2026-02-16T14:40:39.6900477Z ArtifactMetadata: write
+2026-02-16T14:40:39.6901056Z Attestations: write
+2026-02-16T14:40:39.6901534Z Checks: write
+2026-02-16T14:40:39.6902070Z Contents: write
+2026-02-16T14:40:39.6902553Z Deployments: write
+2026-02-16T14:40:39.6903070Z Discussions: write
+2026-02-16T14:40:39.6903546Z Issues: write
+2026-02-16T14:40:39.6904102Z Metadata: read
+2026-02-16T14:40:39.6904563Z Models: read
+2026-02-16T14:40:39.6905292Z Packages: write
+2026-02-16T14:40:39.6905856Z Pages: write
+2026-02-16T14:40:39.6906445Z PullRequests: write
+2026-02-16T14:40:39.6907006Z RepositoryProjects: write
+2026-02-16T14:40:39.6907615Z SecurityEvents: write
+2026-02-16T14:40:39.6908141Z Statuses: write
+2026-02-16T14:40:39.6908610Z ##[endgroup]
+2026-02-16T14:40:39.6910596Z Secret source: Actions
+2026-02-16T14:40:39.6911641Z Prepare workflow directory
+2026-02-16T14:40:39.7339184Z Prepare all required actions
+2026-02-16T14:40:39.7394189Z Getting action download info
+2026-02-16T14:40:40.1541777Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-02-16T14:40:40.2875037Z Download action repository 'actions/cache@v4' (SHA:0057852bfaa89a56745cba8c7296529d2fc39830)
+2026-02-16T14:40:40.3898155Z Download action repository 'actions/setup-java@v4' (SHA:c1e323688fd81a25caa38c78aa6df2d33d3e20d9)
+2026-02-16T14:40:40.8702333Z Download action repository 'sec-open/vuln-diff-action@v2.0.0-alpha.3' (SHA:92b125581be76065ef92efc7919e138e23539680)
+2026-02-16T14:40:42.0904962Z Complete job name: compare-branches
+2026-02-16T14:40:42.1749663Z ##[group]Run actions/checkout@v4
+2026-02-16T14:40:42.1750978Z with:
+2026-02-16T14:40:42.1751747Z   ref: TASK-7908
+2026-02-16T14:40:42.1752721Z   fetch-depth: 0
+2026-02-16T14:40:42.1753563Z   fetch-tags: true
+2026-02-16T14:40:42.1754474Z   repository: opencb/java-common-libs
+2026-02-16T14:40:42.1756039Z   token: ***
+2026-02-16T14:40:42.1756868Z   ssh-strict: true
+2026-02-16T14:40:42.1757691Z   ssh-user: git
+2026-02-16T14:40:42.1758540Z   persist-credentials: true
+2026-02-16T14:40:42.1759482Z   clean: true
+2026-02-16T14:40:42.1760337Z   sparse-checkout-cone-mode: true
+2026-02-16T14:40:42.1761366Z   show-progress: true
+2026-02-16T14:40:42.1762227Z   lfs: false
+2026-02-16T14:40:42.1762997Z   submodules: false
+2026-02-16T14:40:42.1763857Z   set-safe-directory: true
+2026-02-16T14:40:42.1765339Z ##[endgroup]
+2026-02-16T14:40:42.2890178Z Syncing repository: opencb/java-common-libs
+2026-02-16T14:40:42.2892902Z ##[group]Getting Git version info
+2026-02-16T14:40:42.2894589Z Working directory is '/home/runner/work/java-common-libs/java-common-libs'
+2026-02-16T14:40:42.2897211Z [command]/usr/bin/git version
+2026-02-16T14:40:42.2898273Z git version 2.52.0
+2026-02-16T14:40:42.2914112Z ##[endgroup]
+2026-02-16T14:40:42.2928900Z Temporarily overriding HOME='/home/runner/work/_temp/2b5ec758-2856-4ce2-9903-8720727a801b' before making global git config changes
+2026-02-16T14:40:42.2931749Z Adding repository directory to the temporary git global config as a safe directory
+2026-02-16T14:40:42.2941439Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/java-common-libs/java-common-libs
+2026-02-16T14:40:42.2980736Z Deleting the contents of '/home/runner/work/java-common-libs/java-common-libs'
+2026-02-16T14:40:42.2984169Z ##[group]Initializing the repository
+2026-02-16T14:40:42.2988512Z [command]/usr/bin/git init /home/runner/work/java-common-libs/java-common-libs
+2026-02-16T14:40:42.3085496Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-02-16T14:40:42.3087767Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-02-16T14:40:42.3090319Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-02-16T14:40:42.3091856Z hint: call:
+2026-02-16T14:40:42.3092688Z hint:
+2026-02-16T14:40:42.3093815Z hint: 	git config --global init.defaultBranch <name>
+2026-02-16T14:40:42.3095797Z hint:
+2026-02-16T14:40:42.3097028Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-02-16T14:40:42.3099297Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-02-16T14:40:42.3101369Z hint:
+2026-02-16T14:40:42.3102269Z hint: 	git branch -m <name>
+2026-02-16T14:40:42.3103206Z hint:
+2026-02-16T14:40:42.3104653Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-02-16T14:40:42.3107357Z Initialized empty Git repository in /home/runner/work/java-common-libs/java-common-libs/.git/
+2026-02-16T14:40:42.3110987Z [command]/usr/bin/git remote add origin https://github.com/opencb/java-common-libs
+2026-02-16T14:40:42.3137097Z ##[endgroup]
+2026-02-16T14:40:42.3138580Z ##[group]Disabling automatic garbage collection
+2026-02-16T14:40:42.3140531Z [command]/usr/bin/git config --local gc.auto 0
+2026-02-16T14:40:42.3172560Z ##[endgroup]
+2026-02-16T14:40:42.3173957Z ##[group]Setting up auth
+2026-02-16T14:40:42.3178443Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-02-16T14:40:42.3210069Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-02-16T14:40:42.3543978Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-02-16T14:40:42.3575905Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-02-16T14:40:42.3809271Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-02-16T14:40:42.3851014Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-02-16T14:40:42.4088332Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-02-16T14:40:42.4124647Z ##[endgroup]
+2026-02-16T14:40:42.4126599Z ##[group]Fetching the repository
+2026-02-16T14:40:42.4134017Z [command]/usr/bin/git -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+2026-02-16T14:40:43.1663413Z From https://github.com/opencb/java-common-libs
+2026-02-16T14:40:43.1665091Z  * [new branch]        TASK-1113               -> origin/TASK-1113
+2026-02-16T14:40:43.1668931Z  * [new branch]        TASK-1120               -> origin/TASK-1120
+2026-02-16T14:40:43.1669869Z  * [new branch]        TASK-1309               -> origin/TASK-1309
+2026-02-16T14:40:43.1670799Z  * [new branch]        TASK-1415               -> origin/TASK-1415
+2026-02-16T14:40:43.1671808Z  * [new branch]        TASK-1718               -> origin/TASK-1718
+2026-02-16T14:40:43.1673124Z  * [new branch]        TASK-2290               -> origin/TASK-2290
+2026-02-16T14:40:43.1674060Z  * [new branch]        TASK-2297               -> origin/TASK-2297
+2026-02-16T14:40:43.1675157Z  * [new branch]        TASK-2315               -> origin/TASK-2315
+2026-02-16T14:40:43.1676252Z  * [new branch]        TASK-2347               -> origin/TASK-2347
+2026-02-16T14:40:43.1677166Z  * [new branch]        TASK-2390               -> origin/TASK-2390
+2026-02-16T14:40:43.1678034Z  * [new branch]        TASK-2496               -> origin/TASK-2496
+2026-02-16T14:40:43.1679132Z  * [new branch]        TASK-3808               -> origin/TASK-3808
+2026-02-16T14:40:43.1679996Z  * [new branch]        TASK-3900               -> origin/TASK-3900
+2026-02-16T14:40:43.1680898Z  * [new branch]        TASK-504                -> origin/TASK-504
+2026-02-16T14:40:43.1681883Z  * [new branch]        TASK-5174               -> origin/TASK-5174
+2026-02-16T14:40:43.1682787Z  * [new branch]        TASK-5681               -> origin/TASK-5681
+2026-02-16T14:40:43.1683715Z  * [new branch]        TASK-5696               -> origin/TASK-5696
+2026-02-16T14:40:43.1684915Z  * [new branch]        TASK-6165               -> origin/TASK-6165
+2026-02-16T14:40:43.1704236Z  * [new branch]        TASK-6187               -> origin/TASK-6187
+2026-02-16T14:40:43.1705207Z  * [new branch]        TASK-6521               -> origin/TASK-6521
+2026-02-16T14:40:43.1705870Z  * [new branch]        TASK-694                -> origin/TASK-694
+2026-02-16T14:40:43.1706491Z  * [new branch]        TASK-6981               -> origin/TASK-6981
+2026-02-16T14:40:43.1706937Z  * [new branch]        TASK-7037               -> origin/TASK-7037
+2026-02-16T14:40:43.1707455Z  * [new branch]        TASK-7353               -> origin/TASK-7353
+2026-02-16T14:40:43.1709341Z  * [new branch]        TASK-7400               -> origin/TASK-7400
+2026-02-16T14:40:43.1709808Z  * [new branch]        TASK-7461               -> origin/TASK-7461
+2026-02-16T14:40:43.1710309Z  * [new branch]        TASK-7532               -> origin/TASK-7532
+2026-02-16T14:40:43.1710707Z  * [new branch]        TASK-7612               -> origin/TASK-7612
+2026-02-16T14:40:43.1711264Z  * [new branch]        TASK-7693               -> origin/TASK-7693
+2026-02-16T14:40:43.1711714Z  * [new branch]        TASK-7731               -> origin/TASK-7731
+2026-02-16T14:40:43.1712108Z  * [new branch]        TASK-7751               -> origin/TASK-7751
+2026-02-16T14:40:43.1712810Z  * [new branch]        TASK-7809               -> origin/TASK-7809
+2026-02-16T14:40:43.1713329Z  * [new branch]        TASK-7908               -> origin/TASK-7908
+2026-02-16T14:40:43.1713761Z  * [new branch]        TASK-7958               -> origin/TASK-7958
+2026-02-16T14:40:43.1714502Z  * [new branch]        TASK-7966               -> origin/TASK-7966
+2026-02-16T14:40:43.1715259Z  * [new branch]        TASK-8055               -> origin/TASK-8055
+2026-02-16T14:40:43.1715707Z  * [new branch]        TASK-8067               -> origin/TASK-8067
+2026-02-16T14:40:43.1716225Z  * [new branch]        TASK-832                -> origin/TASK-832
+2026-02-16T14:40:43.1716726Z  * [new branch]        develop                 -> origin/develop
+2026-02-16T14:40:43.1717194Z  * [new branch]        develop-facet-venn      -> origin/develop-facet-venn
+2026-02-16T14:40:43.1717789Z  * [new branch]        develop-mongo6          -> origin/develop-mongo6
+2026-02-16T14:40:43.1718321Z  * [new branch]        feature-status          -> origin/feature-status
+2026-02-16T14:40:43.1718826Z  * [new branch]        feature/new-mongo-schema -> origin/feature/new-mongo-schema
+2026-02-16T14:40:43.1719445Z  * [new branch]        halender-patch-1        -> origin/halender-patch-1
+2026-02-16T14:40:43.1720083Z  * [new branch]        hotfix-3.2              -> origin/hotfix-3.2
+2026-02-16T14:40:43.1720556Z  * [new branch]        hotfix-3.3              -> origin/hotfix-3.3
+2026-02-16T14:40:43.1721081Z  * [new branch]        hotfix-3.4.x            -> origin/hotfix-3.4.x
+2026-02-16T14:40:43.1721692Z  * [new branch]        hotfix-3.5.x            -> origin/hotfix-3.5.x
+2026-02-16T14:40:43.1722166Z  * [new branch]        hotfix-3.7.x            -> origin/hotfix-3.7.x
+2026-02-16T14:40:43.1722625Z  * [new branch]        issue-40                -> origin/issue-40
+2026-02-16T14:40:43.1723135Z  * [new branch]        main                    -> origin/main
+2026-02-16T14:40:43.1723582Z  * [new branch]        mvntest                 -> origin/mvntest
+2026-02-16T14:40:43.1724165Z  * [new branch]        release-4.0.0           -> origin/release-4.0.0
+2026-02-16T14:40:43.1724953Z  * [new branch]        release-4.1.x           -> origin/release-4.1.x
+2026-02-16T14:40:43.1725526Z  * [new branch]        release-4.10.x          -> origin/release-4.10.x
+2026-02-16T14:40:43.1726108Z  * [new branch]        release-4.11.x          -> origin/release-4.11.x
+2026-02-16T14:40:43.1726585Z  * [new branch]        release-4.12.x          -> origin/release-4.12.x
+2026-02-16T14:40:43.1727072Z  * [new branch]        release-4.2.x           -> origin/release-4.2.x
+2026-02-16T14:40:43.1727623Z  * [new branch]        release-4.3.x           -> origin/release-4.3.x
+2026-02-16T14:40:43.1728080Z  * [new branch]        release-4.4.x           -> origin/release-4.4.x
+2026-02-16T14:40:43.1728559Z  * [new branch]        release-4.5.x           -> origin/release-4.5.x
+2026-02-16T14:40:43.1728974Z  * [new branch]        release-4.6.x           -> origin/release-4.6.x
+2026-02-16T14:40:43.1729555Z  * [new branch]        release-4.7.x           -> origin/release-4.7.x
+2026-02-16T14:40:43.1730029Z  * [new branch]        release-4.8.x           -> origin/release-4.8.x
+2026-02-16T14:40:43.1730484Z  * [new branch]        release-4.9.x           -> origin/release-4.9.x
+2026-02-16T14:40:43.1731044Z  * [new branch]        release-5.0.x           -> origin/release-5.0.x
+2026-02-16T14:40:43.1731549Z  * [new branch]        release-5.0.x-beta      -> origin/release-5.0.x-beta
+2026-02-16T14:40:43.1732029Z  * [new branch]        release-5.1.x           -> origin/release-5.1.x
+2026-02-16T14:40:43.1732877Z  * [new branch]        release-5.2.x           -> origin/release-5.2.x
+2026-02-16T14:40:43.1733342Z  * [new branch]        release-5.x.x           -> origin/release-5.x.x
+2026-02-16T14:40:43.1733824Z  * [new branch]        release-6.0.x           -> origin/release-6.0.x
+2026-02-16T14:40:43.1734386Z  * [new branch]        release-6.x.x           -> origin/release-6.x.x
+2026-02-16T14:40:43.1735216Z  * [new branch]        revert-4-newGOAnnotator -> origin/revert-4-newGOAnnotator
+2026-02-16T14:40:43.1735878Z  * [new branch]        v1.0-fixes              -> origin/v1.0-fixes
+2026-02-16T14:40:43.1736572Z  * [new tag]           1.0.0                   -> 1.0.0
+2026-02-16T14:40:43.1737167Z  * [new tag]           v3.0.0                  -> v3.0.0
+2026-02-16T14:40:43.1737580Z  * [new tag]           v3.1.0                  -> v3.1.0
+2026-02-16T14:40:43.1738059Z  * [new tag]           v3.2.0                  -> v3.2.0
+2026-02-16T14:40:43.1738463Z  * [new tag]           v3.2.1                  -> v3.2.1
+2026-02-16T14:40:43.1738861Z  * [new tag]           v3.3.0                  -> v3.3.0
+2026-02-16T14:40:43.1739310Z  * [new tag]           v3.3.1                  -> v3.3.1
+2026-02-16T14:40:43.1739666Z  * [new tag]           v3.3.2                  -> v3.3.2
+2026-02-16T14:40:43.1740059Z  * [new tag]           v3.4.0                  -> v3.4.0
+2026-02-16T14:40:43.1740500Z  * [new tag]           v3.4.1                  -> v3.4.1
+2026-02-16T14:40:43.1740854Z  * [new tag]           v3.4.2                  -> v3.4.2
+2026-02-16T14:40:43.1741279Z  * [new tag]           v3.5.0                  -> v3.5.0
+2026-02-16T14:40:43.1741663Z  * [new tag]           v3.5.1                  -> v3.5.1
+2026-02-16T14:40:43.1742086Z  * [new tag]           v3.6.0                  -> v3.6.0
+2026-02-16T14:40:43.1742448Z  * [new tag]           v3.7.0                  -> v3.7.0
+2026-02-16T14:40:43.1742876Z  * [new tag]           v3.7.1                  -> v3.7.1
+2026-02-16T14:40:43.1743291Z  * [new tag]           v3.7.2                  -> v3.7.2
+2026-02-16T14:40:43.1743803Z  * [new tag]           v3.7.3                  -> v3.7.3
+2026-02-16T14:40:43.1744231Z  * [new tag]           v3.7.4                  -> v3.7.4
+2026-02-16T14:40:43.1744610Z  * [new tag]           v3.7.5                  -> v3.7.5
+2026-02-16T14:40:43.1745265Z  * [new tag]           v4.0.0                  -> v4.0.0
+2026-02-16T14:40:43.1745605Z  * [new tag]           v4.0.1                  -> v4.0.1
+2026-02-16T14:40:43.1746119Z  * [new tag]           v4.0.2                  -> v4.0.2
+2026-02-16T14:40:43.1746512Z  * [new tag]           v4.0.3                  -> v4.0.3
+2026-02-16T14:40:43.1746847Z  * [new tag]           v4.0.4                  -> v4.0.4
+2026-02-16T14:40:43.1747400Z  * [new tag]           v4.0.5                  -> v4.0.5
+2026-02-16T14:40:43.1747756Z  * [new tag]           v4.0.6                  -> v4.0.6
+2026-02-16T14:40:43.1748132Z  * [new tag]           v4.1.0                  -> v4.1.0
+2026-02-16T14:40:43.1748557Z  * [new tag]           v4.1.1                  -> v4.1.1
+2026-02-16T14:40:43.1748996Z  * [new tag]           v4.1.2                  -> v4.1.2
+2026-02-16T14:40:43.1749379Z  * [new tag]           v4.10.0                 -> v4.10.0
+2026-02-16T14:40:43.1749813Z  * [new tag]           v4.11.0                 -> v4.11.0
+2026-02-16T14:40:43.1750216Z  * [new tag]           v4.12.0                 -> v4.12.0
+2026-02-16T14:40:43.1750569Z  * [new tag]           v4.2.0                  -> v4.2.0
+2026-02-16T14:40:43.1751041Z  * [new tag]           v4.2.1                  -> v4.2.1
+2026-02-16T14:40:43.1751438Z  * [new tag]           v4.3.0                  -> v4.3.0
+2026-02-16T14:40:43.1751793Z  * [new tag]           v4.4.0                  -> v4.4.0
+2026-02-16T14:40:43.1752244Z  * [new tag]           v4.4.1                  -> v4.4.1
+2026-02-16T14:40:43.1752603Z  * [new tag]           v4.4.2                  -> v4.4.2
+2026-02-16T14:40:43.1753021Z  * [new tag]           v4.4.3                  -> v4.4.3
+2026-02-16T14:40:43.1753415Z  * [new tag]           v4.4.4                  -> v4.4.4
+2026-02-16T14:40:43.1753860Z  * [new tag]           v4.4.5                  -> v4.4.5
+2026-02-16T14:40:43.1754611Z  * [new tag]           v4.5.0                  -> v4.5.0
+2026-02-16T14:40:43.1755248Z  * [new tag]           v4.6.0                  -> v4.6.0
+2026-02-16T14:40:43.1755678Z  * [new tag]           v4.6.1                  -> v4.6.1
+2026-02-16T14:40:43.1785117Z  * [new tag]           v4.7.0                  -> v4.7.0
+2026-02-16T14:40:43.1785670Z  * [new tag]           v4.7.1                  -> v4.7.1
+2026-02-16T14:40:43.1786247Z  * [new tag]           v4.8.0                  -> v4.8.0
+2026-02-16T14:40:43.1786825Z  * [new tag]           v4.9.0                  -> v4.9.0
+2026-02-16T14:40:43.1787624Z  * [new tag]           v5.0.0                  -> v5.0.0
+2026-02-16T14:40:43.1788218Z  * [new tag]           v5.1.0                  -> v5.1.0
+2026-02-16T14:40:43.1788784Z  * [new tag]           v5.2.0                  -> v5.2.0
+2026-02-16T14:40:43.1789334Z  * [new tag]           v5.2.1                  -> v5.2.1
+2026-02-16T14:40:43.1789868Z  * [new tag]           v5.2.2                  -> v5.2.2
+2026-02-16T14:40:43.1790398Z  * [new tag]           v5.2.3                  -> v5.2.3
+2026-02-16T14:40:43.1790929Z  * [new tag]           v5.3.0                  -> v5.3.0
+2026-02-16T14:40:43.1791445Z  * [new tag]           v5.4.0                  -> v5.4.0
+2026-02-16T14:40:43.1791966Z  * [new tag]           v5.5.0                  -> v5.5.0
+2026-02-16T14:40:43.1792489Z  * [new tag]           v5.6.0                  -> v5.6.0
+2026-02-16T14:40:43.1792983Z  * [new tag]           v6.0.0                  -> v6.0.0
+2026-02-16T14:40:43.1793494Z  * [new tag]           v6.1.0                  -> v6.1.0
+2026-02-16T14:40:43.1889806Z ##[endgroup]
+2026-02-16T14:40:43.1890238Z ##[group]Determining the checkout info
+2026-02-16T14:40:43.1896317Z [command]/usr/bin/git branch --list --remote origin/TASK-7908
+2026-02-16T14:40:43.1934992Z   origin/TASK-7908
+2026-02-16T14:40:43.1939806Z ##[endgroup]
+2026-02-16T14:40:43.1944505Z [command]/usr/bin/git sparse-checkout disable
+2026-02-16T14:40:43.1984462Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-02-16T14:40:43.2011406Z ##[group]Checking out the ref
+2026-02-16T14:40:43.2015603Z [command]/usr/bin/git checkout --progress --force -B TASK-7908 refs/remotes/origin/TASK-7908
+2026-02-16T14:40:43.2372974Z Switched to a new branch 'TASK-7908'
+2026-02-16T14:40:43.2376050Z branch 'TASK-7908' set up to track 'origin/TASK-7908'.
+2026-02-16T14:40:43.2385391Z ##[endgroup]
+2026-02-16T14:40:43.2422696Z [command]/usr/bin/git log -1 --format=%H
+2026-02-16T14:40:43.2445949Z 6ea5bda43331f60dd07514b84dc9a1eded4e4515
+2026-02-16T14:40:43.2653827Z ##[group]Run actions/cache@v4
+2026-02-16T14:40:43.2654096Z with:
+2026-02-16T14:40:43.2654286Z   path: ~/.cache/puppeteer
+2026-02-16T14:40:43.2654511Z   key: puppeteer-Linux
+2026-02-16T14:40:43.2654986Z   enableCrossOsArchive: false
+2026-02-16T14:40:43.2655236Z   fail-on-cache-miss: false
+2026-02-16T14:40:43.2655470Z   lookup-only: false
+2026-02-16T14:40:43.2655670Z   save-always: false
+2026-02-16T14:40:43.2655857Z ##[endgroup]
+2026-02-16T14:40:43.5508596Z Cache not found for input keys: puppeteer-Linux
+2026-02-16T14:40:43.5656612Z ##[group]Run actions/setup-java@v4
+2026-02-16T14:40:43.5656890Z with:
+2026-02-16T14:40:43.5657076Z   distribution: temurin
+2026-02-16T14:40:43.5657278Z   java-version: 8
+2026-02-16T14:40:43.5657458Z   cache: maven
+2026-02-16T14:40:43.5657630Z   java-package: jdk
+2026-02-16T14:40:43.5657827Z   check-latest: false
+2026-02-16T14:40:43.5658016Z   server-id: github
+2026-02-16T14:40:43.5658213Z   server-username: GITHUB_ACTOR
+2026-02-16T14:40:43.5658450Z   server-password: GITHUB_TOKEN
+2026-02-16T14:40:43.5658685Z   overwrite-settings: true
+2026-02-16T14:40:43.5658942Z   job-status: success
+2026-02-16T14:40:43.5659252Z   token: ***
+2026-02-16T14:40:43.5659441Z ##[endgroup]
+2026-02-16T14:40:43.7647626Z ##[group]Installed distributions
+2026-02-16T14:40:43.7997362Z Resolved Java 8.0.482+8 from tool-cache
+2026-02-16T14:40:43.7997931Z Setting Java 8.0.482+8 as the default
+2026-02-16T14:40:43.8013110Z Creating toolchains.xml for JDK version 8 from temurin
+2026-02-16T14:40:43.8089007Z Writing to /home/runner/.m2/toolchains.xml
+2026-02-16T14:40:43.8089431Z
+2026-02-16T14:40:43.8089588Z Java configuration:
+2026-02-16T14:40:43.8090896Z   Distribution: temurin
+2026-02-16T14:40:43.8091340Z   Version: 8.0.482+8
+2026-02-16T14:40:43.8097082Z   Path: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/8.0.482-8/x64
+2026-02-16T14:40:43.8098069Z
+2026-02-16T14:40:43.8098822Z ##[endgroup]
+2026-02-16T14:40:43.8113636Z Creating settings.xml with server-id: github
+2026-02-16T14:40:43.8135483Z Writing to /home/runner/.m2/settings.xml
+2026-02-16T14:40:44.0494415Z Cache hit for: setup-java-Linux-x64-maven-889aaee0e25954e57424c0210c205a884f3a0cef53d9e59dc7bd124e1655559a
+2026-02-16T14:40:44.6605824Z Received 38202848 of 38202848 (100.0%), 73.5 MBs/sec
+2026-02-16T14:40:44.6606627Z Cache Size: ~36 MB (38202848 B)
+2026-02-16T14:40:44.6638912Z [command]/usr/bin/tar -xf /home/runner/work/_temp/505fbcf4-869e-4f80-ab37-219d8db18588/cache.tzst -P -C /home/runner/work/java-common-libs/java-common-libs --use-compress-program unzstd
+2026-02-16T14:40:44.7739531Z Cache restored successfully
+2026-02-16T14:40:44.7822260Z Cache restored from key: setup-java-Linux-x64-maven-889aaee0e25954e57424c0210c205a884f3a0cef53d9e59dc7bd124e1655559a
+2026-02-16T14:40:44.8003513Z ##[group]Run sec-open/vuln-diff-action@v2.0.0-alpha.3
+2026-02-16T14:40:44.8003844Z with:
+2026-02-16T14:40:44.8004024Z   base_ref: develop
+2026-02-16T14:40:44.8004212Z   head_ref: TASK-7908
+2026-02-16T14:40:44.8004937Z   html_logo_url: https://zettagenomics.com/wp-content/uploads/2022/10/Zetta-reversed-out-full-logo-dark-background.png
+2026-02-16T14:40:44.8005536Z   path: .
+2026-02-16T14:40:44.8005872Z   github_token: ***
+2026-02-16T14:40:44.8006083Z   include_dev_dependencies: false
+2026-02-16T14:40:44.8006314Z env:
+2026-02-16T14:40:44.8006607Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/8.0.482-8/x64
+2026-02-16T14:40:44.8007301Z   JAVA_HOME_8_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/8.0.482-8/x64
+2026-02-16T14:40:44.8007656Z ##[endgroup]
+2026-02-16T14:40:44.9754561Z [vuln-diff] Analysis: start
+2026-02-16T14:40:44.9762028Z ##[group][analysis] Inputs
+2026-02-16T14:40:44.9762505Z [debug] Analysis start
+2026-02-16T14:40:44.9762975Z base_ref: develop
+2026-02-16T14:40:44.9763405Z head_ref: TASK-7908
+2026-02-16T14:40:44.9763770Z path: .
+2026-02-16T14:40:44.9773551Z ##[endgroup]
+2026-02-16T14:40:44.9778364Z ##[group][analysis] Tools detection
+2026-02-16T14:41:59.8708946Z tools detected in 74893ms
+2026-02-16T14:41:59.8712428Z ##[endgroup]
+2026-02-16T14:41:59.8713111Z ##[group][analysis] Resolve refs & prepare worktrees
+2026-02-16T14:42:00.1217720Z resolved base_sha: 1cc8a1f06371e32e8ead07a1eb402c7121857159 (1cc8a1f)
+2026-02-16T14:42:00.1219229Z resolved head_sha: 6ea5bda43331f60dd07514b84dc9a1eded4e4515 (6ea5bda)
+2026-02-16T14:42:00.2113416Z base workdir: /home/runner/work/java-common-libs/java-common-libs/dist/refs/1cc8a1f
+2026-02-16T14:42:00.2114210Z head workdir: /home/runner/work/java-common-libs/java-common-libs/dist/refs/6ea5bda
+2026-02-16T14:42:00.2115115Z refs & worktrees ready in 341ms
+2026-02-16T14:42:00.2116066Z ##[endgroup]
+2026-02-16T14:42:00.2116720Z ##[group][analysis] Project type detection
+2026-02-16T14:42:00.2117304Z [analysis] Detected project type: java
+2026-02-16T14:42:00.2118017Z ##[endgroup]
+2026-02-16T14:42:00.2119630Z ##[group][analysis] SBOM generation
+2026-02-16T14:42:12.2288588Z wrote SBOMs -> /home/runner/work/java-common-libs/java-common-libs/dist/sbom/base.sbom.json / /home/runner/work/java-common-libs/java-common-libs/dist/sbom/head.sbom.json
+2026-02-16T14:42:12.2289854Z SBOM generation done in 12017ms
+2026-02-16T14:42:12.2290670Z ##[endgroup]
+2026-02-16T14:42:12.2291220Z ##[group][analysis] Vulnerability scanning (Grype + npm audit)
+2026-02-16T14:42:13.0654530Z wrote Grype outputs -> /home/runner/work/java-common-libs/java-common-libs/dist/grype/base.grype.json / /home/runner/work/java-common-libs/java-common-libs/dist/grype/head.grype.json
+2026-02-16T14:42:13.0656151Z Grype scans done
+2026-02-16T14:42:13.0658755Z Skipping npm audit for non-JavaScript project type: java
+2026-02-16T14:42:13.0738723Z wrote merged outputs -> /home/runner/work/java-common-libs/java-common-libs/dist/merged/base.merged.json / /home/runner/work/java-common-libs/java-common-libs/dist/merged/head.merged.json
+2026-02-16T14:42:13.0740193Z Vulnerability scanning done in 845ms
+2026-02-16T14:42:13.0741157Z ##[endgroup]
+2026-02-16T14:42:13.0741823Z ##[group][analysis] Metadata
+2026-02-16T14:42:13.0742565Z [debug] metaPath: /home/runner/work/java-common-libs/java-common-libs/dist/meta.json
+2026-02-16T14:42:13.0743962Z [debug] metaObj: {
+2026-02-16T14:42:13.0744339Z   "schema_version": "1.0",
+2026-02-16T14:42:13.0750245Z   "generated_at": "2026-02-16T14:42:13.073Z",
+2026-02-16T14:42:13.0750774Z   "inputs": {
+2026-02-16T14:42:13.0751152Z     "base_ref": "develop",
+2026-02-16T14:42:13.0751577Z     "head_ref": "TASK-7908",
+2026-02-16T14:42:13.0751971Z     "path": "."
+2026-02-16T14:42:13.0752315Z   },
+2026-02-16T14:42:13.0752649Z   "repo": "opencb/java-common-libs",
+2026-02-16T14:42:13.0753434Z   "tools": {
+2026-02-16T14:42:13.0754019Z     "cyclonedx_maven": "Apache Maven 3.9.12 (848fbb4bf2d427b72bdb2471c22fced7ebd9a7a1)",
+2026-02-16T14:42:13.0755284Z     "cyclonedx_npm": "4.1.2",
+2026-02-16T14:42:13.0755715Z     "syft": "1.13.0",
+2026-02-16T14:42:13.0756056Z     "grype": "0.104.0",
+2026-02-16T14:42:13.0756400Z     "node": "v20.19.6"
+2026-02-16T14:42:13.0756726Z   },
+2026-02-16T14:42:13.0757001Z   "environment": {
+2026-02-16T14:42:13.0757326Z     "runner_os": "linux",
+2026-02-16T14:42:13.0757688Z     "arch": "x64"
+2026-02-16T14:42:13.0757986Z   },
+2026-02-16T14:42:13.0758258Z   "paths": {
+2026-02-16T14:42:13.0758559Z     "sbom": {
+2026-02-16T14:42:13.0759180Z       "base": "/home/runner/work/java-common-libs/java-common-libs/dist/sbom/base.sbom.json",
+2026-02-16T14:42:13.0760529Z       "head": "/home/runner/work/java-common-libs/java-common-libs/dist/sbom/head.sbom.json"
+2026-02-16T14:42:13.0761246Z     },
+2026-02-16T14:42:13.0761520Z     "grype": {
+2026-02-16T14:42:13.0762129Z       "base": "/home/runner/work/java-common-libs/java-common-libs/dist/grype/base.grype.json",
+2026-02-16T14:42:13.0763182Z       "head": "/home/runner/work/java-common-libs/java-common-libs/dist/grype/head.grype.json"
+2026-02-16T14:42:13.0763885Z     }
+2026-02-16T14:42:13.0764150Z   }
+2026-02-16T14:42:13.0764395Z }
+2026-02-16T14:42:13.0765274Z wrote meta.json -> /home/runner/work/java-common-libs/java-common-libs/dist/meta.json
+2026-02-16T14:42:13.0766380Z metadata written in 1ms
+2026-02-16T14:42:13.0766980Z ##[endgroup]
+2026-02-16T14:42:13.0767573Z ##[group][analysis] POM dependencies extraction
+2026-02-16T14:42:13.0918877Z [pom.js] Found 7 pom.xml files in /home/runner/work/java-common-libs/java-common-libs/dist/refs/1cc8a1f
+2026-02-16T14:42:13.0960678Z [pom.js] Extracted 15 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/1cc8a1f/bioformats/pom.xml
+2026-02-16T14:42:13.0974037Z [pom.js] Extracted 6 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/1cc8a1f/commons-datastore/commons-datastore-core/pom.xml
+2026-02-16T14:42:13.0990262Z [pom.js] Extracted 11 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/1cc8a1f/commons-datastore/commons-datastore-mongodb/pom.xml
+2026-02-16T14:42:13.1001796Z [pom.js] Extracted 5 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/1cc8a1f/commons-datastore/commons-datastore-solr/pom.xml
+2026-02-16T14:42:13.1012759Z [pom.js] Extracted 2 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/1cc8a1f/commons-datastore/pom.xml
+2026-02-16T14:42:13.1026985Z [pom.js] Extracted 12 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/1cc8a1f/commons-lib/pom.xml
+2026-02-16T14:42:13.1063642Z [pom.js] Extracted 0 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/1cc8a1f/pom.xml
+2026-02-16T14:42:13.1065693Z [pom.js] Total dependencies collected from all poms: 51
+2026-02-16T14:42:13.1066317Z [pom.js] Final unique dependencies after dedup: 29
+2026-02-16T14:42:13.1239493Z [pom.js] Found 7 pom.xml files in /home/runner/work/java-common-libs/java-common-libs/dist/refs/6ea5bda
+2026-02-16T14:42:13.1259451Z [pom.js] Extracted 15 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/6ea5bda/bioformats/pom.xml
+2026-02-16T14:42:13.1271188Z [pom.js] Extracted 6 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/6ea5bda/commons-datastore/commons-datastore-core/pom.xml
+2026-02-16T14:42:13.1280105Z [pom.js] Extracted 11 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/6ea5bda/commons-datastore/commons-datastore-mongodb/pom.xml
+2026-02-16T14:42:13.1285334Z [pom.js] Extracted 5 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/6ea5bda/commons-datastore/commons-datastore-solr/pom.xml
+2026-02-16T14:42:13.1293563Z [pom.js] Extracted 2 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/6ea5bda/commons-datastore/pom.xml
+2026-02-16T14:42:13.1309069Z [pom.js] Extracted 12 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/6ea5bda/commons-lib/pom.xml
+2026-02-16T14:42:13.1344447Z [pom.js] Extracted 0 dependencies from /home/runner/work/java-common-libs/java-common-libs/dist/refs/6ea5bda/pom.xml
+2026-02-16T14:42:13.1345971Z [pom.js] Total dependencies collected from all poms: 51
+2026-02-16T14:42:13.1346583Z [pom.js] Final unique dependencies after dedup: 29
+2026-02-16T14:42:13.1348944Z [analysis] BASE pom dependencies extracted: 29 items
+2026-02-16T14:42:13.1349517Z   - org.opencb.commons:commons-lib:
+2026-02-16T14:42:13.1350267Z   - com.google.guava:guava:
+2026-02-16T14:42:13.1350695Z   - org.slf4j:slf4j-api:
+2026-02-16T14:42:13.1351437Z [analysis] HEAD pom dependencies extracted: 29 items
+2026-02-16T14:42:13.1351992Z   - org.opencb.commons:commons-lib:
+2026-02-16T14:42:13.1352445Z   - com.google.guava:guava:
+2026-02-16T14:42:13.1353041Z   - org.slf4j:slf4j-api:
+2026-02-16T14:42:13.1354494Z wrote pom deps -> /home/runner/work/java-common-libs/java-common-libs/dist/pom/base-deps.json / /home/runner/work/java-common-libs/java-common-libs/dist/pom/head-deps.json
+2026-02-16T14:42:13.1357370Z POM dependencies extraction done in 61ms
+2026-02-16T14:42:13.1358604Z ##[endgroup]
+2026-02-16T14:42:13.1359186Z ##[group][analysis] Cleanup worktrees
+2026-02-16T14:42:13.1581108Z [debug] Worktrees cleanup
+2026-02-16T14:42:13.1581718Z cleanup done in 22ms
+2026-02-16T14:42:13.1582701Z ##[endgroup]
+2026-02-16T14:42:13.1583279Z ##[group][analysis] Outputs
+2026-02-16T14:42:13.1590798Z outputs: base_sha=1cc8a1f06371e32e8ead07a1eb402c7121857159, head_sha=6ea5bda43331f60dd07514b84dc9a1eded4e4515
+2026-02-16T14:42:13.1591672Z [debug] Analysis finished
+2026-02-16T14:42:13.1592307Z ##[endgroup]
+2026-02-16T14:42:13.1592636Z [vuln-diff] Analysis: done
+2026-02-16T14:42:13.1593026Z [vuln-diff] Normalization: start
+2026-02-16T14:42:13.1594221Z [vuln-diff][normalization] dist directory: /home/runner/work/java-common-libs/java-common-libs/dist
+2026-02-16T14:42:13.1596997Z [vuln-diff][normalization] reading Phase 1 outputs…
+2026-02-16T14:42:13.1642994Z [vuln-diff][normalization] indexing SBOM (base)…
+2026-02-16T14:42:13.1657618Z [vuln-diff][normalization] indexing SBOM (head)…
+2026-02-16T14:42:13.1660601Z [vuln-diff][normalization] normalizing BASE…
+2026-02-16T14:42:13.1676114Z [vuln-diff][normalization] BASE occurrences: 15
+2026-02-16T14:42:13.1677694Z [vuln-diff][normalization] normalizing HEAD…
+2026-02-16T14:42:13.1684051Z [vuln-diff][normalization] HEAD occurrences: 26
+2026-02-16T14:42:13.1700874Z [vuln-diff][normalization] wrote base.json and head.json
+2026-02-16T14:42:13.1701598Z [vuln-diff][normalization] computing diff…
+2026-02-16T14:42:13.1705587Z [vuln-diff][normalization] BASE pom deps: 29 items
+2026-02-16T14:42:13.1706214Z   - org.opencb.commons:commons-lib:
+2026-02-16T14:42:13.1706686Z   - com.google.guava:guava:
+2026-02-16T14:42:13.1707073Z   - org.slf4j:slf4j-api:
+2026-02-16T14:42:13.1707520Z [vuln-diff][normalization] HEAD pom deps: 29 items
+2026-02-16T14:42:13.1708070Z   - org.opencb.commons:commons-lib:
+2026-02-16T14:42:13.1708540Z   - com.google.guava:guava:
+2026-02-16T14:42:13.1708945Z   - org.slf4j:slf4j-api:
+2026-02-16T14:42:13.1720622Z [vuln-diff][normalization] dependency diff totals: NEW=0, UPDATED=0, REMOVED=0, UNCHANGED=9
+2026-02-16T14:42:13.1721863Z [vuln-diff][normalization] wrote diff.json — totals: NEW=19, REMOVED=8, UNCHANGED=7
+2026-02-16T14:42:13.1722607Z [vuln-diff] Normalization: done
+2026-02-16T14:42:13.1723029Z [vuln-diff] Render: start
+2026-02-16T14:42:13.1723401Z [render] start
+2026-02-16T14:42:13.1724016Z ##[group][render] Markdown
+2026-02-16T14:42:13.1733089Z ##[group][render/markdown] summary
+2026-02-16T14:42:13.1851634Z [render/markdown] wrote /home/runner/work/java-common-libs/java-common-libs/dist/markdown/summary.md
+2026-02-16T14:42:13.1856987Z [render/markdown] appended to $GITHUB_STEP_SUMMARY
+2026-02-16T14:42:13.1857799Z ##[endgroup]
+2026-02-16T14:42:13.1858109Z [render] Markdown completed
+2026-02-16T14:42:13.1858704Z ##[endgroup]
+2026-02-16T14:42:13.1859220Z ##[group][render] HTML
+2026-02-16T14:42:13.1864022Z ##[group][render/html] buildHtmlBundle
+2026-02-16T14:42:13.1884167Z [render/html] repo=opencb/java-common-libs base=develop@1cc8a1f0 head=TASK-7908@6ea5bda4
+2026-02-16T14:42:13.2036823Z [render/html] assets copied from /home/runner/work/_actions/sec-open/vuln-diff-action/v2.0.0-alpha.3/.bundle/assets -> /home/runner/work/java-common-libs/java-common-libs/dist/html/assets
+2026-02-16T14:42:13.2037817Z [render/html] bundle written to /home/runner/work/java-common-libs/java-common-libs/dist/html
+2026-02-16T14:42:13.2038473Z ##[endgroup]
+2026-02-16T14:42:13.2038840Z [render/html] bundle generated at /home/runner/work/java-common-libs/java-common-libs/dist/html
+2026-02-16T14:42:13.2039650Z ##[endgroup]
+2026-02-16T14:42:13.2039991Z ##[group][render] PDF
+2026-02-16T14:42:13.2832285Z [pdf/orch] start
+2026-02-16T14:42:22.9647245Z [pdf] written: /home/runner/work/java-common-libs/java-common-libs/dist/pdf/report.pdf
+2026-02-16T14:42:23.0831458Z [pdf/orch] done
+2026-02-16T14:42:23.0831993Z [render/pdf] PDF skeleton generated under ./dist/pdf
+2026-02-16T14:42:23.0832920Z ##[endgroup]
+2026-02-16T14:42:23.0833244Z [render] done
+2026-02-16T14:42:23.0833584Z [vuln-diff] Render: done
+2026-02-16T14:42:23.0845156Z [vuln-diff][upload] files to upload in artifact: 52930
+2026-02-16T14:42:23.0846050Z [vuln-diff][upload] uploading single artifact…
+2026-02-16T14:42:23.1553419Z [artifact] @actions/artifact: source=default.uploadArtifact, version=2.3.2
+2026-02-16T14:42:23.1554393Z [artifact] rootDirectory=/home/runner/work/java-common-libs/java-common-libs/dist
+2026-02-16T14:42:23.1704937Z [artifact] files found: 43
+2026-02-16T14:42:23.1706144Z [artifact] uploading: name="report-files" (continueOnError=false)
+2026-02-16T14:42:23.1710286Z Artifact name is valid!
+2026-02-16T14:42:23.1711683Z Root directory input is valid!
+2026-02-16T14:42:23.2694547Z Beginning upload of artifact content to blob storage
+2026-02-16T14:42:23.7428479Z Uploaded bytes 1544994
+2026-02-16T14:42:23.7750183Z Finished uploading artifact content to blob storage!
+2026-02-16T14:42:23.7751232Z SHA256 digest of uploaded artifact zip is 033aca45d3a78bb2e8ba1fdce18e7569f8718410004bb95c09da1aa78ae3cb93
+2026-02-16T14:42:23.7752790Z Finalizing artifact upload
+2026-02-16T14:42:23.9293058Z Artifact report-files.zip successfully finalized. Artifact ID 5526880545
+2026-02-16T14:42:23.9294536Z [artifact] upload result: {"size":1544994,"digest":"033aca45d3a78bb2e8ba1fdce18e7569f8718410004bb95c09da1aa78ae3cb93","id":5526880545}
+2026-02-16T14:42:23.9296498Z [vuln-diff][upload] artifact upload OK: {"size":1544994,"digest":"033aca45d3a78bb2e8ba1fdce18e7569f8718410004bb95c09da1aa78ae3cb93","id":5526880545}
+2026-02-16T14:42:23.9486582Z ##[group]Run actions/cache@v4
+2026-02-16T14:42:23.9486834Z with:
+2026-02-16T14:42:23.9487018Z   path: ~/.cache/puppeteer
+2026-02-16T14:42:23.9487243Z   key: puppeteer-Linux
+2026-02-16T14:42:23.9487457Z   enableCrossOsArchive: false
+2026-02-16T14:42:23.9487681Z   fail-on-cache-miss: false
+2026-02-16T14:42:23.9487895Z   lookup-only: false
+2026-02-16T14:42:23.9488084Z   save-always: false
+2026-02-16T14:42:23.9488264Z env:
+2026-02-16T14:42:23.9488544Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/8.0.482-8/x64
+2026-02-16T14:42:23.9489017Z   JAVA_HOME_8_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/8.0.482-8/x64
+2026-02-16T14:42:23.9489363Z ##[endgroup]
+2026-02-16T14:42:24.2276167Z Cache not found for input keys: puppeteer-Linux
+2026-02-16T14:42:24.2386547Z Post job cleanup.
+2026-02-16T14:42:24.3786883Z [warning]Path Validation Error: Path(s) specified in the action for caching do(es) not exist, hence no cache is being saved.
+2026-02-16T14:42:24.3891170Z Post job cleanup.
+2026-02-16T14:42:24.5599032Z Cache hit occurred on the primary key setup-java-Linux-x64-maven-889aaee0e25954e57424c0210c205a884f3a0cef53d9e59dc7bd124e1655559a, not saving cache.
+2026-02-16T14:42:24.5707005Z Post job cleanup.
+2026-02-16T14:42:24.7168682Z [warning]Path Validation Error: Path(s) specified in the action for caching do(es) not exist, hence no cache is being saved.
+2026-02-16T14:42:24.7265582Z Post job cleanup.
+2026-02-16T14:42:24.8242426Z [command]/usr/bin/git version
+2026-02-16T14:42:24.8281591Z git version 2.52.0
+2026-02-16T14:42:24.8327467Z Temporarily overriding HOME='/home/runner/work/_temp/a1c58b6e-0b50-4989-9fce-d8b002d78854' before making global git config changes
+2026-02-16T14:42:24.8328799Z Adding repository directory to the temporary git global config as a safe directory
+2026-02-16T14:42:24.8334305Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/java-common-libs/java-common-libs
+2026-02-16T14:42:24.8373513Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-02-16T14:42:24.8408068Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-02-16T14:42:24.8650459Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-02-16T14:42:24.8674282Z http.https://github.com/.extraheader
+2026-02-16T14:42:24.8687257Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-02-16T14:42:24.8719710Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-02-16T14:42:24.8961582Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-02-16T14:42:24.8997629Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-02-16T14:42:24.9356210Z Cleaning up orphan processes

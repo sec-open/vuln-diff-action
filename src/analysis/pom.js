@@ -46,6 +46,8 @@ function collectDependenciesFromModel(model, filePath = '') {
     const propsObj = {};
     const propsNode = model?.project?.properties;
 
+    core.debug(`[pom.js] Properties node type: ${typeof propsNode}, keys: ${propsNode ? Object.keys(propsNode).join(',') : 'null'}`);
+
     if (propsNode && typeof propsNode === 'object') {
       // Las propiedades pueden estar como objeto con claves
       for (const [key, val] of Object.entries(propsNode)) {
@@ -59,11 +61,14 @@ function collectDependenciesFromModel(model, filePath = '') {
       }
     }
 
+    core.debug(`[pom.js] Extracted ${Object.keys(propsObj).length} properties`);
+
     // Extraer dependencias
     const depsNode = model?.project?.dependencies;
     let depsList = [];
 
     if (!depsNode) {
+      core.warning(`[pom.js] No dependencies node found in ${filePath}`);
       return [];
     }
 
@@ -74,28 +79,51 @@ function collectDependenciesFromModel(model, filePath = '') {
       depsList = [depsNode.dependency];
     }
 
+    core.debug(`[pom.js] Found ${depsList.length} dependency elements`);
+
     const out = [];
     for (const d of depsList) {
-      if (!d || typeof d !== 'object') continue;
+      if (!d || typeof d !== 'object') {
+        core.debug(`[pom.js] Skipping invalid dependency element`);
+        continue;
+      }
 
       // Extraer groupId, artifactId, version
       let groupId = d.groupId || d.groupid || '';
       let artifactId = d.artifactId || d.artifactid || '';
       let version = d.version || d.VERSION || '';
 
+      // DEBUG: Log raw values
+      core.debug(`[pom.js] Raw values - groupId type: ${typeof groupId} value: "${groupId}"`);
+      core.debug(`[pom.js] Raw values - artifactId type: ${typeof artifactId} value: "${artifactId}"`);
+      core.debug(`[pom.js] Raw values - version type: ${typeof version} value: "${version}"`);
+
+      // Ensure strings
+      groupId = String(groupId).trim();
+      artifactId = String(artifactId).trim();
+      version = String(version).trim();
+
+      core.debug(`[pom.js] After trim - version: "${version}"`);
+
       // Solo incluir si tiene groupId y artifactId
-      if (!groupId || !artifactId) continue;
+      if (!groupId || !artifactId) {
+        core.debug(`[pom.js] Skipping - no groupId or artifactId`);
+        continue;
+      }
 
       // Resolver propiedades en la versión
-      version = resolvePropertiesRecursive(String(version), propsObj);
+      const resolvedVersion = resolvePropertiesRecursive(version, propsObj);
+      core.debug(`[pom.js] Version after resolve: "${version}" -> "${resolvedVersion}"`);
 
-      out.push({ groupId, artifactId, version: version || '' });
-      core.debug(`[pom.js] Dependency: ${groupId}:${artifactId}:${version}`);
+      out.push({ groupId, artifactId, version: resolvedVersion || '' });
+      core.debug(`[pom.js] Added dependency: ${groupId}:${artifactId}:${resolvedVersion}`);
     }
 
+    core.info(`[pom.js] Total dependencies from file: ${out.length}`);
     return out;
   } catch (err) {
-    core.debug(`[pom.js] Error parsing dependencies from ${filePath}: ${err.message}`);
+    core.warning(`[pom.js] Error parsing dependencies from ${filePath}: ${err.message}`);
+    core.debug(`[pom.js] Stack: ${err.stack}`);
     return [];
   }
 }
