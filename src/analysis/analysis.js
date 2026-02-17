@@ -17,7 +17,7 @@ const {
 const { generateSbom } = require('./sbom');
 const { scanSbomWithGrype } = require('./grype');
 const { makeMeta, writeMeta } = require('./meta');
-const { extractPomDependencies } = require('./pom');
+const { extractPomDependencies, comparePomDependencies } = require('./pom');
 const { scanWithNpmAudit } = require('./npm');
 const { mergeVulnerabilities } = require('./merge');
 const { detectProjectType } = require('./detectProjectType');
@@ -218,28 +218,26 @@ async function analysis() {
 
     // Extract POM dependencies from each workdir and persist as JSON.
     core.endGroup();
-    core.startGroup('[analysis] POM dependencies extraction');
+    core.startGroup('[analysis] POM dependencies extraction & comparison');
     stop = time();
+
+    // Comparar pom.xml archivo a archivo entre las dos ramas
+    const pomDifferences = await comparePomDependencies(baseWorkdir, headWorkdir);
+
+    core.info(`[analysis] Found ${pomDifferences.length} pom.xml differences`);
+    if (pomDifferences.length > 0) {
+      pomDifferences.slice(0, 10).forEach(diff => {
+        const msg = diff.type === 'PROPERTY_CHANGED'
+          ? `[${diff.type}] ${diff.pomFile}: ${diff.propertyName} (${diff.baseValue} -> ${diff.headValue})`
+          : `[${diff.type}] ${diff.pomFile}: ${diff.groupId}:${diff.artifactId}`;
+        core.info(`  ${msg}`);
+      });
+    }
+
+    // Para mantener compatibility con el pipeline de normalización, extraer dependencias simples
     const basePomDeps = await extractPomDependencies(baseWorkdir);
     const headPomDeps = await extractPomDependencies(headWorkdir);
 
-    core.info(`[analysis] BASE pom dependencies extracted: ${basePomDeps.length} items`);
-    if (basePomDeps.length > 0) {
-      basePomDeps.slice(0, 3).forEach(d => {
-        core.info(`  - ${d.groupId}:${d.artifactId}:${d.version}`);
-      });
-    } else {
-      core.warning(`[analysis] WARNING: No dependencies extracted from BASE`);
-    }
-
-    core.info(`[analysis] HEAD pom dependencies extracted: ${headPomDeps.length} items`);
-    if (headPomDeps.length > 0) {
-      headPomDeps.slice(0, 3).forEach(d => {
-        core.info(`  - ${d.groupId}:${d.artifactId}:${d.version}`);
-      });
-    } else {
-      core.warning(`[analysis] WARNING: No dependencies extracted from HEAD`);
-    }
 
     await ensureDir(path.dirname(l.pom.base));
     await ensureDir(path.dirname(l.pom.head));
