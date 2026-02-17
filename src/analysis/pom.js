@@ -111,33 +111,25 @@ function extractDependenciesFromModel(model, filePath = '') {
 
       let groupId = String(d.groupId || d.groupid || '').trim();
       let artifactId = String(d.artifactId || d.artifactid || '').trim();
-      let version = String(d.version || d.VERSION || '').trim();
+      let versionRaw = String(d.version || d.VERSION || '').trim();
 
       if (!groupId || !artifactId) continue;
 
       depsProcessed++;
 
-      // Log antes de resolver
-      if (depsProcessed <= 3) {
-        core.debug(`[pom.js] ${filePath} - Dependency ${depsProcessed}: ${groupId}:${artifactId} raw version: "${version}"`);
-      }
-
       // Resolver propiedades en la versión
-      const resolvedVersion = resolvePropertiesRecursive(version, propsObj);
-
-      if (depsProcessed <= 3) {
-        core.debug(`[pom.js] ${filePath} - After resolution: "${resolvedVersion}"`);
-      }
+      const versionResolved = resolvePropertiesRecursive(versionRaw, propsObj);
 
       out.push({
         groupId,
         artifactId,
-        version: resolvedVersion || '',
+        version: versionResolved || '',
+        versionRaw: versionRaw, // Guardar también la versión sin resolver
         scope: String(d.scope || '').trim() || 'compile'
       });
     }
 
-    core.debug(`[pom.js] ${filePath}: Extracted ${out.length} dependencies (${depsProcessed} processed)`);
+    core.debug(`[pom.js] ${filePath}: Extracted ${out.length} dependencies`);
 
     return out;
   } catch (err) {
@@ -275,25 +267,25 @@ async function comparePomDependencies(baseDir, headDir) {
               // Encontrar dependencias que usan esta propiedad
               const propPlaceholder = `\${${propKey}}`;
               for (const [key, baseDep] of baseDepsMap.entries()) {
-                if (baseDep.version.includes(propPlaceholder)) {
+                // Usar versionRaw para detectar si usa la propiedad
+                const baseDependencyUsesProperty = baseDep.versionRaw && baseDep.versionRaw.includes(propPlaceholder);
+
+                if (baseDependencyUsesProperty) {
                   // Esta dependencia usa la propiedad que cambió
                   const headDep = headDepsMap.get(key);
-                  if (headDep) {
-                    const resolvedBaseVersion = baseDep.version.replace(propPlaceholder, baseVal);
-                    const resolvedHeadVersion = headDep.version.replace(propPlaceholder, headVal);
 
-                    if (resolvedBaseVersion !== resolvedHeadVersion) {
-                      allDifferences.push({
-                        type: 'DEPENDENCY_UPDATED_BY_PROPERTY',
-                        pomFile: relPath,
-                        groupId: baseDep.groupId,
-                        artifactId: baseDep.artifactId,
-                        propertyName: propKey,
-                        baseVersion: resolvedBaseVersion,
-                        headVersion: resolvedHeadVersion
-                      });
-                      core.info(`[pom.js] DEPENDENCY UPDATED (via property ${propKey}): ${relPath} -> ${key} (${resolvedBaseVersion} -> ${resolvedHeadVersion})`);
-                    }
+                  // Las versiones resueltas deberían ser diferentes
+                  if (headDep && baseDep.version !== headDep.version) {
+                    allDifferences.push({
+                      type: 'DEPENDENCY_UPDATED_BY_PROPERTY',
+                      pomFile: relPath,
+                      groupId: baseDep.groupId,
+                      artifactId: baseDep.artifactId,
+                      propertyName: propKey,
+                      baseVersion: baseDep.version,
+                      headVersion: headDep.version
+                    });
+                    core.info(`[pom.js] DEPENDENCY UPDATED (via property ${propKey}): ${relPath} -> ${key} (${baseDep.version} -> ${headDep.version})`);
                   }
                 }
               }
@@ -358,5 +350,68 @@ async function extractPomDependencies(rootDir) {
   }
 }
 
-module.exports = { extractPomDependencies, comparePomDependencies };
+/**
+ * Convierte las diferencias encontradas en formato de diff para el reporte
+ */
+function differencesToDependencyDiff(differences) {
+  const items = [];
+  let NEW = 0, REMOVED = 0, UPDATED = 0, UNCHANGED = 0;
+
+  const seen = new Set();
+
+  for (const diff of differences) {
+    if (diff.type === 'DEPENDENCY_ADDED') {
+      const key = `${diff.groupId}:${diff.artifactId}`;
+      if (!seen.has(key)) {
+        items.push({
+          groupId: diff.groupId,
+          artifactId: diff.artifactId,
+          baseVersion: null,
+          headVersion: diff.headVersion,
+          state: 'NEW'
+        });
+        NEW++;
+        seen.add(key);
+      }
+    } else if (diff.type === 'DEPENDENCY_REMOVED') {
+      const key = `${diff.groupId}:${diff.artifactId}`;
+      if (!seen.has(key)) {
+        items.push({
+          groupId: diff.groupId,
+          artifactId: diff.artifactId,
+          baseVersion: diff.baseVersion,
+          headVersion: null,
+          state: 'REMOVED'
+        });
+        REMOVED++;
+        seen.add(key);
+      }
+    } else if (diff.type === 'DEPENDENCY_UPDATED' || diff.type === 'DEPENDENCY_UPDATED_BY_PROPERTY') {
+      const key = `${diff.groupId}:${diff.artifactId}`;
+      if (!seen.has(key)) {
+        items.push({
+          groupId: diff.groupId,
+          artifactId: diff.artifactId,
+          baseVersion: diff.baseVersion,
+          headVersion: diff.headVersion,
+          state: 'UPDATED',
+          reason: diff.type === 'DEPENDENCY_UPDATED_BY_PROPERTY' ? `property ${diff.propertyName}` : undefined
+        });
+        UPDATED++;
+        seen.add(key);
+      }
+    }
+  }
+
+  return {
+    totals: { NEW, REMOVED, UPDATED, UNCHANGED },
+    items: items.sort((a, b) => {
+      const keyA = `${a.groupId}:${a.artifactId}`;
+      const keyB = `${b.groupId}:${b.artifactId}`;
+      return keyA.localeCompare(keyB);
+    })
+  };
+}
+
+module.exports = { extractPomDependencies, comparePomDependencies, differencesToDependencyDiff };
 

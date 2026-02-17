@@ -17,7 +17,7 @@ const {
 const { generateSbom } = require('./sbom');
 const { scanSbomWithGrype } = require('./grype');
 const { makeMeta, writeMeta } = require('./meta');
-const { extractPomDependencies, comparePomDependencies } = require('./pom');
+const { extractPomDependencies, comparePomDependencies, differencesToDependencyDiff } = require('./pom');
 const { scanWithNpmAudit } = require('./npm');
 const { mergeVulnerabilities } = require('./merge');
 const { detectProjectType } = require('./detectProjectType');
@@ -234,15 +234,20 @@ async function analysis() {
       });
     }
 
-    // Para mantener compatibility con el pipeline de normalización, extraer dependencias simples
+    // Convertir diferencias a formato de dependency diff
+    const pomDiff = differencesToDependencyDiff(pomDifferences);
+    core.info(`[analysis] POM dependency diff summary: NEW=${pomDiff.totals.NEW}, UPDATED=${pomDiff.totals.UPDATED}, REMOVED=${pomDiff.totals.REMOVED}`);
+
+    // Para mantener compatibility con el pipeline de normalización, también extraer listas simples
     const basePomDeps = await extractPomDependencies(baseWorkdir);
     const headPomDeps = await extractPomDependencies(headWorkdir);
 
-
     await ensureDir(path.dirname(l.pom.base));
     await ensureDir(path.dirname(l.pom.head));
-    await writeJson(l.pom.base, { dependencies: basePomDeps });
-    await writeJson(l.pom.head, { dependencies: headPomDeps });
+
+    // Guardar tanto las listas simples como el diff calculado
+    await writeJson(l.pom.base, { dependencies: basePomDeps, diff: pomDiff });
+    await writeJson(l.pom.head, { dependencies: headPomDeps, diff: pomDiff });
     core.info(`wrote pom deps -> ${l.pom.base} / ${l.pom.head}`);
     core.info(`POM dependencies extraction done in ${stop()}`);
 

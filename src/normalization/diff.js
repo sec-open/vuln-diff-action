@@ -36,7 +36,7 @@ function computePomDependencyDiff(pomBaseDeps = [], pomHeadDeps = []) {
 
 function mapByKey(arr) { const m = new Map(); for (const v of arr || []) m.set(v.match_key, v); return m; }
 
-function buildDiff(baseDoc, headDoc, meta, { pomBaseDeps = [], pomHeadDeps = [] } = {}) {
+function buildDiff(baseDoc, headDoc, meta, { pomBaseDeps = [], pomHeadDeps = [], precalculatedPomDiff = null } = {}) {
   const B = mapByKey(baseDoc?.vulnerabilities || []);
   const H = mapByKey(headDoc?.vulnerabilities || []);
   const items = []; const seen = new Set();
@@ -54,7 +54,9 @@ function buildDiff(baseDoc, headDoc, meta, { pomBaseDeps = [], pomHeadDeps = [] 
     items.push({ state: 'NEW', branches: 'HEAD', ...h, severity: normalizeSeverity(h.severity) });
   }
   const summary = buildDiffSummary(items);
-  const dependency_pom_diff = computePomDependencyDiff(pomBaseDeps, pomHeadDeps);
+
+  // Usar diff precalculado si está disponible, si no calcularlo
+  const dependency_pom_diff = precalculatedPomDiff || computePomDependencyDiff(pomBaseDeps, pomHeadDeps);
 
   return {
     schema_version: '2.0.0',

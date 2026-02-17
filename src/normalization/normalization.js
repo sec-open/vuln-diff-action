@@ -92,25 +92,36 @@ async function normalization(options = {}) {
   const basePomDeps = ctx.pom?.base?.dependencies || [];
   const headPomDeps = ctx.pom?.head?.dependencies || [];
 
-  core.info(`[vuln-diff][normalization] BASE pom deps: ${basePomDeps.length} items`);
-  if (basePomDeps.length > 0) {
-    basePomDeps.slice(0, 3).forEach(d => {
-      core.info(`  - ${d.groupId}:${d.artifactId}:${d.version}`);
-    });
+  // Usar diff precalculado si está disponible
+  const precalculatedDiff = ctx.pom?.base?.diff || ctx.pom?.head?.diff || null;
+
+  if (precalculatedDiff) {
+    core.info(`[vuln-diff][normalization] Using precalculated POM diff: NEW=${precalculatedDiff.totals.NEW}, UPDATED=${precalculatedDiff.totals.UPDATED}, REMOVED=${precalculatedDiff.totals.REMOVED}`);
   } else {
-    core.warning(`[vuln-diff][normalization] WARNING: No BASE dependencies in context`);
+    core.info(`[vuln-diff][normalization] BASE pom deps: ${basePomDeps.length} items`);
+    if (basePomDeps.length > 0) {
+      basePomDeps.slice(0, 3).forEach(d => {
+        core.info(`  - ${d.groupId}:${d.artifactId}:${d.version}`);
+      });
+    } else {
+      core.warning(`[vuln-diff][normalization] WARNING: No BASE dependencies in context`);
+    }
+
+    core.info(`[vuln-diff][normalization] HEAD pom deps: ${headPomDeps.length} items`);
+    if (headPomDeps.length > 0) {
+      headPomDeps.slice(0, 3).forEach(d => {
+        core.info(`  - ${d.groupId}:${d.artifactId}:${d.version}`);
+      });
+    } else {
+      core.warning(`[vuln-diff][normalization] WARNING: No HEAD dependencies in context`);
+    }
   }
 
-  core.info(`[vuln-diff][normalization] HEAD pom deps: ${headPomDeps.length} items`);
-  if (headPomDeps.length > 0) {
-    headPomDeps.slice(0, 3).forEach(d => {
-      core.info(`  - ${d.groupId}:${d.artifactId}:${d.version}`);
-    });
-  } else {
-    core.warning(`[vuln-diff][normalization] WARNING: No HEAD dependencies in context`);
-  }
-
-  const diffDoc = buildDiff(baseDoc, headDoc, meta, { pomBaseDeps: basePomDeps, pomHeadDeps: headPomDeps });
+  const diffDoc = buildDiff(baseDoc, headDoc, meta, {
+    pomBaseDeps: basePomDeps,
+    pomHeadDeps: headPomDeps,
+    precalculatedPomDiff: precalculatedDiff
+  });
   const diffOut = path.join(distDir, 'diff.json');
   await writeJSON(diffOut, diffDoc);
 
