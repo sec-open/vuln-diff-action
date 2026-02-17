@@ -105,6 +105,7 @@ function extractDependenciesFromModel(model, filePath = '') {
     }
 
     const out = [];
+    let depsProcessed = 0;
     for (const d of depsList) {
       if (!d || typeof d !== 'object') continue;
 
@@ -114,16 +115,29 @@ function extractDependenciesFromModel(model, filePath = '') {
 
       if (!groupId || !artifactId) continue;
 
+      depsProcessed++;
+
+      // Log antes de resolver
+      if (depsProcessed <= 3) {
+        core.debug(`[pom.js] ${filePath} - Dependency ${depsProcessed}: ${groupId}:${artifactId} raw version: "${version}"`);
+      }
+
       // Resolver propiedades en la versión
-      version = resolvePropertiesRecursive(version, propsObj);
+      const resolvedVersion = resolvePropertiesRecursive(version, propsObj);
+
+      if (depsProcessed <= 3) {
+        core.debug(`[pom.js] ${filePath} - After resolution: "${resolvedVersion}"`);
+      }
 
       out.push({
         groupId,
         artifactId,
-        version: version || '',
+        version: resolvedVersion || '',
         scope: String(d.scope || '').trim() || 'compile'
       });
     }
+
+    core.debug(`[pom.js] ${filePath}: Extracted ${out.length} dependencies (${depsProcessed} processed)`);
 
     return out;
   } catch (err) {
@@ -257,6 +271,32 @@ async function comparePomDependencies(baseDir, headDir) {
                 headValue: headVal
               });
               core.info(`[pom.js] PROPERTY: ${relPath} -> ${propKey} (${baseVal} -> ${headVal})`);
+
+              // Encontrar dependencias que usan esta propiedad
+              const propPlaceholder = `\${${propKey}}`;
+              for (const [key, baseDep] of baseDepsMap.entries()) {
+                if (baseDep.version.includes(propPlaceholder)) {
+                  // Esta dependencia usa la propiedad que cambió
+                  const headDep = headDepsMap.get(key);
+                  if (headDep) {
+                    const resolvedBaseVersion = baseDep.version.replace(propPlaceholder, baseVal);
+                    const resolvedHeadVersion = headDep.version.replace(propPlaceholder, headVal);
+
+                    if (resolvedBaseVersion !== resolvedHeadVersion) {
+                      allDifferences.push({
+                        type: 'DEPENDENCY_UPDATED_BY_PROPERTY',
+                        pomFile: relPath,
+                        groupId: baseDep.groupId,
+                        artifactId: baseDep.artifactId,
+                        propertyName: propKey,
+                        baseVersion: resolvedBaseVersion,
+                        headVersion: resolvedHeadVersion
+                      });
+                      core.info(`[pom.js] DEPENDENCY UPDATED (via property ${propKey}): ${relPath} -> ${key} (${resolvedBaseVersion} -> ${resolvedHeadVersion})`);
+                    }
+                  }
+                }
+              }
             }
           }
         }
